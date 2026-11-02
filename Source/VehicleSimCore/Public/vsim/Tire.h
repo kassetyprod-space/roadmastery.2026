@@ -14,7 +14,7 @@
 namespace vsim
 {
 // Нормированная кривая Пасейки, D = 1. Аргумент — проскальзывание (безразмерное или радианы).
-struct MagicFormula
+struct VSIM_API MagicFormula
 {
 	double B = 10.0;
 	double C = 1.65;
@@ -67,7 +67,7 @@ struct TireState
 	bool bSliding = false;
 };
 
-class Tire
+class VSIM_API Tire
 {
 public:
 	void Init(const TireParams& InParams);

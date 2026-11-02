@@ -3,6 +3,8 @@
 // Ядро не зависит от Unreal: его можно собрать и протестировать отдельно (см. Tests/).
 #pragma once
 
+#include "vsim/Export.h"
+
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>

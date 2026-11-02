@@ -171,7 +171,7 @@ struct Telemetry
 	bool bGearGrind = false; // последняя попытка переключения не удалась (не выжато сцепление)
 };
 
-class Vehicle
+class VSIM_API Vehicle
 {
 public:
 	static constexpr double MaxSubstep = 1.0 / 600.0;

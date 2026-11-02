@@ -94,12 +94,12 @@ struct EngineState
 // Функции двигателя без собственного состояния — удобно тестировать.
 namespace EngineModel
 {
-double FrictionTorque(const EngineParams& P, double Rpm, double Condition);
+VSIM_API double FrictionTorque(const EngineParams& P, double Rpm, double Condition);
 // Нетто-момент на маховике при данной дроссельной заслонке (0..1).
-double NetTorque(const EngineParams& P, double Rpm, double Throttle, double Condition);
+VSIM_API double NetTorque(const EngineParams& P, double Rpm, double Throttle, double Condition);
 // Индикаторная мощность (Вт) — для расчёта расхода.
-double IndicatedPower(const EngineParams& P, double Rpm, double Throttle, double Condition);
+VSIM_API double IndicatedPower(const EngineParams& P, double Rpm, double Throttle, double Condition);
 // Заслонка, нужная, чтобы на холостых удержать IdleRpm (подаётся к P-регулятору как смещение).
-double IdleThrottleBias(const EngineParams& P);
+VSIM_API double IdleThrottleBias(const EngineParams& P);
 } // namespace EngineModel
 } // namespace vsim
