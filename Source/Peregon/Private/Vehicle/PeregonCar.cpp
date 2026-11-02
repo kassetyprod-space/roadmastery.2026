@@ -139,9 +139,9 @@ void APeregonCar::BeginPlay()
 	Tint(CabinMesh, CabinColor);
 	for (USceneComponent* Pivot : WheelPivots)
 	{
-		TArray<USceneComponent*> Children;
-		Pivot->GetChildrenComponents(false, Children);
-		for (USceneComponent* Child : Children)
+		TArray<USceneComponent*> PivotChildren;
+		Pivot->GetChildrenComponents(false, PivotChildren);
+		for (USceneComponent* Child : PivotChildren)
 		{
 			UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Child);
 			Tint(Mesh, Mesh && Mesh->GetName().StartsWith(TEXT("Hub")) ? HubColor : TireColor);
