@@ -178,28 +178,55 @@ void UPeregonVehicleMovementComponent::StepVehicle(float DeltaTime, UPrimitiveCo
 		vsim::WheelContact& C = Contacts[static_cast<size_t>(I)];
 
 		F.Attach = T.TransformPosition(GetWheelAttachLocal(I));
-		const double RayLen = (W.Suspension.Travel + W.Tire.Radius) * MToCm;
+
+		// Колесо — не луч, а сфера (половина радиуса шины), опущенная так, что её низ совпадает
+		// с низом колеса. Так кочки, бордюры и «стиральная доска» ощущаются плавно, без ступенек.
+		const double WheelR = W.Tire.Radius * MToCm;
+		const double SphereR = WheelR * 0.5;
+		const double TravelCm = W.Suspension.Travel * MToCm;
+		const FVector SweepStart = F.Attach - Up * (WheelR - SphereR);
+		const FVector SweepEnd = SweepStart - Up * TravelCm;
 		FHitResult Hit;
-		F.bHit = World->LineTraceSingleByChannel(Hit, F.Attach, F.Attach - Up * RayLen, WheelTraceChannel, Params) && !Hit.bStartPenetrating;
+		const bool bSweepHit = World->SweepSingleByChannel(Hit, SweepStart, SweepEnd, FQuat::Identity, WheelTraceChannel,
+			FCollisionShape::MakeSphere(static_cast<float>(SphereR)), Params);
+
+		double CompressionCm = 0.0;
+		FVector Normal = Up;
+		if (bSweepHit && Hit.bStartPenetrating)
+		{
+			// Пробой подвески: колесо упёрлось в препятствие на полном сжатии.
+			CompressionCm = TravelCm + 2.0;
+			F.Contact = SweepStart - Up * SphereR;
+			F.bHit = true;
+		}
+		else if (bSweepHit && FVector::DotProduct(Hit.ImpactNormal, Up) > 0.35)
+		{
+			CompressionCm = TravelCm - Hit.Distance;
+			F.Contact = Hit.ImpactPoint;
+			Normal = Hit.ImpactNormal;
+			F.bHit = true;
+		}
+		else
+		{
+			F.bHit = false; // в воздухе или зацепили стену боком
+		}
 		if (!F.bHit)
 		{
 			C.bInContact = false;
 			continue;
 		}
 
-		const FVector Normal = Hit.ImpactNormal;
 		const double Steer = Sim->SteerAngle(static_cast<size_t>(I));
 		const FVector WheelFwd = T.TransformVectorNoScale(FVector(FMath::Cos(Steer), FMath::Sin(Steer), 0.0));
 		F.Forward = (WheelFwd - Normal * FVector::DotProduct(WheelFwd, Normal)).GetSafeNormal();
 		F.Right = FVector::CrossProduct(Normal, F.Forward);
-		F.Contact = Hit.ImpactPoint;
 
-		const FVector ContactVel = Body->GetPhysicsLinearVelocityAtPoint(Hit.ImpactPoint);
+		const FVector ContactVel = Body->GetPhysicsLinearVelocityAtPoint(F.Contact);
 		const FVector AttachVel = Body->GetPhysicsLinearVelocityAtPoint(F.Attach);
 		const FPeregonSurface Surface = LookupSurface(Hit.PhysMaterial.Get());
 
 		C.bInContact = true;
-		C.Compression = W.Suspension.Travel + W.Tire.Radius - Hit.Distance * CmToM;
+		C.Compression = CompressionCm * CmToM;
 		C.CompressionVelocity = -FVector::DotProduct(AttachVel, Up) * CmToM;
 		C.Vx = FVector::DotProduct(ContactVel, F.Forward) * CmToM;
 		C.Vy = FVector::DotProduct(ContactVel, F.Right) * CmToM;
@@ -221,7 +248,7 @@ void UPeregonVehicleMovementComponent::StepVehicle(float DeltaTime, UPrimitiveCo
 	In.Brake = Brake;
 	In.Steer = Steering;
 	In.Clutch = ClutchPedal;
-	In.Handbrake = Handbrake;
+	In.Handbrake = FMath::Max(Handbrake, bParkingBrake ? 1.f : 0.f);
 	In.bStarter = bStarter;
 	In.bIgnition = bIgnition;
 	Sim->SetInput(In);
@@ -249,6 +276,10 @@ void UPeregonVehicleMovementComponent::StepVehicle(float DeltaTime, UPrimitiveCo
 			DrawDebugLine(World, F.Contact, F.Contact + TireForce * 0.0005, O.bSliding ? FColor::Red : FColor::Green, false, -1.f, 0, 2.f);
 		}
 	}
+
+	// Реакция мотора: момент на маховике качает кузов вокруг продольной оси (особенно на газу в первой).
+	const double ReactionNm = Sim->GetTelemetry().ClutchTorque * EngineReactionScale;
+	Body->AddTorqueInRadians(Fwd * ReactionNm * 1.0e4); // Н·м → кг·см²/с²
 
 	const double SpeedMs = BodyVel.Size() * CmToM;
 	if (SpeedMs > 0.1)
@@ -336,6 +367,7 @@ FPeregonTelemetry UPeregonVehicleMovementComponent::GetTelemetry() const
 	Out.EngineCondition = static_cast<float>(C.Engine);
 	Out.ClutchCondition = static_cast<float>(C.Clutch);
 	Out.RadiatorCondition = static_cast<float>(C.Radiator);
+	Out.SteeringWheelDeg = static_cast<float>(T.SteeringWheelDeg);
 	for (size_t I = 0; I < Sim->NumWheels(); ++I)
 	{
 		const vsim::WheelOutput& O = Sim->GetWheel(I);
@@ -345,6 +377,7 @@ FPeregonTelemetry UPeregonVehicleMovementComponent::GetTelemetry() const
 		Out.SlipRatio.Add(static_cast<float>(O.SlipRatio));
 		Out.SlipAngleDeg.Add(static_cast<float>(FMath::RadiansToDegrees(O.SlipAngle)));
 		Out.WheelLoadN.Add(static_cast<float>(O.Load));
+		Out.BrakeTempC.Add(static_cast<float>(O.BrakeTempC));
 	}
 	return Out;
 }

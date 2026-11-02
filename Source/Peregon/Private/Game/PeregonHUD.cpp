@@ -3,71 +3,210 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "Interaction/PeregonInteractable.h"
+#include "Player/PeregonCharacter.h"
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 
-namespace PeregonHud
+namespace PeregonUi
 {
+const FLinearColor Text(0.92f, 0.92f, 0.90f, 0.9f);
+const FLinearColor Dim(0.92f, 0.92f, 0.90f, 0.45f);
+const FLinearColor Track(1.f, 1.f, 1.f, 0.12f);
+const FLinearColor Amber(1.f, 0.72f, 0.28f, 0.95f);
+const FLinearColor Red(1.f, 0.32f, 0.25f, 0.95f);
+const FLinearColor Shadow(0.f, 0.f, 0.f, 0.55f);
+constexpr float Margin = 32.f;
+
 FString GearName(int32 Gear)
 {
 	return Gear < 0 ? TEXT("R") : (Gear == 0 ? TEXT("N") : FString::FromInt(Gear));
 }
 
-FLinearColor ConditionColor(float Value)
+UFont* Font(int32 Size)
 {
-	return Value > 0.6f ? FLinearColor(0.7f, 1.f, 0.7f) : (Value > 0.3f ? FLinearColor(1.f, 0.85f, 0.3f) : FLinearColor(1.f, 0.3f, 0.25f));
+	if (!GEngine)
+	{
+		return nullptr;
+	}
+	switch (Size)
+	{
+	case 0: return GEngine->GetTinyFont();
+	case 1: return GEngine->GetSmallFont();
+	case 2: return GEngine->GetMediumFont();
+	default: return GEngine->GetLargeFont();
+	}
 }
-} // namespace PeregonHud
+} // namespace PeregonUi
+
+void APeregonHUD::DrawTextShadowed(const FString& Text, const FLinearColor& Color, float X, float Y, UFont* InFont, float Scale)
+{
+	DrawText(Text, PeregonUi::Shadow, X + 1.f, Y + 1.f, InFont, Scale);
+	DrawText(Text, Color, X, Y, InFont, Scale);
+}
 
 void APeregonHUD::DrawHUD()
 {
 	Super::DrawHUD();
-
-	const APeregonCar* Car = Cast<APeregonCar>(GetOwningPawn());
-	if (!Car || !Car->GetVehicleMovement() || !Canvas)
+	if (!Canvas)
 	{
 		return;
 	}
-	using namespace PeregonHud;
-	const UPeregonVehicleMovementComponent* Move = Car->GetVehicleMovement();
-	const FPeregonTelemetry T = Move->GetTelemetry();
-	UFont* Font = GEngine ? GEngine->GetMediumFont() : nullptr;
-
-	const float X = 24.f;
-	float Y = Canvas->SizeY - 250.f;
-	const float Line = 22.f;
-	auto Print = [&](const FString& Text, const FLinearColor& Color = FLinearColor::White) {
-		DrawText(Text, Color, X, Y, Font, 1.f);
-		Y += Line;
-	};
-
-	Print(FString::Printf(TEXT("%3.0f км/ч   %s   %4.0f об/мин"), FMath::Abs(T.SpeedKmh), *GearName(T.Gear), T.Rpm),
-		T.Rpm > 6000.f ? FLinearColor(1.f, 0.3f, 0.25f) : FLinearColor::White);
-	Print(FString::Printf(TEXT("Бензин %.1f / %.0f л   расход %.1f л/100   одометр %.1f км"),
-		T.FuelL, T.FuelCapacityL, T.InstantLPer100Km, T.OdometerKm),
-		T.FuelL < 5.f ? FLinearColor(1.f, 0.6f, 0.2f) : FLinearColor::White);
-	Print(FString::Printf(TEXT("Двигатель %.0f°C%s   сцепление %.0f%%"), T.EngineTempC, T.bFanOn ? TEXT(" [вентилятор]") : TEXT(""), T.ClutchEngagement * 100.f),
-		T.EngineTempC > 105.f ? FLinearColor(1.f, 0.3f, 0.25f) : FLinearColor::White);
-	Print(FString::Printf(TEXT("Мотор %.0f%%  Сцепление %.0f%%  Радиатор %.0f%%"),
-		T.EngineCondition * 100.f, T.ClutchCondition * 100.f, T.RadiatorCondition * 100.f),
-		ConditionColor(FMath::Min3(T.EngineCondition, T.ClutchCondition, T.RadiatorCondition)));
-
-	static const TCHAR* WheelNames[] = {TEXT("ПЛ"), TEXT("ПП"), TEXT("ЗЛ"), TEXT("ЗП")};
-	FString Wheels;
-	for (int32 I = 0; I < T.TreadMm.Num() && I < 4; ++I)
+	const APawn* Pawn = GetOwningPawn();
+	if (const APeregonCar* Car = Cast<APeregonCar>(Pawn))
 	{
-		Wheels += FString::Printf(TEXT("%s: протектор %.1f мм, колодки %.1f мм   "), WheelNames[I], T.TreadMm[I], T.PadMm[I]);
+		DrawCrosshair(&Car->GetFocus(), Car->IsFirstPerson(), TEXT("ЛКМ"));
+		DrawCluster(Car);
+		DrawWarnings(Car);
+		if (bShowDetails)
+		{
+			DrawDetails(Car);
+		}
 	}
-	Print(Wheels, FLinearColor(0.8f, 0.8f, 0.8f));
+	else if (const APeregonCharacter* Walker = Cast<APeregonCharacter>(Pawn))
+	{
+		DrawCrosshair(&Walker->GetFocus(), true, TEXT("E"));
+	}
+}
 
+void APeregonHUD::DrawCrosshair(const FPeregonFocus* Focus, bool bFirstPerson, const TCHAR* InteractKey)
+{
+	const float Cx = Canvas->ClipX * 0.5f;
+	const float Cy = Canvas->ClipY * 0.5f;
+	const bool bFocused = Focus && Focus->IsValid();
+	if (bFirstPerson || bFocused)
+	{
+		const float Size = bFocused ? 6.f : 4.f;
+		DrawRect(PeregonUi::Shadow, Cx - Size * 0.5f + 1.f, Cy - Size * 0.5f + 1.f, Size, Size);
+		DrawRect(bFocused ? PeregonUi::Text : PeregonUi::Dim, Cx - Size * 0.5f, Cy - Size * 0.5f, Size, Size);
+	}
+	if (bFocused)
+	{
+		const FString Prompt = FString::Printf(TEXT("%s   %s"), InteractKey, *Focus->Prompt);
+		float W = 0.f, H = 0.f;
+		GetTextSize(Prompt, W, H, PeregonUi::Font(1));
+		DrawTextShadowed(Prompt, PeregonUi::Text, Cx - W * 0.5f, Cy + 22.f, PeregonUi::Font(1));
+	}
+}
+
+void APeregonHUD::DrawCluster(const APeregonCar* Car)
+{
+	using namespace PeregonUi;
+	const UPeregonVehicleMovementComponent* Move = Car->GetVehicleMovement();
+	if (!Move)
+	{
+		return;
+	}
+	const FPeregonTelemetry T = Move->GetTelemetry();
+	const float Right = Canvas->ClipX - Margin;
+	const float Bottom = Canvas->ClipY - Margin;
+
+	// Скорость крупно, передача рядом.
+	const FString Speed = FString::Printf(TEXT("%d"), FMath::RoundToInt(FMath::Abs(T.SpeedKmh)));
+	float SpeedW = 0.f, SpeedH = 0.f;
+	GetTextSize(Speed, SpeedW, SpeedH, Font(3), 1.6f);
+	const float SpeedY = Bottom - 54.f - SpeedH;
+	DrawTextShadowed(Speed, Text, Right - SpeedW, SpeedY, Font(3), 1.6f);
+	DrawTextShadowed(TEXT("км/ч"), Dim, Right - 34.f, SpeedY + SpeedH - 4.f, Font(0));
+
+	const FString Gear = GearName(T.Gear);
+	float GearW = 0.f, GearH = 0.f;
+	GetTextSize(Gear, GearW, GearH, Font(3), 1.2f);
+	const FLinearColor GearColor = T.bGearGrind ? Red : (Move->IsAutoGearbox() ? Dim : Text);
+	DrawTextShadowed(Gear, GearColor, Right - SpeedW - 18.f - GearW, SpeedY + SpeedH - GearH, Font(3), 1.2f);
+	if (Move->IsAutoGearbox())
+	{
+		DrawTextShadowed(TEXT("АВТ"), Dim, Right - SpeedW - 18.f - GearW, SpeedY + SpeedH - 2.f, Font(0));
+	}
+
+	// Тонкая полоса оборотов, красная зона с 6000.
+	const float BarW = 170.f;
+	const float BarX = Right - BarW;
+	float Y = Bottom - 44.f;
+	const float RpmFrac = FMath::Clamp(T.Rpm / 7000.f, 0.f, 1.f);
+	DrawRect(Track, BarX, Y, BarW, 3.f);
+	DrawRect(T.Rpm > 6000.f ? Red : Text, BarX, Y, BarW * RpmFrac, 3.f);
+	DrawRect(Red, BarX + BarW * (6000.f / 7000.f), Y - 2.f, 1.f, 7.f);
+
+	// Бензин и температура — две короткие полоски.
+	auto MiniBar = [&](const TCHAR* Label, float Fraction, const FLinearColor& Color, float RowY) {
+		DrawTextShadowed(Label, Dim, BarX, RowY - 5.f, Font(0));
+		DrawRect(Track, BarX + 44.f, RowY, BarW - 44.f, 3.f);
+		DrawRect(Color, BarX + 44.f, RowY, (BarW - 44.f) * FMath::Clamp(Fraction, 0.f, 1.f), 3.f);
+	};
+	const float FuelFrac = T.FuelCapacityL > 0.f ? T.FuelL / T.FuelCapacityL : 0.f;
+	Y += 16.f;
+	MiniBar(TEXT("БЕНЗ"), FuelFrac, T.FuelL < 4.f ? Amber : Text, Y);
+	Y += 14.f;
+	MiniBar(TEXT("ТЕМП"), (T.EngineTempC - 40.f) / 90.f, T.EngineTempC > 105.f ? Red : Text, Y);
+}
+
+void APeregonHUD::DrawWarnings(const APeregonCar* Car)
+{
+	using namespace PeregonUi;
+	const UPeregonVehicleMovementComponent* Move = Car->GetVehicleMovement();
+	if (!Move)
+	{
+		return;
+	}
+	const FPeregonTelemetry T = Move->GetTelemetry();
+	TArray<TPair<FString, FLinearColor>> Lines;
 	if (!T.bEngineRunning)
 	{
-		Print(TEXT("Мотор заглушен — держи R (стартер)"), FLinearColor(1.f, 0.85f, 0.3f));
+		Lines.Emplace(FString(T.FuelL <= 0.f ? TEXT("Бак пуст") : TEXT("Двигатель заглушен  ·  R — стартер")), Amber);
+	}
+	if (Move->IsParkingBrake() && Move->GetThrottleInput() > 0.1f)
+	{
+		Lines.Emplace(FString(TEXT("Поднят ручник  ·  P")), Amber);
+	}
+	if (T.EngineTempC > 105.f)
+	{
+		Lines.Emplace(FString(TEXT("Перегрев двигателя")), Red);
 	}
 	if (T.bGearGrind)
 	{
-		Print(TEXT("ХРУСТ! Выжми сцепление (Shift)"), FLinearColor(1.f, 0.3f, 0.25f));
+		Lines.Emplace(FString(Move->IsAutoGearbox() ? TEXT("Передача не включилась") : TEXT("Хруст — выжми сцепление (Shift)")), Red);
 	}
-	Print(FString::Printf(TEXT("КПП: %s (G)   W/S газ/тормоз   A/D руль   Q/E передачи   Space ручник   C камера   Backspace — на колёса"),
-		Move->IsAutoGearbox() ? TEXT("автомат") : TEXT("механика")), FLinearColor(0.6f, 0.6f, 0.6f));
+	if (T.EngineCondition < 0.3f)
+	{
+		Lines.Emplace(FString(TEXT("Двигатель изношен")), Red);
+	}
+
+	float Y = Canvas->ClipY - Margin - 18.f;
+	for (int32 I = Lines.Num() - 1; I >= 0; --I)
+	{
+		float W = 0.f, H = 0.f;
+		GetTextSize(Lines[I].Key, W, H, Font(1));
+		DrawTextShadowed(Lines[I].Key, Lines[I].Value, (Canvas->ClipX - W) * 0.5f, Y, Font(1));
+		Y -= H + 4.f;
+	}
+}
+
+void APeregonHUD::DrawDetails(const APeregonCar* Car)
+{
+	using namespace PeregonUi;
+	const UPeregonVehicleMovementComponent* Move = Car->GetVehicleMovement();
+	if (!Move)
+	{
+		return;
+	}
+	const FPeregonTelemetry T = Move->GetTelemetry();
+	float Y = Margin;
+	auto Line = [&](const FString& S, const FLinearColor& Color = PeregonUi::Text) {
+		DrawTextShadowed(S, Color, Margin, Y, Font(1));
+		Y += 16.f;
+	};
+	Line(FString::Printf(TEXT("%.0f об/мин   расход %.1f л/100   одометр %.2f км"), T.Rpm, T.InstantLPer100Km, T.OdometerKm));
+	Line(FString::Printf(TEXT("Двигатель %.0f°C%s   сцепление %.0f%%   руль %.0f°"), T.EngineTempC, T.bFanOn ? TEXT(" [вент]") : TEXT(""),
+		T.ClutchEngagement * 100.f, T.SteeringWheelDeg));
+	Line(FString::Printf(TEXT("Состояние: мотор %.0f%%  сцепление %.0f%%  радиатор %.0f%%"),
+		T.EngineCondition * 100.f, T.ClutchCondition * 100.f, T.RadiatorCondition * 100.f));
+	static const TCHAR* Names[] = {TEXT("ПЛ"), TEXT("ПП"), TEXT("ЗЛ"), TEXT("ЗП")};
+	for (int32 I = 0; I < T.TreadMm.Num() && I < 4; ++I)
+	{
+		Line(FString::Printf(TEXT("%s  нагрузка %4.0f Н  скольж. %+.2f  увод %+5.1f°  протектор %.2f мм  колодки %.2f мм  тормоз %3.0f°C  аморт. %.0f%%"),
+			Names[I], T.WheelLoadN[I], T.SlipRatio[I], T.SlipAngleDeg[I], T.TreadMm[I], T.PadMm[I], T.BrakeTempC[I], T.ShockCondition[I] * 100.f), Dim);
+	}
+	Line(TEXT("W/S газ-тормоз  A/D руль  E/Q передачи  Shift сцепление  Space ручник  P стояночный  L фары"), Dim);
+	Line(TEXT("R стартер  I зажигание  G автомат/механика  C камера  F выйти  ЛКМ взаимодействие  Backspace на колёса"), Dim);
 }

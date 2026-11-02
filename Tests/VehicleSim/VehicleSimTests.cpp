@@ -222,6 +222,36 @@ int main()
 		CheckRange("тормозной путь, укатанный снег (0.3), м", BrakeFrom100(0.3, false), 110.0, 220.0);
 	}
 
+	std::printf("\nПерегрев тормозов\n");
+	{
+		// 10 торможений со 100 км/ч подряд (спуск с перевала «в пол»). С ABS: колёса не блокируются,
+		// и вся энергия уходит в тормоза (с блокировкой она уходит в шину).
+		Setup S;
+		Assists A = S.Car.GetAssists();
+		A.bAbs = true;
+		S.Car.SetAssists(A);
+		S.Car.RequestGear(0);
+		double First = 0.0, Last = 0.0;
+		for (int Stop = 0; Stop < 10; ++Stop)
+		{
+			S.Rig.U = 100.0 / 3.6;
+			S.In.Brake = 0.0;
+			for (int I = 0; I < 60; ++I)
+			{
+				S.Step();
+			}
+			const double X0 = S.Rig.PosX;
+			S.In.Brake = 1.0;
+			for (int I = 0; I < 60 * 60 && S.Rig.U > 0.05; ++I)
+			{
+				S.Step();
+			}
+			(Stop == 0 ? First : Last) = S.Rig.PosX - X0;
+		}
+		CheckRange("температура передних тормозов после 10 стопов, °C", S.Car.GetWheel(0).BrakeTempC, 300.0, 800.0);
+		Check(Last > First * 1.1, "тормоза «поплыли»: путь вырос (последний/первый)", Last / First);
+	}
+
 	std::printf("\nПоворот\n");
 	{
 		Setup S;

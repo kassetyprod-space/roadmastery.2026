@@ -283,7 +283,9 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 	if (EngineSt.bRunning)
 	{
 		const double IdleThrottle = Clamp(IdleBias + 0.0012 * (EP.IdleRpm - Rpm), 0.0, 0.4);
-		Throttle = std::max(Clamp01(Input.Throttle), IdleThrottle);
+		// Впуск не мгновенный: мотор подхватывает газ за ~60 мс, а не за один кадр.
+		ThrottleState += (Clamp01(Input.Throttle) - ThrottleState) * std::min(1.0, H / 0.06);
+		Throttle = std::max(ThrottleState, IdleThrottle);
 		// Автосцепление сбрасывает газ на время переключения, чтобы мотор не улетал на отсечку.
 		if (ShiftTimer > 0.0 && (Assist.bAutoClutch || Assist.bAutoGearbox))
 		{
@@ -363,6 +365,7 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 	}
 	EngineSt.Omega = std::max(0.0, EngineSt.Omega + (EngineFreeTorque - ClutchTorque) / Ie * H);
 	EngineSt.Torque = EngineFreeTorque;
+	ClutchTorqueLast = ClutchTorque;
 
 	const double TotalAxleTorque = ClutchTorque * G * Cfg.Gearbox.Efficiency;
 	AxleTorqueLast = TotalAxleTorque;
@@ -471,7 +474,8 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 		W.Omega += (W.DriveTorque + TireTorque[I]) / WC.Inertia * H;
 
 		const double PadFactor = Cond.Wheels[I].PadMm > 0.5 ? 1.0 : 0.35; // колодки стёрты — железо по железу
-		double BrakeTorque = Clamp01(Input.Brake) * WC.Brake.MaxTorque * PadFactor;
+		const double Fade = 1.0 - (1.0 - WC.Brake.FadeMinFactor) * SmoothStep(WC.Brake.FadeStartC, WC.Brake.FadeEndC, W.BrakeTempC);
+		double BrakeTorque = Clamp01(Input.Brake) * WC.Brake.MaxTorque * PadFactor * Fade;
 		if (Assist.bAbs && BrakeTorque > 0.0 && std::abs(C.Vx) > 3.0
 			&& W.TireSt.SlipLong * SignOf(C.Vx) < -1.2 * W.TireModel.PeakSlipLong())
 		{
@@ -487,6 +491,8 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 
 		const double PadEnergy = BrakeTorque * std::abs(W.Omega) * H;
 		Cond.Wheels[I].PadMm = std::max(0.0, Cond.Wheels[I].PadMm - PadEnergy * WC.Brake.PadWearMmPerJoule);
+		const double Cooling = (WC.Brake.CoolingBase + WC.Brake.CoolingPerSpeed * std::abs(C.Vx)) * (W.BrakeTempC - AmbientLast);
+		W.BrakeTempC += (PadEnergy - Cooling * H) / WC.Brake.ThermalMass;
 
 		// Тормоз и трение не могут развернуть колесо — только остановить (так колесо честно блокируется).
 		W.Omega = std::abs(W.Omega) <= DOmega ? 0.0 : W.Omega - SignOf(W.Omega) * DOmega;
@@ -586,6 +592,7 @@ void Vehicle::Step(double Dt, const std::vector<WheelContact>& Contacts, double 
 		return;
 	}
 	LastSpeed = ForwardSpeed;
+	AmbientLast = AmbientC;
 	for (size_t I = 0; I < Wheels.size(); ++I)
 	{
 		Wheels[I].TireSt.TreadMm = Cond.Wheels[I].TreadMm;
@@ -630,6 +637,7 @@ void Vehicle::Step(double Dt, const std::vector<WheelContact>& Contacts, double 
 		O.SlipRatio = W.TireSt.SlipLong;
 		O.SlipAngle = std::atan(W.TireSt.SlipLatTan);
 		O.bSliding = W.TireSt.bSliding;
+		O.BrakeTempC = W.BrakeTempC;
 	}
 }
 
@@ -651,6 +659,8 @@ Telemetry Vehicle::GetTelemetry() const
 	T.bFanOn = EngineSt.bFanOn;
 	T.bShifting = ShiftTimer > 0.0;
 	T.bGearGrind = GrindTimer > 0.0;
+	T.ClutchTorque = ClutchTorqueLast;
+	T.SteeringWheelDeg = SteerState * Cfg.Steering.MaxAngleDeg * Cfg.Steering.SteeringRatio;
 	return T;
 }
 } // namespace vsim

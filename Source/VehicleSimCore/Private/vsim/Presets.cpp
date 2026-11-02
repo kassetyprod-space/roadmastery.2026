@@ -62,6 +62,8 @@ VehicleConfig Sokol1500()
 	RearBrake.MaxTorque = 600.0;
 	RearBrake.HandbrakeTorque = 1000.0;
 	RearBrake.PadNewMm = 6.0;
+	RearBrake.ThermalMass = 4000.0; // барабаны тяжелее, но хуже охлаждаются
+	RearBrake.CoolingPerSpeed = 0.6;
 
 	auto MakeWheel = [&](const char* Name, double X, double Y, int Axle, int Side, bool bFront) {
 		WheelConfig W;

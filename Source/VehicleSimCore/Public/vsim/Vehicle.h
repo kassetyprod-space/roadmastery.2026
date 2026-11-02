@@ -36,6 +36,13 @@ struct BrakeParams
 	double HandbrakeTorque = 0.0;    // Н·м
 	double PadNewMm = 10.0;
 	double PadWearMmPerJoule = 1.0e-7;
+	// Нагрев и «ватность» тормозов: после серии торможений с горы педаль слабеет.
+	double ThermalMass = 2500.0;     // Дж/К (диск/барабан + суппорт)
+	double CoolingBase = 3.0;        // Вт/К на месте
+	double CoolingPerSpeed = 1.0;    // Вт/К на каждый м/с
+	double FadeStartC = 300.0;
+	double FadeEndC = 550.0;
+	double FadeMinFactor = 0.4;      // доля эффективности на полностью перегретых тормозах
 };
 
 struct WheelConfig
@@ -62,6 +69,7 @@ struct SteeringParams
 	double InputRate = 4.0;          // 1/с — скорость поворота руля к цели (клавиатура)
 	double ReturnRate = 6.0;         // 1/с — возврат к центру
 	double HighSpeedFraction = 0.35; // доля угла на высокой скорости (если включён ассист)
+	double SteeringRatio = 16.0;     // поворот руля / поворот колёс (~1.5 оборота от центра до упора)
 };
 
 struct AeroParams
@@ -132,6 +140,7 @@ struct WheelOutput
 	double SlipAngle = 0.0;       // рад
 	bool bInContact = false;
 	bool bSliding = false;
+	double BrakeTempC = 20.0;
 };
 
 // Всё, что изнашивается и чинится. Сохраняется между сессиями.
@@ -169,6 +178,8 @@ struct Telemetry
 	bool bFanOn = false;
 	bool bShifting = false;
 	bool bGearGrind = false; // последняя попытка переключения не удалась (не выжато сцепление)
+	double ClutchTorque = 0.0;        // Н·м через сцепление — реакция мотора качает кузов
+	double SteeringWheelDeg = 0.0;    // угол рулевого колеса для визуала
 };
 
 class VSIM_API Vehicle
@@ -221,6 +232,7 @@ private:
 		double FxAccum = 0.0;
 		double FyAccum = 0.0;
 		double DriveTorque = 0.0;
+		double BrakeTempC = 20.0;
 		WheelOutput Out;
 	};
 
@@ -251,6 +263,9 @@ private:
 	double RearAxleX = 0.0;
 	double OdometerM = 0.0;
 	double LastSpeed = 0.0;
+	double ThrottleState = 0.0;   // заслонка с инерцией впуска
+	double ClutchTorqueLast = 0.0;
+	double AmbientLast = 20.0;
 	double FuelFlowKgPerS = 0.0;
 	double AxleTorqueLast = 0.0;
 };

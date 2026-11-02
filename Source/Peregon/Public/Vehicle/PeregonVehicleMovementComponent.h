@@ -62,6 +62,8 @@ struct FPeregonTelemetry
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry") TArray<float> SlipRatio;
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry") TArray<float> SlipAngleDeg;
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry") TArray<float> WheelLoadN;
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry") TArray<float> BrakeTempC;
+	UPROPERTY(BlueprintReadOnly, Category = "Telemetry") float SteeringWheelDeg = 0.f;
 };
 
 UENUM(BlueprintType)
@@ -88,6 +90,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") void SetSteering(float Value) { Steering = FMath::Clamp(Value, -1.f, 1.f); }
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") void SetClutchPedal(float Value) { ClutchPedal = FMath::Clamp(Value, 0.f, 1.f); }
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") void SetHandbrake(float Value) { Handbrake = FMath::Clamp(Value, 0.f, 1.f); }
+	// Стояночный тормоз (рычаг) — держится сам, в отличие от Space.
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") void SetParkingBrake(bool bOn) { bParkingBrake = bOn; }
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") bool IsParkingBrake() const { return bParkingBrake; }
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") float GetThrottleInput() const { return Throttle; }
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") float GetBrakeInput() const { return Brake; }
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") float GetClutchInput() const { return ClutchPedal; }
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") float GetHandbrakeInput() const { return FMath::Max(Handbrake, bParkingBrake ? 1.f : 0.f); }
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") bool IsStarterOn() const { return bStarter; }
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") void SetStarter(bool bOn) { bStarter = bOn; }
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") void SetIgnition(bool bOn) { bIgnition = bOn; }
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Input") bool GetIgnition() const { return bIgnition; }
@@ -153,6 +163,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon|Debug")
 	bool bDrawDebug = false;
 
+	// Насколько момент мотора качает кузов (1 — физически, 0 — выкл).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon|Vehicle", meta = (ClampMin = "0"))
+	float EngineReactionScale = 1.f;
+
 private:
 	void EnsureVehicle();
 	void StepVehicle(float DeltaTime, UPrimitiveComponent* Body);
@@ -166,6 +180,7 @@ private:
 	float Steering = 0.f;
 	float ClutchPedal = 0.f;
 	float Handbrake = 0.f;
+	bool bParkingBrake = true; // машина стоит на ручнике, пока водитель не опустит рычаг
 	bool bStarter = false;
 	bool bIgnition = true;
 	float ForwardSpeedMs = 0.f;
