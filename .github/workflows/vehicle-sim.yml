@@ -1,0 +1,30 @@
+name: Vehicle physics tests
+
+on:
+  push:
+    paths:
+      - "Source/VehicleSimCore/**"
+      - "Tests/VehicleSim/**"
+      - ".github/workflows/vehicle-sim.yml"
+  pull_request:
+    paths:
+      - "Source/VehicleSimCore/**"
+      - "Tests/VehicleSim/**"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Configure
+        run: cmake -S Tests/VehicleSim -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

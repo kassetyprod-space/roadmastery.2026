@@ -1,0 +1,33 @@
+# Unreal Engine — генерируемое
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+*.sln
+*.code-workspace
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.VC.db
+*.opensdf
+
+# CMake-сборка тестов
+Tests/**/build/
+build/
+
+# Пайплайн карт: сырые выгрузки OSM и рельефа большие, хранятся отдельно
+Tools/MapPipeline/data/
+Tools/MapPipeline/out/
+__pycache__/
+*.pyc
+.venv/
+
+.DS_Store
+Thumbs.db
