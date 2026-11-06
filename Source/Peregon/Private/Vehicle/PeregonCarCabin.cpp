@@ -311,10 +311,10 @@ void APeregonCar::OnDome(const FInputActionValue&)
 
 int32 APeregonCar::WindowIndex(const UPrimitiveComponent* Part) const
 {
-	static const FName Tags[] = {FName(TEXT("WindowFL")), FName(TEXT("WindowFR")), FName(TEXT("WindowRL")), FName(TEXT("WindowRR"))};
+	static const FName WindowTags[] = {FName(TEXT("WindowFL")), FName(TEXT("WindowFR")), FName(TEXT("WindowRL")), FName(TEXT("WindowRR"))};
 	for (int32 K = 0; K < 4; ++K)
 	{
-		if (Part && Part->ComponentHasTag(Tags[K]))
+		if (Part && Part->ComponentHasTag(WindowTags[K]))
 		{
 			return K;
 		}
