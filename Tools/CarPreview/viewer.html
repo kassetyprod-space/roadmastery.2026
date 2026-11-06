@@ -31,6 +31,12 @@ function partXf(name, origin, data){
     if (name==='DoorFL'||name==='DoorRL') r = rotZ(65*D); if (name==='DoorFR'||name==='DoorRR') r = rotZ(-65*D);
     if (name==='Glovebox') r = rotY(70*D);
   }
+  // open=Wipers — щётки в верхней точке хода (поворот вокруг оси wiperAxis, формула Родрига).
+  if (open.includes('Wipers') && (name==='WiperL'||name==='WiperR') && data.wiperAxis) {
+    const n=data.wiperAxis, t=data.wiperSweep*D, c=Math.cos(t), s=Math.sin(t);
+    r = v=>{ const d=n[0]*v[0]+n[1]*v[1]+n[2]*v[2]; const x=[n[1]*v[2]-n[2]*v[1], n[2]*v[0]-n[0]*v[2], n[0]*v[1]-n[1]*v[0]];
+      return [0,1,2].map(i=>v[i]*c + x[i]*s + n[i]*d*(1-c)); };
+  }
   if (name==='Steering') { const X=data.steeringDir; let Y=[ -X[1], X[0], 0 ]; // Up x X, Up=(0,0,1)
     const l=Math.hypot(...Y); Y=Y.map(a=>a/l); const Z=[X[1]*Y[2]-X[2]*Y[1], X[2]*Y[0]-X[0]*Y[2], X[0]*Y[1]-X[1]*Y[0]];
     const b = v=>[X[0]*v[0]+Y[0]*v[1]+Z[0]*v[2], X[1]*v[0]+Y[1]*v[1]+Z[1]*v[2], X[2]*v[0]+Y[2]*v[1]+Z[2]*v[2]];
@@ -70,7 +76,7 @@ fetch('car.json').then(r=>r.json()).then(data=>{
   gl.enable(gl.DEPTH_TEST); if (cull){ gl.enable(gl.CULL_FACE); gl.frontFace(gl.CCW); gl.cullFace(gl.BACK);} 
   gl.uniformMatrix4fv(U('mvp'), false, mvp); gl.uniform3fv(U('eye'), E);
   const pl = gl.getAttribLocation(prog,'p'), nl = gl.getAttribLocation(prog,'n');
-  const order = draws.filter(d=>d.mat!=='Glass').concat(noglass?[]:draws.filter(d=>d.mat==='Glass'));
+  const order = draws.filter(d=>d.mat!=='Glass'&&d.mat!=='Water').concat(noglass?[]:draws.filter(d=>d.mat==='Glass'));
   for (const d of order){
     const glass = d.mat==='Glass'; if (glass){ gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);} 
     gl.uniform3fv(U('col'), COL[d.mat]||[1,0,1]); gl.uniform1f(U('spec'), SPEC[d.mat]||0.05); gl.uniform1f(U('alpha'), glass?0.35:1);

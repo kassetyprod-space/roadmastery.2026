@@ -24,6 +24,9 @@
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "vsim/BodyModel.h"
 #include "Audio/PeregonAudio.h"
+#include "EngineUtils.h"
+#include "Game/PeregonGameMode.h"
+#include "World/PeregonSky.h"
 
 namespace PeregonCarModel
 {
@@ -138,6 +141,8 @@ APeregonCar::APeregonCar()
 	ClutchPedal = MakePartPivot(vmodel::Part::ClutchPedal, TEXT("ClutchPedal"));
 	BrakePedal = MakePartPivot(vmodel::Part::BrakePedal, TEXT("BrakePedal"));
 	GasPedal = MakePartPivot(vmodel::Part::GasPedal, TEXT("GasPedal"));
+	WiperL = MakePartPivot(vmodel::Part::WiperL, TEXT("WiperL"));
+	WiperR = MakePartPivot(vmodel::Part::WiperR, TEXT("WiperR"));
 	PartPivots[static_cast<int32>(vmodel::Part::Body)] = Body;
 
 	// Мишени взаимодействия: невидимые боксы, ловят только луч Interact.
@@ -162,10 +167,11 @@ APeregonCar::APeregonCar()
 		Lamp->SetMobility(EComponentMobility::Movable);
 		Lamp->SetRelativeRotation(FRotator(-3.f, 0.f, 0.f));
 		Lamp->SetIntensityUnits(ELightUnits::Candelas);
-		Lamp->SetIntensity(6000.f);
-		Lamp->SetAttenuationRadius(5000.f);
-		// Свет фар в тумане — заметный, но не «стена»: днём рассеяние почти не видно.
-		Lamp->SetVolumetricScatteringIntensity(0.15f);
+		// Ближний свет советской фары ~1 000 кд в пятне. Раньше было 6 000 — на ночной экспозиции дорога у капота «выгорала».
+		Lamp->SetIntensity(950.f);
+		Lamp->SetAttenuationRadius(6000.f);
+		// Свет фар в тумане и дожде — заметный конус, но не «стена».
+		Lamp->SetVolumetricScatteringIntensity(0.35f);
 		Lamp->SetInnerConeAngle(12.f);
 		Lamp->SetOuterConeAngle(30.f);
 		Lamp->SetLightColor(FLinearColor(1.f, 0.92f, 0.75f));
@@ -366,6 +372,12 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	{
 		return Art->MakeGlassMaterial(this, FLinearColor(0.42f, 0.5f, 0.52f), 0.22f);
 	}
+	if (M == vmodel::Mat::Water)
+	{
+		// Капли на лобовом: прозрачность растёт под дождём, дворники её сбрасывают. Без M_PSX3_Glass — нет капель.
+		WaterMaterial = Art->MakeTranslucent(this, EPeregonTex::Raindrops, FLinearColor(0.85f, 0.9f, 0.95f), 0.f, 0.03f);
+		return WaterMaterial;
+	}
 	FPeregonLook Look;
 	switch (M)
 	{
@@ -388,6 +400,16 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	case vmodel::Mat::Plate: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.9f, 0.9f, 0.87f), 0.5f); break;
 	default: Look = FPeregonLook(EPeregonTex::White, FLinearColor::White, 0.8f); break;
 	}
+	// Кузов мокнет под дождём (глянец), салон — нет. Снег на машине не копим: она едет.
+	switch (M)
+	{
+	case vmodel::Mat::Paint: Look.WetMask = 1.f; break;
+	case vmodel::Mat::Chrome: Look.WetMask = 0.5f; break;
+	case vmodel::Mat::BlackTrim:
+	case vmodel::Mat::Rubber: Look.WetMask = 0.7f; break;
+	default: Look.WetMask = 0.f; break;
+	}
+	Look.SnowMask = 0.f;
 	UMaterialInstanceDynamic* Mid = Art->MakeMaterial(this, Look);
 	if (Mid && (M == vmodel::Mat::Headlamp || M == vmodel::Mat::Taillamp))
 	{
@@ -443,7 +465,7 @@ void APeregonCar::BuildModelMeshes()
 			{
 				Mesh->SetMaterial(SectionIndex, Material);
 			}
-			else if (S.Material == vmodel::Mat::Glass)
+			else if (S.Material == vmodel::Mat::Glass || S.Material == vmodel::Mat::Water)
 			{
 				Mesh->SetMeshSectionVisible(SectionIndex, false); // нет стеклянного материала — лучше без стёкол, чем непрозрачные
 			}
@@ -533,6 +555,7 @@ void APeregonCar::Tick(float DeltaSeconds)
 	const FPeregonTelemetry T = Movement->GetTelemetry();
 	UpdateMovingParts(DeltaSeconds);
 	UpdateCockpit(DeltaSeconds, T);
+	UpdateWipers(DeltaSeconds);
 	UpdateSounds(DeltaSeconds, T);
 	if (IsPlayerControlled())
 	{
@@ -985,6 +1008,7 @@ void APeregonCar::BuildInput()
 	ParkingBrakeAction = MakeAction(TEXT("IA_Car_ParkingBrake"), EInputActionValueType::Boolean);
 	DetailsAction = MakeAction(TEXT("IA_Car_Details"), EInputActionValueType::Boolean);
 	ZoomAction = MakeAction(TEXT("IA_Car_Zoom"), EInputActionValueType::Boolean);
+	WipersAction = MakeAction(TEXT("IA_Car_Wipers"), EInputActionValueType::Boolean);
 
 	Mapping = NewObject<UInputMappingContext>(this, TEXT("IMC_Car"));
 	auto Map = [this](UInputAction* Action, const FKey& Key, bool bNegate = false, bool bDeadZone = false) {
@@ -1040,6 +1064,8 @@ void APeregonCar::BuildInput()
 	Map(ParkingBrakeAction, EKeys::P);
 	Map(ParkingBrakeAction, EKeys::Gamepad_DPad_Left);
 	Map(DetailsAction, EKeys::F3);
+	Map(WipersAction, EKeys::K);
+	Map(WipersAction, EKeys::Gamepad_DPad_Right);
 }
 
 void APeregonCar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -1080,6 +1106,7 @@ void APeregonCar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	EIC->BindAction(LightsAction, ETriggerEvent::Started, this, &APeregonCar::OnToggleLights);
 	EIC->BindAction(ParkingBrakeAction, ETriggerEvent::Started, this, &APeregonCar::OnToggleParkingBrake);
 	EIC->BindAction(DetailsAction, ETriggerEvent::Started, this, &APeregonCar::OnToggleDetails);
+	EIC->BindAction(WipersAction, ETriggerEvent::Started, this, &APeregonCar::OnCycleWipers);
 }
 
 void APeregonCar::PawnClientRestart()
@@ -1158,6 +1185,80 @@ void APeregonCar::OnToggleCamera(const FInputActionValue&) { SetFirstPerson(!bFi
 void APeregonCar::OnZoomPressed(const FInputActionValue&) { bZoom = true; }
 void APeregonCar::OnZoomReleased(const FInputActionValue&) { bZoom = false; }
 void APeregonCar::OnToggleLights(const FInputActionValue&) { SetHeadlights(!bHeadlights); }
+
+void APeregonCar::OnCycleWipers(const FInputActionValue&)
+{
+	WiperMode = (WiperMode + 1) % 3;
+	PeregonAudio::PlayEvent(this, TEXT("lights.switch"), GetActorLocation(), 0.5f, 1.2f);
+	if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+	{
+		static const TCHAR* Names[] = {TEXT("Дворники выключены"), TEXT("Дворники: медленно"), TEXT("Дворники: быстро")};
+		GM->Toast(Names[WiperMode], 1.5f);
+	}
+}
+
+void APeregonCar::UpdateWipers(float DeltaSeconds)
+{
+	// Погода: сколько воды и снега летит на стекло (больше — на скорости).
+	float Rain = 0.f;
+	float Snowfall = 0.f;
+	for (TActorIterator<APeregonSky> It(GetWorld()); It; ++It)
+	{
+		Rain = static_cast<float>(It->GetWeather().Rain);
+		Snowfall = static_cast<float>(It->GetWeather().Snow);
+		break;
+	}
+	const float Speed = FMath::Abs(Movement->GetForwardSpeed()) / 100.f;
+	const float Hit = 1.f + FMath::Clamp(Speed / 20.f, 0.f, 1.5f);
+	WaterLevel = FMath::Clamp(WaterLevel + DeltaSeconds * (Rain * 0.22f * Hit - (Rain < 0.02f ? 0.015f : 0.f)), 0.f, 1.f);
+	SnowOnGlass = FMath::Clamp(SnowOnGlass + DeltaSeconds * (Snowfall * 0.12f * Hit - (Snowfall < 0.02f ? 0.01f : 0.f)), 0.f, 1.f);
+
+	// Ход щётки: медленно ~40 взмахов в минуту, быстро ~65. Выключили — щётки доходят до упора и встают.
+	const float Rate = WiperMode == 2 ? 1.1f : 0.68f;
+	const bool bRunning = WiperMode > 0 && Movement->GetIgnition();
+	if (bRunning || WiperPhase > 0.f)
+	{
+		const float Prev = WiperPhase;
+		WiperPhase += DeltaSeconds * Rate;
+		// Середина хода — щётка вверху: стекло на её пути вытерто.
+		if (Prev < 0.5f && WiperPhase >= 0.5f)
+		{
+			WaterLevel *= 0.08f;
+			SnowOnGlass *= 0.15f;
+		}
+		if (WiperPhase >= 1.f)
+		{
+			WaterLevel *= 0.3f;
+			WiperPhase = bRunning ? FMath::Fmod(WiperPhase, 1.f) : 0.f;
+			if (bRunning)
+			{
+				PeregonAudio::PlayEvent(this, TEXT("wiper.swipe"), GetActorLocation() + GetActorForwardVector() * 90.f, 0.35f);
+			}
+		}
+		if (Prev == 0.f && bRunning)
+		{
+			PeregonAudio::PlayEvent(this, TEXT("wiper.swipe"), GetActorLocation() + GetActorForwardVector() * 90.f, 0.35f);
+		}
+	}
+	const vmodel::Model& Model = PeregonCarModel::Get();
+	const FVector Axis = PeregonCarModel::ToVector(Model.WiperAxis).GetSafeNormal();
+	const float Angle = Model.WiperSweepDeg * 0.5f * (1.f - FMath::Cos(2.f * PI * WiperPhase));
+	const FQuat Turn(Axis, FMath::DegreesToRadians(Angle));
+	for (USceneComponent* Wiper : {WiperL.Get(), WiperR.Get()})
+	{
+		if (Wiper)
+		{
+			Wiper->SetRelativeRotation(Turn);
+		}
+	}
+	if (WaterMaterial)
+	{
+		const float Amount = FMath::Max(WaterLevel, SnowOnGlass);
+		WaterMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.9f * Amount);
+		WaterMaterial->SetVectorParameterValue(TEXT("Color"), FMath::Lerp(FLinearColor(0.85f, 0.9f, 0.95f), FLinearColor(1.f, 1.f, 1.f),
+			SnowOnGlass > WaterLevel ? 1.f : 0.f));
+	}
+}
 void APeregonCar::OnToggleParkingBrake(const FInputActionValue&)
 {
 	Movement->SetParkingBrake(!Movement->IsParkingBrake());

@@ -199,15 +199,60 @@ void APeregonRoadWorld::SetupAssets()
 	Set(EPeregonWorldMat::WhitePaint, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.85f, 0.85f, 0.82f), 0.6f));
 	Set(EPeregonWorldMat::DarkPaint, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.05f, 0.05f, 0.05f), 0.6f));
 	Set(EPeregonWorldMat::Concrete, FPeregonLook(EPeregonTex::Concrete, FLinearColor::White, 0.9f));
-	Set(EPeregonWorldMat::Glass, FPeregonLook(EPeregonTex::Glass, FLinearColor::White, 0.1f));
+	FPeregonLook GlassLook(EPeregonTex::Glass, FLinearColor::White, 0.1f);
+	GlassLook.WetMask = 0.f;
+	GlassLook.SnowMask = 0.f;
+	Set(EPeregonWorldMat::Glass, GlassLook);
 	Set(EPeregonWorldMat::BirchBark, FPeregonLook(EPeregonTex::BirchBark, FLinearColor::White, 0.9f));
 	Set(EPeregonWorldMat::PineBark, FPeregonLook(EPeregonTex::PineBark, FLinearColor::White, 0.95f));
-	Set(EPeregonWorldMat::Needles, FPeregonLook(EPeregonTex::Needles, FLinearColor::White, 0.95f));
-	Set(EPeregonWorldMat::Leaves, FPeregonLook(EPeregonTex::Leaves, FLinearColor::White, 0.9f));
 	Set(EPeregonWorldMat::Pole, FPeregonLook(EPeregonTex::PineBark, FLinearColor(0.45f, 0.4f, 0.35f), 0.95f));
 	FPeregonLook FarLook(EPeregonTex::Needles, FLinearColor(0.8f, 0.9f, 0.8f), 1.f);
 	FarLook.WorldTileCm = 1200.f;
 	Set(EPeregonWorldMat::Far, FarLook);
+
+	// Трава и кусты качаются на ветру (вес — альфа цвета вершин: корни стоят, верхушки гнутся).
+	FPeregonLook Tuft(EPeregonTex::GrassTuft, FLinearColor(0.55f, 0.62f, 0.38f), 0.95f);
+	Tuft.Sway = 1.f;
+	Set(EPeregonWorldMat::GrassTuft, Tuft);
+	FPeregonLook BushLook(EPeregonTex::Bush, FLinearColor(0.42f, 0.55f, 0.3f), 0.9f);
+	BushLook.Sway = 0.45f;
+	Set(EPeregonWorldMat::Bush, BushLook);
+	FPeregonLook TwigLook(EPeregonTex::Bush, FLinearColor(0.32f, 0.28f, 0.25f), 0.95f);
+	TwigLook.Sway = 0.25f;
+	Set(EPeregonWorldMat::Twigs, TwigLook);
+	FPeregonLook FarLand(EPeregonTex::Grass, FLinearColor::White, 1.f);
+	FarLand.WorldTileCm = 2400.f;
+	Set(EPeregonWorldMat::FarLand, FarLand);
+	FPeregonLook RidgeLook(EPeregonTex::Needles, FLinearColor(0.75f, 0.85f, 0.85f), 1.f);
+	RidgeLook.WorldTileCm = 6000.f;
+	RidgeLook.SnowMask = 0.f;
+	Set(EPeregonWorldMat::Ridge, RidgeLook);
+	Set(EPeregonWorldMat::Panel, FPeregonLook(EPeregonTex::PanelFacade, FLinearColor::White, 0.85f));
+	Set(EPeregonWorldMat::Brick, FPeregonLook(EPeregonTex::BrickFacade, FLinearColor::White, 0.9f));
+	Set(EPeregonWorldMat::CityRoof, FPeregonLook(EPeregonTex::Concrete, FLinearColor(0.42f, 0.42f, 0.44f), 0.9f));
+	// Окна, в которых вечером горит свет: днём — шторы, ночью — тёплый свет.
+	FPeregonLook Window(EPeregonTex::White, FLinearColor(0.85f, 0.68f, 0.38f), 0.6f);
+	Window.NightGlow = 1.6f;
+	Window.WetMask = 0.f;
+	Window.SnowMask = 0.f;
+	Set(EPeregonWorldMat::LitWindow, Window);
+	FPeregonLook Gold(EPeregonTex::Chrome, FLinearColor(1.f, 0.72f, 0.28f), 0.25f, 1.f);
+	Gold.SnowMask = 0.f;
+	Set(EPeregonWorldMat::Gold, Gold);
+	Set(EPeregonWorldMat::RedPaint, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.55f, 0.06f, 0.04f), 0.6f));
+	FPeregonLook Lamp(EPeregonTex::White, FLinearColor(1.f, 0.78f, 0.45f), 0.5f);
+	Lamp.NightGlow = 12.f;
+	Lamp.WetMask = 0.f;
+	Lamp.SnowMask = 0.f;
+	Set(EPeregonWorldMat::LampGlow, Lamp);
+	Set(EPeregonWorldMat::Stele, FPeregonLook(EPeregonTex::Concrete, FLinearColor(0.95f, 0.95f, 0.93f), 0.8f));
+	Set(EPeregonWorldMat::SteleAccent, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.08f, 0.22f, 0.5f), 0.5f));
+	FPeregonLook Leaves(EPeregonTex::Leaves, FLinearColor::White, 0.9f);
+	Leaves.Sway = 0.3f;
+	Set(EPeregonWorldMat::Leaves, Leaves);
+	FPeregonLook Needles(EPeregonTex::Needles, FLinearColor::White, 0.95f);
+	Needles.Sway = 0.12f;
+	Set(EPeregonWorldMat::Needles, Needles);
 }
 
 UMaterialInterface* APeregonRoadWorld::Mat(EPeregonWorldMat Type) const
@@ -225,6 +270,14 @@ void APeregonRoadWorld::EndPlay(const EEndPlayReason::Type Reason)
 	{
 		DestroyChunk(Key);
 	}
+	for (TWeakObjectPtr<UActorComponent>& Comp : Scenery)
+	{
+		if (Comp.IsValid())
+		{
+			Comp->DestroyComponent();
+		}
+	}
+	Scenery.Reset();
 	Super::EndPlay(Reason);
 }
 
@@ -252,6 +305,24 @@ void APeregonRoadWorld::Generate(int32 Seed)
 
 	FarGround->SetStaticMesh(CubeMesh);
 	FarGround->SetMaterial(0, Mat(EPeregonWorldMat::Far));
+
+	// Пейзаж до горизонта и города — один раз на весь маршрут.
+	for (TWeakObjectPtr<UActorComponent>& Comp : Scenery)
+	{
+		if (Comp.IsValid())
+		{
+			Comp->DestroyComponent();
+		}
+	}
+	Scenery.Reset();
+	const double StartTime = FPlatformTime::Seconds();
+	Landscape.Build(Route);
+	BuildFarTerrain();
+	BuildCities();
+	RidgeCenter = FVector(1e12);
+	bSeasonApplied = false;
+	UpdateSeason(true);
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Пейзаж и города построены за %.0f мс"), (FPlatformTime::Seconds() - StartTime) * 1000.0);
 }
 
 void APeregonRoadWorld::BuildAround(double S)
@@ -331,7 +402,14 @@ void APeregonRoadWorld::Tick(float DeltaSeconds)
 		AnnouncePlaces(PrevS, TrackedS);
 	}
 	UpdateStreaming(false);
-	FarGround->SetWorldLocation(FVector(Focus.X, Focus.Y, (Route.MinZ() - 6.0) * PeregonRoad::M));
+	FarGround->SetWorldLocation(FVector(Focus.X, Focus.Y, (Route.MinZ() - 40.0) * PeregonRoad::M));
+	UpdateRidges(Focus);
+	SeasonCheckTimer -= DeltaSeconds;
+	if (SeasonCheckTimer <= 0.f)
+	{
+		SeasonCheckTimer = 1.f;
+		UpdateSeason(false);
+	}
 }
 
 void APeregonRoadWorld::AnnouncePlaces(double PrevS, double NewS)
@@ -493,7 +571,7 @@ UProceduralMeshComponent* APeregonRoadWorld::AddSurface(FChunk& Chunk, const FMe
 		Mesh->SetPhysMaterialOverride(Phys);
 	}
 	Mesh->RegisterComponent();
-	Mesh->CreateMeshSection(0, Data.Vertices, Data.Triangles, Data.Normals, Data.UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), Phys != nullptr);
+	Mesh->CreateMeshSection(0, Data.Vertices, Data.Triangles, Data.Normals, Data.UVs, Data.Colors, TArray<FProcMeshTangent>(), Phys != nullptr);
 	if (UMaterialInterface* Material = Mat(MatType))
 	{
 		Mesh->SetMaterial(0, Material);
@@ -681,7 +759,11 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		case rgen::PoiType::Border:
 			if (Poi.S >= S0 && Poi.S < S1)
 			{
-				AddSign(Chunk, Poi.S, Half + 3.0, Name.Replace(TEXT(" — "), TEXT("\n")), false);
+				// Стела на границе: с одной стороны — область, из которой выезжаем, с другой — в которую въезжаем.
+				const int32 Before = FMath::Max(0, Route.RegionAt(Poi.S - 5.0));
+				const FString BeforeName = Route.Regions().size() > static_cast<size_t>(Before)
+					? FString(UTF8_TO_TCHAR(Route.Regions()[static_cast<size_t>(Before)].Name.c_str())) : FString();
+				BuildRegionStele(Chunk, Poi.S, BeforeName, Name);
 			}
 			break;
 		case rgen::PoiType::Fuel:
@@ -744,7 +826,17 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		}
 	}
 
+	// Стелы городов на въезде.
+	for (int32 Town = 0; Town < SteleS.Num(); ++Town)
+	{
+		if (SteleS[Town] >= S0 && SteleS[Town] < S1)
+		{
+			BuildStele(Chunk, SteleS[Town], Town);
+		}
+	}
+
 	BuildTrees(Chunk, Index, S0, S1);
+	BuildFoliage(Chunk, Index, S0, S1);
 }
 
 bool APeregonRoadWorld::IsClearZone(double S, double T) const
@@ -775,6 +867,10 @@ void APeregonRoadWorld::BuildTrees(FChunk& Chunk, int32 Index, double S0, double
 		Crowns->SetCastShadow(true);
 	}
 
+	// Берёзы по сезону: крона гуще летом, реже осенью, зимой — голые ветки (плоские «веники»).
+	const double LeafAmount = bSeasonApplied ? AppliedSeason.Leaves : 1.0;
+	const bool bBare = LeafAmount < 0.15;
+	FMeshBuffers Twigs;
 	rgen::Rng Rand(rgen::Hash(static_cast<uint32_t>(Index + 100000), Route.Params().Seed));
 	const uint32_t ForestSeed = rgen::Hash(Route.Params().Seed, 0xF0E57u);
 	for (double S = S0; S < S1; S += 9.0)
@@ -814,10 +910,33 @@ void APeregonRoadWorld::BuildTrees(FChunk& Chunk, int32 Index, double S0, double
 				{
 					const double H = 10.0 * Scale;
 					BirchTrunks->AddInstance(FTransform(FRotator(Rand.Range(-3.0, 3.0), Yaw, 0), Base + FVector(0, 0, H * 50.0), FVector(0.26 * Scale, 0.26 * Scale, H)));
-					BirchCrowns->AddInstance(FTransform(FRotator(0, Yaw, 0), Base + FVector(0, 0, H * 100.0 * 0.78), FVector(4.2 * Scale, 4.2 * Scale, 6.0 * Scale)));
+					if (bBare)
+					{
+						const FVector Crown = Base + FVector(0, 0, H * 100.0 * 0.7);
+						for (int32 K = 0; K < 3; ++K)
+						{
+							const float Ang = FMath::DegreesToRadians(static_cast<float>(Yaw) + 60.f * K);
+							const FVector Axis(FMath::Cos(Ang), FMath::Sin(Ang), 0.f);
+							const float R = static_cast<float>(220.0 * Scale);
+							const float Hh = static_cast<float>(330.0 * Scale);
+							Twigs.AddQuad(Crown - Axis * R - FVector(0, 0, Hh), Crown + Axis * R - FVector(0, 0, Hh), Crown + Axis * R + FVector(0, 0, Hh),
+								Crown - Axis * R + FVector(0, 0, Hh), FVector::CrossProduct(Axis, FVector::UpVector), FVector2D(0, 1), FVector2D(1, 0),
+								FColor::White, 255);
+						}
+					}
+					else
+					{
+						const double Fullness = 0.55 + 0.45 * LeafAmount;
+						BirchCrowns->AddInstance(FTransform(FRotator(0, Yaw, 0), Base + FVector(0, 0, H * 100.0 * 0.78),
+							FVector(4.2 * Scale * Fullness, 4.2 * Scale * Fullness, 6.0 * Scale * Fullness)));
+					}
 				}
 			}
 		}
+	}
+	if (Twigs.Vertices.Num() > 0)
+	{
+		AddProc(Chunk.Components, Twigs, Mat(EPeregonWorldMat::Twigs), false);
 	}
 }
 
@@ -829,6 +948,7 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 	const double ExitS = Poi.S + 220.0;
 	if (EntryS >= S0 && EntryS < S1)
 	{
+		// Знак «начало населённого пункта» стоит всегда; у городов перед ним ещё и стела (BuildStele).
 		AddSign(Chunk, EntryS, Half + 3.0, Name, false);
 	}
 	if (ExitS >= S0 && ExitS < S1 && Poi.Type != rgen::PoiType::Finish)
@@ -915,7 +1035,9 @@ void APeregonRoadWorld::BuildHouse(FChunk& Chunk, double S, int32 Side, uint32 S
 	for (double Wx : {-Length * 0.25, Length * 0.25})
 	{
 		AddMesh(Chunk, CubeMesh, FTransform(Rot, At(Wx, FaceY, 1.55), FVector(1.25, 0.06, 1.35)), Mat(EPeregonWorldMat::WhitePaint), false);
-		AddMesh(Chunk, CubeMesh, FTransform(Rot, At(Wx, FaceY - Side * 0.02, 1.55), FVector(0.95, 0.06, 1.05)), Mat(EPeregonWorldMat::Glass), false);
+		const bool bLit = rgen::HashToUnit(rgen::Hash(Seed, static_cast<uint32>(Wx * 10.0 + 50.0))) < 0.55;
+		AddMesh(Chunk, CubeMesh, FTransform(Rot, At(Wx, FaceY - Side * 0.02, 1.55), FVector(0.95, 0.06, 1.05)),
+			Mat(bLit ? EPeregonWorldMat::LitWindow : EPeregonWorldMat::Glass), false);
 	}
 }
 

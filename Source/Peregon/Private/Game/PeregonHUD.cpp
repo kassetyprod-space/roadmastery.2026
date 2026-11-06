@@ -1,5 +1,8 @@
 #include "Game/PeregonHUD.h"
 
+#include "EngineUtils.h"
+#include "World/PeregonSky.h"
+
 #include "Art/PeregonArtSubsystem.h"
 
 #include "Engine/Canvas.h"
@@ -338,8 +341,9 @@ void APeregonHUD::DrawDetails(const APeregonCar* Car)
 		Lines.Emplace(FString::Printf(TEXT("%s  нагрузка %4.0f Н  скольж. %+.2f  увод %+5.1f°  протектор %.2f мм  колодки %.2f мм  тормоз %3.0f°C  аморт. %.0f%%"),
 			Names[I], T.WheelLoadN[I], T.SlipRatio[I], T.SlipAngleDeg[I], T.TreadMm[I], T.PadMm[I], T.BrakeTempC[I], T.ShockCondition[I] * 100.f), Dim);
 	}
-	Lines.Emplace(FString(TEXT("W/S газ-тормоз  A/D руль  E/Q передачи  Shift сцепление  Space ручник  P стояночный  L фары")), Dim);
-	Lines.Emplace(FString(TEXT("R стартер  I зажигание  G автомат/механика  V камера  C приблизить  F выйти  ЛКМ взаимодействие  Backspace на колёса  Tab вещи  M карта")), Dim);
+	Lines.Emplace(FString(TEXT("W/S газ-тормоз  A/D руль  E/Q передачи  Shift сцепление  Space ручник  P стояночный  L фары  K дворники")), Dim);
+	Lines.Emplace(FString(TEXT("R стартер  I зажигание  G автомат/механика  V камера  C приблизить  F выйти  ЛКМ взаимодействие")), Dim);
+	Lines.Emplace(FString(TEXT("Backspace на колёса  Tab вещи  M карта  F6 погода  F7 +15 дней")), Dim);
 
 	float W = 0.f;
 	float LineH = 0.f;
@@ -373,15 +377,27 @@ void APeregonHUD::DrawTrip()
 		const int32 Minutes = FMath::FloorToInt((GI->TimeOfDayHours - Hours) * 60.f);
 		const FString Clock = FString::Printf(TEXT("%02d:%02d"), Hours, Minutes);
 		const FString Sub = FString::Printf(TEXT("День %d  ·  %s ₽"), GI->Day, *Thousands(FMath::RoundToInt(GI->Money)));
+		// Дата и погода: «15 сентября · +12 °C · Пасмурно».
+		FString Weather;
+		for (TActorIterator<APeregonSky> It(GetWorld()); It; ++It)
+		{
+			Weather = FString::Printf(TEXT("%s  ·  %s"), *It->DescribeDate(), *It->DescribeWeather());
+			break;
+		}
 		const FVector2f ClockSize = Measure(Clock, EUiFont::Title);
 		const FVector2f SubSize = Measure(Sub, EUiFont::Small);
-		const float W = FMath::Max(ClockSize.X, SubSize.X) + 2.f * Px(Pad);
-		const float H = ClockSize.Y + SubSize.Y + 2.f * Px(Pad);
+		const FVector2f WeatherSize = Weather.IsEmpty() ? FVector2f(0.f, 0.f) : Measure(Weather, EUiFont::Small);
+		const float W = FMath::Max3(ClockSize.X, SubSize.X, WeatherSize.X) + 2.f * Px(Pad);
+		const float H = ClockSize.Y + SubSize.Y + WeatherSize.Y + 2.f * Px(Pad);
 		const float X = Canvas->ClipX - Px(Margin) - W;
 		const float Y = Px(Margin);
 		Panel(X, Y, W, H);
 		Label(Clock, EUiFont::Title, Text, X + W - Px(Pad) - ClockSize.X, Y + Px(Pad));
 		Label(Sub, EUiFont::Small, Dim, X + W - Px(Pad) - SubSize.X, Y + Px(Pad) + ClockSize.Y);
+		if (!Weather.IsEmpty())
+		{
+			Label(Weather, EUiFont::Small, Dim, X + W - Px(Pad) - WeatherSize.X, Y + Px(Pad) + ClockSize.Y + SubSize.Y);
+		}
 	}
 
 	// Слева сверху: где мы, что впереди и полоса маршрута с отметками остановок.

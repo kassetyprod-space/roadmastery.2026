@@ -15,9 +15,13 @@
 #include "Styling/CoreStyle.h"
 #include "Engine/GameInstance.h"
 #include "Engine/Texture2D.h"
+#include "HAL/IConsoleManager.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+
+static TAutoConsoleVariable<int32> CVarPeregonTextureMips(TEXT("peregon.TextureMips"), 1,
+	TEXT("Мип-карты процедурных текстур (1 — да, против ряби вдали; 0 — один уровень)."), ECVF_Default);
 
 namespace PeregonTexGen
 {
@@ -60,6 +64,13 @@ FColor Rgb(float R, float G, float B)
 {
 	return FColor(static_cast<uint8>(FMath::Clamp(R, 0.f, 255.f)), static_cast<uint8>(FMath::Clamp(G, 0.f, 255.f)),
 		static_cast<uint8>(FMath::Clamp(B, 0.f, 255.f)), 255);
+}
+
+FColor Rgba(float R, float G, float B, float A)
+{
+	FColor C = Rgb(R, G, B);
+	C.A = static_cast<uint8>(FMath::Clamp(A, 0.f, 255.f));
+	return C;
 }
 
 FColor Scale(const FColor& Base, float K)
@@ -105,6 +116,11 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 	case EPeregonTex::RoadMarked: W = 64; H = 128; break;
 	case EPeregonTex::BirchBark:
 	case EPeregonTex::PineBark: W = 32; H = 64; break;
+	case EPeregonTex::GrassTuft: W = 32; H = 32; break;
+	case EPeregonTex::Leaf: W = H = 8; break;
+	case EPeregonTex::PanelFacade:
+	case EPeregonTex::BrickFacade: W = 32; H = 32; break;
+	case EPeregonTex::Clouds: W = H = 128; break;
 	default: break;
 	}
 	Px.SetNumUninitialized(W * H);
@@ -278,6 +294,131 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 			case EPeregonTex::Glass:
 				C = ((X + Y) % 32) < 4 ? Rgb(80.f, 96.f, 108.f) : Rgb(38.f, 52.f, 62.f);
 				break;
+			case EPeregonTex::GrassTuft:
+			{
+				// Травинки растут от нижнего края (V = 1) вверх; каждая — со своим наклоном и высотой.
+				C = Rgba(0.f, 0.f, 0.f, 0.f);
+				const float Up = static_cast<float>(H - 1 - Y) / static_cast<float>(H); // 0 внизу, 1 вверху
+				for (int32 Blade = 0; Blade < 11; ++Blade)
+				{
+					const float Root = 2.f + 28.f * Rand(Blade, 0, 171);
+					const float Lean = (Rand(Blade, 1, 172) - 0.5f) * 14.f;
+					const float Height = 0.45f + 0.55f * Rand(Blade, 2, 173);
+					const float Bx = Root + Lean * Up * Up;
+					const float Width = 1.3f * (1.f - Up / Height) + 0.35f;
+					if (Up < Height && FMath::Abs(static_cast<float>(X) - Bx) < Width)
+					{
+						const float Tip = Up / Height;
+						C = Rgba(150.f + 60.f * Tip, 180.f + 50.f * Tip, 120.f + 30.f * Tip, 255.f);
+					}
+				}
+				break;
+			}
+			case EPeregonTex::Bush:
+			{
+				// Овал листвы с просветами: шум по краю, тёмная середина, светлые листья по кромке.
+				const float Dx = (static_cast<float>(X) - 31.5f) / 31.5f;
+				const float Dy = (static_cast<float>(Y) - 36.f) / 30.f;
+				const float Dist = FMath::Sqrt(Dx * Dx + Dy * Dy);
+				const float Edge = 0.78f + 0.25f * (TileNoise(X, Y, 8, W, H, 181) - 0.5f) * 2.f;
+				const bool bHole = Rand(X / 3, Y / 3, 182) > 0.86f;
+				if (Dist < Edge && !bHole)
+				{
+					const float Leaf = Rand(X / 2, Y / 2, 183);
+					const float Shade = 0.7f + 0.3f * (1.f - Dy) * 0.5f + (Leaf - 0.5f) * 0.25f;
+					C = Rgba(190.f * Shade, 215.f * Shade, 170.f * Shade, 255.f);
+				}
+				else
+				{
+					C = Rgba(0.f, 0.f, 0.f, 0.f);
+				}
+				break;
+			}
+			case EPeregonTex::Leaf:
+			{
+				// Ромбик листа с черешком; цвет — светлый, оттенок даёт материал (зелёный, жёлтый, рыжий).
+				const float Dx = FMath::Abs(static_cast<float>(X) - 3.5f);
+				const float Dy = FMath::Abs(static_cast<float>(Y) - 3.f);
+				C = (Dx + Dy * 0.8f < 3.6f) || (X == 4 && Y == 7) ? Rgba(230.f + (R - 0.5f) * 30.f, 225.f, 200.f, 255.f) : Rgba(0.f, 0.f, 0.f, 0.f);
+				break;
+			}
+			case EPeregonTex::Raindrops:
+			{
+				// Капли разного размера; между ними прозрачно.
+				C = Rgba(0.f, 0.f, 0.f, 0.f);
+				for (int32 Drop = 0; Drop < 70; ++Drop)
+				{
+					const float Cx = 64.f * Rand(Drop, 0, 191);
+					const float Cy = 64.f * Rand(Drop, 1, 192);
+					const float Rad = 0.8f + 2.2f * Rand(Drop, 2, 193) * Rand(Drop, 3, 194);
+					float Ddx = FMath::Abs(static_cast<float>(X) - Cx);
+					float Ddy = FMath::Abs(static_cast<float>(Y) - Cy);
+					Ddx = FMath::Min(Ddx, 64.f - Ddx);
+					Ddy = FMath::Min(Ddy, 64.f - Ddy);
+					const float D = FMath::Sqrt(Ddx * Ddx + Ddy * Ddy * 0.8f);
+					if (D < Rad)
+					{
+						const bool bHighlight = (static_cast<float>(X) - Cx) < -Rad * 0.2f && (static_cast<float>(Y) - Cy) < -Rad * 0.2f;
+						C = bHighlight ? Rgba(250.f, 252.f, 255.f, 235.f) : Rgba(150.f, 165.f, 175.f, 150.f + 80.f * (1.f - D / Rad));
+					}
+				}
+				break;
+			}
+			case EPeregonTex::PanelFacade:
+			{
+				// Пролёт панельного дома: 32 px = 3 м × 2.8 м. Швы между панелями, окно с рамой, подоконный пояс.
+				const float Panel = 196.f + (TileNoise(X, Y, 8, W, H, 201) - 0.5f) * 16.f + (R - 0.5f) * 10.f;
+				C = Gray(Panel);
+				if (X == 0 || Y == 0)
+				{
+					C = Gray(120.f); // шов
+				}
+				const bool bWindow = X >= 9 && X <= 23 && Y >= 7 && Y <= 21;
+				const bool bFrame = bWindow && (X == 9 || X == 23 || Y == 7 || Y == 21 || X == 16);
+				if (bFrame)
+				{
+					C = Gray(225.f);
+				}
+				else if (bWindow)
+				{
+					C = Y < 11 ? Rgb(95.f, 112.f, 128.f) : Rgb(52.f, 62.f, 72.f);
+				}
+				if (Y >= 24 && Y <= 26 && X >= 7 && X <= 25)
+				{
+					C = Gray(150.f); // отлив
+				}
+				break;
+			}
+			case EPeregonTex::BrickFacade:
+			{
+				const int32 Row = Y / 3;
+				const int32 Brick = (X + (Row & 1) * 3) / 6;
+				const float Tone = 0.85f + 0.3f * Rand(Brick, Row, 211);
+				C = Rgb(168.f * Tone, 82.f * Tone, 58.f * Tone);
+				if (Y % 3 == 0 || (X + (Row & 1) * 3) % 6 == 0)
+				{
+					C = Rgb(176.f, 166.f, 150.f); // раствор
+				}
+				const bool bWindow = X >= 10 && X <= 22 && Y >= 6 && Y <= 22;
+				if (bWindow)
+				{
+					C = (X == 10 || X == 22 || Y == 6 || Y == 22 || Y == 12) ? Gray(232.f) : Rgb(48.f, 58.f, 66.f);
+				}
+				if (Y == 5 && X >= 9 && X <= 23)
+				{
+					C = Rgb(210.f, 200.f, 186.f); // перемычка
+				}
+				break;
+			}
+			case EPeregonTex::Clouds:
+			{
+				// Кучевые: несколько октав бесшовного шума, порог — края облаков, низ чуть темнее.
+				const float N = 0.5f * TileNoise(X, Y, 32, W, H, 221) + 0.3f * TileNoise(X, Y, 16, W, H, 222) + 0.2f * TileNoise(X, Y, 8, W, H, 223);
+				const float A = FMath::SmoothStep(0.48f, 0.68f, N);
+				const float Shade = 175.f + 80.f * FMath::SmoothStep(0.5f, 0.8f, N);
+				C = Rgba(Shade, Shade, Shade * 1.03f, 255.f * A);
+				break;
+			}
 			default:
 				break;
 			}
@@ -320,14 +461,31 @@ void UPeregonArtSubsystem::EnsureBaseMaterial()
 		return;
 	}
 	bTriedLoad = true;
-	BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2.M_PSX2"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	// Сначала второе поколение (погода, ветер, альфа), потом старое.
+	BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX3.M_PSX3"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	bPsx3 = BaseMaterial != nullptr;
+	if (!BaseMaterial)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет M_PSX3 (погода, ветер, трава) — перезапустите редактор, его создаст PeregonEditor. Пока — M_PSX2."));
+		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2.M_PSX2"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
 	bPsx = BaseMaterial != nullptr;
+	LabelMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2.M_PSX2"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!LabelMaterial)
+	{
+		LabelMaterial = BaseMaterial;
+	}
 	if (!BaseMaterial)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет /Game/Peregon/Materials/M_PSX2 — его создаёт модуль PeregonEditor при запуске редактора. Пока — без текстур."));
 		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	}
-	GlassMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2_Glass.M_PSX2_Glass"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	GlassMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX3_Glass.M_PSX3_Glass"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	bGlass3 = GlassMaterial != nullptr;
+	if (!GlassMaterial)
+	{
+		GlassMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2_Glass.M_PSX2_Glass"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
 	if (!GlassMaterial)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет M_PSX2_Glass — стёкла машины будут скрыты (материал создаёт PeregonEditor)."));
@@ -358,6 +516,68 @@ bool UPeregonArtSubsystem::HasPsxMaterial()
 {
 	EnsureBaseMaterial();
 	return bPsx;
+}
+
+bool UPeregonArtSubsystem::HasWeatherMaterials()
+{
+	EnsureBaseMaterial();
+	return bPsx3 && bGlass3;
+}
+
+UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeTranslucent(UObject* Outer, EPeregonTex Texture, const FLinearColor& Tint, float Opacity, float Emissive,
+	float NearFadeCm)
+{
+	EnsureBaseMaterial();
+	if (!GlassMaterial || !bGlass3)
+	{
+		return nullptr;
+	}
+	UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(GlassMaterial, Outer ? Outer : this);
+	if (Mid)
+	{
+		Mid->SetTextureParameterValue(TEXT("Tex"), GetTexture(Texture));
+		Mid->SetVectorParameterValue(TEXT("Color"), Tint);
+		Mid->SetScalarParameterValue(TEXT("Roughness"), 0.1f);
+		Mid->SetScalarParameterValue(TEXT("Metallic"), 0.f);
+		Mid->SetScalarParameterValue(TEXT("Opacity"), Opacity);
+		Mid->SetScalarParameterValue(TEXT("Emissive"), Emissive);
+		Mid->SetScalarParameterValue(TEXT("NearFade"), NearFadeCm);
+		Mid->SetScalarParameterValue(TEXT("WorldUV"), 0.f);
+	}
+	return Mid;
+}
+
+void UPeregonArtSubsystem::ApplyWeather(UMaterialInstanceDynamic* Mid) const
+{
+	Mid->SetScalarParameterValue(TEXT("Wetness"), CurWetness);
+	Mid->SetScalarParameterValue(TEXT("Snow"), CurSnow);
+	Mid->SetVectorParameterValue(TEXT("Wind"), FLinearColor(CurWind.X, CurWind.Y, CurWind.Z, 0.f));
+}
+
+void UPeregonArtSubsystem::SetWorldParams(float Wetness, float Snow, const FVector& WindCm, float Night)
+{
+	const bool bWeather = FMath::Abs(Wetness - CurWetness) > 0.01f || FMath::Abs(Snow - CurSnow) > 0.01f || !WindCm.Equals(CurWind, 0.5f);
+	const bool bNight = FMath::Abs(Night - CurNight) > 0.01f;
+	if (bWeather)
+	{
+		CurWetness = Wetness;
+		CurSnow = Snow;
+		CurWind = WindCm;
+		WeatherMids.RemoveAllSwap([](const TWeakObjectPtr<UMaterialInstanceDynamic>& M) { return !M.IsValid(); });
+		for (const TWeakObjectPtr<UMaterialInstanceDynamic>& M : WeatherMids)
+		{
+			ApplyWeather(M.Get());
+		}
+	}
+	if (bNight)
+	{
+		CurNight = Night;
+		GlowMids.RemoveAllSwap([](const FGlow& G) { return !G.Mid.IsValid(); });
+		for (const FGlow& G : GlowMids)
+		{
+			G.Mid->SetScalarParameterValue(TEXT("Emissive"), G.Base + G.Glow * CurNight);
+		}
+	}
 }
 
 UTexture2D* UPeregonArtSubsystem::GetTexture(EPeregonTex Type)
@@ -400,14 +620,57 @@ UTexture2D* UPeregonArtSubsystem::Generate(EPeregonTex Type)
 	}
 	Tex->Filter = TF_Nearest;   // пиксели без размытия — PSX
 	Tex->SRGB = true;
-	// Один мип-уровень: собирать мипы вручную у транзиентной текстуры в UE 5.8 небезопасно (падение
-	// с огромным выделением памяти). Рябь вдали гасим крупнее плиткой мира и TSR.
-	Tex->LODGroup = TEXTUREGROUP_Pixels2D;
+	Tex->LODGroup = TEXTUREGROUP_World;
+	FTexturePlatformData* Platform = Tex->GetPlatformData();
 	{
-		FTexture2DMipMap& Mip = Tex->GetPlatformData()->Mips[0];
+		FTexture2DMipMap& Mip = Platform->Mips[0];
 		void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
 		FMemory::Memcpy(Data, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
 		Mip.BulkData.Unlock();
+	}
+	// Мип-карты — от ряби вдали: мелкий узор асфальта и травы на расстоянии усредняется, а не мерцает.
+	// Уровни считаются здесь (среднее 2×2) и кладутся рядом с нулевым; peregon.TextureMips 0 — выключить.
+	if (CVarPeregonTextureMips.GetValueOnGameThread() != 0 && Platform->Mips.Num() == 1)
+	{
+		TArray<FColor> Prev = Pixels;
+		int32 Pw = W;
+		int32 Ph = H;
+		while (Pw > 4 && Ph > 4)
+		{
+			const int32 Nw = Pw / 2;
+			const int32 Nh = Ph / 2;
+			TArray<FColor> Next;
+			Next.SetNumUninitialized(Nw * Nh);
+			for (int32 Y = 0; Y < Nh; ++Y)
+			{
+				for (int32 X = 0; X < Nw; ++X)
+				{
+					uint32 Acc[4] = {0, 0, 0, 0};
+					for (int32 K = 0; K < 4; ++K)
+					{
+						const FColor& P = Prev[(Y * 2 + K / 2) * Pw + X * 2 + K % 2];
+						Acc[0] += P.R;
+						Acc[1] += P.G;
+						Acc[2] += P.B;
+						Acc[3] += P.A;
+					}
+					Next[Y * Nw + X] = FColor(static_cast<uint8>(Acc[0] / 4), static_cast<uint8>(Acc[1] / 4), static_cast<uint8>(Acc[2] / 4),
+						static_cast<uint8>(Acc[3] / 4));
+				}
+			}
+			FTexture2DMipMap* Mip = new FTexture2DMipMap();
+			Mip->SizeX = Nw;
+			Mip->SizeY = Nh;
+			Mip->SizeZ = 1;
+			Mip->BulkData.Lock(LOCK_READ_WRITE);
+			void* Data = Mip->BulkData.Realloc(static_cast<int64>(Next.Num()) * static_cast<int64>(sizeof(FColor)));
+			FMemory::Memcpy(Data, Next.GetData(), Next.Num() * sizeof(FColor));
+			Mip->BulkData.Unlock();
+			Platform->Mips.Add(Mip);
+			Prev = MoveTemp(Next);
+			Pw = Nw;
+			Ph = Nh;
+		}
 	}
 	Tex->UpdateResource();
 	return Tex;
@@ -435,6 +698,49 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeMaterial(UObject* Outer, con
 		Mid->SetScalarParameterValue(TEXT("Emissive"), Look.Emissive);
 		Mid->SetScalarParameterValue(TEXT("WorldUV"), Look.WorldTileCm > 0.f ? 1.f : 0.f);
 		Mid->SetScalarParameterValue(TEXT("TileSize"), Look.WorldTileCm > 0.f ? Look.WorldTileCm : 400.f);
+		if (bPsx3)
+		{
+			// Как поверхность ведёт себя в непогоду, если не сказано явно.
+			float Wet = 0.f;
+			float SnowCover = 0.f;
+			switch (Look.Texture)
+			{
+			case EPeregonTex::Asphalt:
+			case EPeregonTex::RoadMarked: Wet = 1.f; SnowCover = 0.55f; break;
+			case EPeregonTex::Gravel:
+			case EPeregonTex::Dirt:
+			case EPeregonTex::Mud: Wet = 0.8f; SnowCover = 0.9f; break;
+			case EPeregonTex::Grass:
+			case EPeregonTex::GrassTuft: Wet = 0.45f; SnowCover = 1.f; break;
+			case EPeregonTex::Concrete:
+			case EPeregonTex::Plaster:
+			case EPeregonTex::PanelFacade:
+			case EPeregonTex::BrickFacade: Wet = 0.7f; SnowCover = 0.85f; break;
+			case EPeregonTex::RoofMetal: Wet = 1.f; SnowCover = 1.f; break;
+			case EPeregonTex::WoodPlanks: Wet = 0.6f; SnowCover = 0.8f; break;
+			case EPeregonTex::Needles:
+			case EPeregonTex::Leaves:
+			case EPeregonTex::Bush: Wet = 0.3f; SnowCover = 0.75f; break;
+			case EPeregonTex::BirchBark:
+			case EPeregonTex::PineBark: Wet = 0.5f; SnowCover = 0.25f; break;
+			default: break;
+			}
+			Wet = Look.WetMask >= 0.f ? Look.WetMask : Wet;
+			SnowCover = Look.SnowMask >= 0.f ? Look.SnowMask : SnowCover;
+			Mid->SetScalarParameterValue(TEXT("WetMask"), Wet);
+			Mid->SetScalarParameterValue(TEXT("SnowMask"), SnowCover);
+			Mid->SetScalarParameterValue(TEXT("Sway"), Look.Sway);
+			if (Wet > 0.f || SnowCover > 0.f || Look.Sway > 0.f)
+			{
+				ApplyWeather(Mid);
+				WeatherMids.Add(Mid);
+			}
+		}
+		if (Look.NightGlow > 0.f)
+		{
+			Mid->SetScalarParameterValue(TEXT("Emissive"), Look.Emissive + Look.NightGlow * CurNight);
+			GlowMids.Add({Mid, Look.Emissive, Look.NightGlow});
+		}
 	}
 	else
 	{
@@ -663,10 +969,24 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeLabelMaterial(UObject* Outer
 		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World, Context);
 		LabelCache.Add(Key, Target);
 	}
-	UMaterialInstanceDynamic* Mid = MakeMaterial(Outer, FPeregonLook(EPeregonTex::White, FLinearColor::White, 0.7f));
-	if (Mid && bPsx)
+	EnsureBaseMaterial();
+	UMaterialInstanceDynamic* Mid = nullptr;
+	if (bPsx && LabelMaterial)
 	{
-		Mid->SetTextureParameterValue(TEXT("Tex"), Target);
+		Mid = UMaterialInstanceDynamic::Create(LabelMaterial, Outer ? Outer : this);
+		if (Mid)
+		{
+			Mid->SetTextureParameterValue(TEXT("Tex"), Target);
+			Mid->SetVectorParameterValue(TEXT("Color"), FLinearColor::White);
+			Mid->SetScalarParameterValue(TEXT("Roughness"), 0.7f);
+			Mid->SetScalarParameterValue(TEXT("Metallic"), 0.f);
+			Mid->SetScalarParameterValue(TEXT("Emissive"), 0.f);
+			Mid->SetScalarParameterValue(TEXT("WorldUV"), 0.f);
+		}
+	}
+	else
+	{
+		Mid = MakeMaterial(Outer, FPeregonLook(EPeregonTex::White, FLinearColor::White, 0.7f));
 	}
 	return Mid;
 }

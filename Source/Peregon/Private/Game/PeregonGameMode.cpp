@@ -129,6 +129,7 @@ void APeregonGameMode::StartNewGame(const FPeregonRunConfig& Config)
 		GI->TimeOfDayHours = Config.StartHour;
 		GI->Day = 1;
 		GI->ResetInventory();
+		GI->ResetClimate(Config.StartDayOfYear, Config.Seed);
 	}
 	StartSession(Config, nullptr);
 }
@@ -163,6 +164,14 @@ bool APeregonGameMode::ContinueGame()
 		GI->Money = Save->Money;
 		GI->TimeOfDayHours = Save->TimeOfDayHours;
 		GI->Day = Save->Day;
+		if (Save->Version >= 3)
+		{
+			GI->Climate = Save->Climate;
+		}
+		else
+		{
+			GI->ResetClimate(Save->Config.StartDayOfYear + Save->Day - 1, Save->Config.Seed);
+		}
 		if (Save->Version >= 2)
 		{
 			GI->Pockets = Save->Pockets;
@@ -209,6 +218,7 @@ bool APeregonGameMode::SaveGame(const FString& PlaceName)
 	Save->Glovebox = GI->Glovebox;
 	Save->Trunk = GI->Trunk;
 	Save->TraveledMaxS = GI->TraveledMaxS;
+	Save->Climate = GI->Climate;
 	return UGameplayStatics::SaveGameToSlot(Save, UPeregonSaveGame::SlotName, 0);
 }
 

@@ -54,7 +54,9 @@ enum class EPeregonProcedural : uint8
 	StepGravel,
 	StepSoft,
 	Land,
-	Paper
+	Paper,
+	Rain,    // петля: шелест дождя и капли (интенсивность 0..1)
+	Wiper    // разовый: мотор и резинка дворника по стеклу
 };
 
 UCLASS(ClassGroup = Peregon)

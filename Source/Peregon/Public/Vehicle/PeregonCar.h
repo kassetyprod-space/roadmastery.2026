@@ -66,6 +66,8 @@ public:
 	const FPeregonFocus& GetFocus() const { return Focus; }
 	bool IsFirstPerson() const { return bFirstPerson; }
 	bool AreHeadlightsOn() const { return bHeadlights; }
+	// Дворники: 0 — выключены, 1 — медленно, 2 — быстро.
+	int32 GetWiperMode() const { return WiperMode; }
 	bool HasDriver() const { return Driver != nullptr; }
 
 	void EnterCar(APeregonCharacter* Character);
@@ -171,6 +173,8 @@ private:
 	void OnToggleDetails(const FInputActionValue& Value);
 	void OnZoomPressed(const FInputActionValue& Value);
 	void OnZoomReleased(const FInputActionValue& Value);
+	void OnCycleWipers(const FInputActionValue& Value);
+	void UpdateWipers(float DeltaSeconds);
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> Mapping;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ThrottleAction;
@@ -192,6 +196,16 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ParkingBrakeAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> DetailsAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ZoomAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> WipersAction;
+
+	// Дворники и вода на лобовом стекле.
+	UPROPERTY() TObjectPtr<USceneComponent> WiperL;
+	UPROPERTY() TObjectPtr<USceneComponent> WiperR;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> WaterMaterial;
+	int32 WiperMode = 0;
+	float WiperPhase = 0.f;   // 0..1 — один ход туда и обратно
+	float WaterLevel = 0.f;   // 0..1 — сколько воды на стекле
+	float SnowOnGlass = 0.f;  // 0..1 — снежинки
 	bool bZoom = false;
 	float ZoomFov = 0.f;
 

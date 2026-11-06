@@ -5,9 +5,12 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "rgen/Climate.h"
+#include "rgen/Landscape.h"
 #include "rgen/Route.h"
 #include "PeregonRoadWorld.generated.h"
 
+class APeregonSky;
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UPhysicalMaterial;
@@ -34,6 +37,20 @@ enum class EPeregonWorldMat : uint8
 	Leaves,
 	Pole,
 	Far,
+	GrassTuft,
+	Bush,
+	Twigs,
+	FarLand,
+	Ridge,
+	Panel,
+	Brick,
+	CityRoof,
+	LitWindow,
+	Gold,
+	RedPaint,
+	LampGlow,
+	Stele,
+	SteleAccent,
 	Count UMETA(Hidden)
 };
 
@@ -53,6 +70,7 @@ public:
 	void BuildAround(double S);
 
 	const rgen::Route& GetRoute() const { return Route; }
+	const rgen::Landscape& GetLandscape() const { return Landscape; }
 	double GetTrackedS() const { return TrackedS; }
 	double FindS(const FVector& WorldLocation, double Hint = -1.0) const;
 	double LateralOffset(const FVector& WorldLocation, double S) const;
@@ -90,6 +108,13 @@ private:
 		TArray<int32> Triangles;
 		TArray<FVector> Normals;
 		TArray<FVector2D> UVs;
+		TArray<FColor> Colors;
+
+		// Четырёхугольник A→B→C→D (по контуру), лицом к Normal; UV — по углам.
+		void AddQuad(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal, const FVector2D& UvA,
+			const FVector2D& UvC, const FColor& Color = FColor::White, uint8 TopAlpha = 255);
+		// Коробка: основание в Center (низ), оси — Yaw; стены с UV в метрах / Tile.
+		void AddBox(const FVector& BaseCenter, float YawDeg, const FVector& SizeCm, const FVector2D& TileCm, const FColor& Color, bool bTop, bool bBottom);
 	};
 
 	void SetupAssets();
@@ -113,8 +138,31 @@ private:
 
 	UMaterialInterface* Mat(EPeregonWorldMat Type) const;
 
+	// Пейзаж до горизонта и города (PeregonRoadWorldScenery.cpp).
+	void BuildFarTerrain();
+	void UpdateRidges(const FVector& Focus);
+	void BuildCities();
+	void BuildCity(const rgen::Settlement& Town);
+	void BuildStele(FChunk& Chunk, double S, int32 TownIndex);
+	void BuildRegionStele(FChunk& Chunk, double S, const FString& Before, const FString& After);
+	void BuildFoliage(FChunk& Chunk, int32 Index, double S0, double S1);
+	void UpdateSeason(bool bForce);
+	UProceduralMeshComponent* AddProc(TArray<TWeakObjectPtr<UActorComponent>>& Owner, const FMeshBuffers& Data, UMaterialInterface* Material, bool bCollision,
+		bool bShadow = true);
+	UStaticMeshComponent* AddSceneryMesh(UStaticMesh* Mesh, const FTransform& Transform, UMaterialInterface* Material);
+	APeregonSky* FindSky();
+
 	rgen::Route Route;
+	rgen::Landscape Landscape;
 	TMap<int32, FChunk> Chunks;
+	// Постоянная часть мира: дальний рельеф, города, горы на горизонте.
+	TArray<TWeakObjectPtr<UActorComponent>> Scenery;
+	TArray<double> SteleS;  // где стоят стелы городов (по индексу в Landscape.Settlements)
+	FVector RidgeCenter = FVector(1e12);
+	rgen::SeasonLook AppliedSeason;
+	bool bSeasonApplied = false;
+	float SeasonCheckTimer = 0.f;
+	TWeakObjectPtr<APeregonSky> SkyRef;
 	double TrackedS = 0.0;
 	bool bGenerated = false;
 
@@ -129,4 +177,7 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Peregon")
 	TObjectPtr<UStaticMeshComponent> FarGround;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> Ridges;
 };

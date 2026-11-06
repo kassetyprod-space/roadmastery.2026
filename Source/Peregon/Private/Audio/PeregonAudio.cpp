@@ -257,6 +257,10 @@ EPeregonProcedural Fallback(const FString& Event)
 	{
 		return EPeregonProcedural::Paper;
 	}
+	if (Event.StartsWith(TEXT("wiper")))
+	{
+		return EPeregonProcedural::Wiper;
+	}
 	if (Event == TEXT("footstep.gravel") || Event == TEXT("footstep.dirt"))
 	{
 		return EPeregonProcedural::StepGravel;
@@ -606,6 +610,19 @@ float UPeregonSynth::ProceduralSample()
 		const float Grit = (Noise() > 0.995f - 0.004f * FMath::Clamp(Intensity / 20.f, 0.f, 1.f)) ? Noise() : 0.f; // мелкие камешки
 		return (Tone.Process(N) * 0.6f + Brown * 0.1f + Grit * 0.3f) * FMath::Clamp(Intensity / 25.f, 0.f, 1.2f);
 	}
+	case EPeregonProcedural::Rain:
+	{
+		// Шелест (высокочастотный шум) + россыпь капель, чаще при сильном дожде. Intensity 0..1.
+		const float Amount = FMath::Clamp(Intensity, 0.f, 1.f);
+		Hiss.Bandpass(5200.f, 0.5f, Rate);
+		Tone.Lowpass(900.f, 0.7f, Rate);
+		Excite *= 0.993f;
+		if (Noise() > 0.9995f - 0.004f * Amount)
+		{
+			Excite = 0.4f + 0.6f * FMath::Abs(Noise());
+		}
+		return Hiss.Process(N) * 0.35f * Amount + Tone.Process(N * Excite) * 1.4f * Amount;
+	}
 	case EPeregonProcedural::Skid:
 	{
 		// Визг: узкая полоса вокруг ~1 кГц, «гуляет».
@@ -679,6 +696,15 @@ float UPeregonSynth::ProceduralSample()
 		S = (Tone.Process(N) * 1.5f + FMath::Sin(2.f * PI * 70.f * Age) * 0.6f) * Decay(0.06f);
 		Length = 0.35f;
 		break;
+	case EPeregonProcedural::Wiper:
+	{
+		// Гудение моторчика и «вжик» резинки: полоса шума скользит вверх-вниз за ход щётки.
+		const float Sweep = FMath::Sin(PI * FMath::Clamp(Age / 0.55f, 0.f, 1.f));
+		Tone.Bandpass(700.f + 900.f * Sweep, 3.f, Rate);
+		S = Tone.Process(N) * 0.9f * Sweep + FMath::Sin(2.f * PI * 95.f * Age) * 0.12f * Sweep;
+		Length = 0.6f;
+		break;
+	}
 	case EPeregonProcedural::Paper:
 		Tone.Bandpass(4200.f, 0.8f, Rate);
 		S = Tone.Process(N) * 1.2f * (0.5f + 0.5f * FMath::Sin(2.f * PI * 23.f * Age)) * Decay(0.12f);

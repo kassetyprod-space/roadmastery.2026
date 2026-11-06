@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "Game/PeregonInventory.h"
+#include "rgen/Climate.h"
 #include "PeregonGameInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -25,6 +26,53 @@ struct FPeregonRunConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartMoney = 3000.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartHour = 9.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") bool bProvingGround = false;
+	// День года старта (1..365). 258 — 15 сентября, золотая осень.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") int32 StartDayOfYear = 258;
+};
+
+// Погода и время года (сохраняется). Логика — в rgen::Climate.
+USTRUCT(BlueprintType)
+struct FPeregonClimate
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") float DayOfYear = 258.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") uint8 Current = 0;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") uint8 Next = 0;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") float Blend = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") float HoursLeft = 3.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") float Wetness = 0.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") float SnowCover = 0.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") float WindDirDeg = 240.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Climate") int32 Seed = 0x2026;
+
+	rgen::ClimateState ToState() const
+	{
+		rgen::ClimateState S;
+		S.DayOfYear = DayOfYear;
+		constexpr uint8 Last = static_cast<uint8>(static_cast<uint8>(rgen::Weather::Count) - 1);
+		S.Current = static_cast<rgen::Weather>(Current > Last ? Last : Current);
+		S.Next = static_cast<rgen::Weather>(Next > Last ? Last : Next);
+		S.Blend = Blend;
+		S.HoursLeft = HoursLeft;
+		S.Wetness = Wetness;
+		S.SnowCover = SnowCover;
+		S.WindDirDeg = WindDirDeg;
+		S.Seed = static_cast<uint32>(Seed);
+		return S;
+	}
+	void FromState(const rgen::ClimateState& S)
+	{
+		DayOfYear = static_cast<float>(S.DayOfYear);
+		Current = static_cast<uint8>(S.Current);
+		Next = static_cast<uint8>(S.Next);
+		Blend = static_cast<float>(S.Blend);
+		HoursLeft = static_cast<float>(S.HoursLeft);
+		Wetness = static_cast<float>(S.Wetness);
+		SnowCover = static_cast<float>(S.SnowCover);
+		WindDirDeg = static_cast<float>(S.WindDirDeg);
+		Seed = static_cast<int32>(S.Seed);
+	}
 };
 
 UCLASS()
@@ -45,6 +93,20 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "Peregon")
 	int32 Day = 1;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Peregon")
+	FPeregonClimate Climate;
+
+	// Новая партия: дата старта, ясная погода, сухие дороги (снег — по сезону).
+	void ResetClimate(int32 StartDayOfYear, int32 Seed)
+	{
+		Climate = FPeregonClimate();
+		Climate.DayOfYear = static_cast<float>(FMath::Clamp(StartDayOfYear, 1, 365));
+		Climate.Seed = Seed ^ 0x5EA5;
+		const rgen::SeasonLook Look = rgen::Climate::Season(Climate.DayOfYear);
+		Climate.SnowCover = 0.f;
+		Climate.Current = Climate.Next = static_cast<uint8>(Look.GroundSnow > 0.5 ? rgen::Weather::Cloudy : rgen::Weather::Clear);
+	}
 
 	// Вещи: карманы, бардачок, багажник.
 	UPROPERTY(BlueprintReadWrite, Category = "Peregon|Inventory")

@@ -39,6 +39,7 @@
 # key.turn =
 # lights.switch =
 # handbrake =
+# wiper.swipe =            # один ход дворника (мотор + резинка по стеклу)
 
 # --- Пешком
 # footstep.asphalt =
@@ -48,3 +49,7 @@
 # footstep.any =           # общий шаг, если для поверхности своего нет
 # jump.land =
 # map.open =
+
+# --- Природа и погода (петли; громкость по погоде, в салоне глуше)
+# ambience.rain =          # дождь (в PSE — раздел Ambience / Weather)
+# ambience.wind =          # ветер в поле

@@ -146,6 +146,9 @@ public:
 	double MinZ() const { return ZMin; }
 	double MaxZ() const { return ZMax; }
 
+	// Естественный рельеф (−1..1) в точке плана — им же строится дальний рельеф (rgen/Landscape).
+	double NaturalNoise(double X, double Y) const;
+
 private:
 	void BuildPlan();
 	void BuildGuidedPlan();
@@ -153,7 +156,6 @@ private:
 	void BuildPois();
 	void BuildGuidedPois();
 	void AddFlatten(const Poi& Item);
-	double NaturalNoise(double X, double Y) const;
 
 	RouteParams P;
 	std::vector<RouteSample> Samples;

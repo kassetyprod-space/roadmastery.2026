@@ -46,6 +46,13 @@ enum class EPeregonTex : uint8
 	Needles,
 	Leaves,
 	Glass,
+	GrassTuft,    // пучок травы с прозрачностью (альфа)
+	Bush,         // куст с просветами
+	Leaf,         // один лист (листопад)
+	Raindrops,    // капли на стекле
+	PanelFacade,  // панельный дом: шов, окно, балкон — один пролёт 3 × 2.8 м
+	BrickFacade,  // кирпичный дом
+	Clouds,       // бесшовные облака (альфа — плотность), для PSX-неба
 	Count UMETA(Hidden)
 };
 
@@ -71,6 +78,13 @@ struct FPeregonLook
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look") float Emissive = 0.f;
 	// > 0 — мировые UV с этим размером плитки (см): для растянутых боксов.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look") float WorldTileCm = 0.f;
+	// Погода (материал M_PSX3). −1 — по типу текстуры: дорога мокнет, трава и крыши белеют от снега, салон — нет.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look") float WetMask = -1.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look") float SnowMask = -1.f;
+	// Гибкость на ветру (множитель смещения; вес по вершинам — альфа цвета вершин).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look") float Sway = 0.f;
+	// Свечение в темноте (окна домов, фонари): добавляется к Emissive ночью.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Look") float NightGlow = 0.f;
 
 	FPeregonLook() = default;
 	FPeregonLook(EPeregonTex InTexture, const FLinearColor& InTint, float InRoughness = 0.8f, float InMetallic = 0.f)
@@ -107,9 +121,19 @@ public:
 
 	UTexture2D* GetTexture(EPeregonTex Type);
 	UMaterialInstanceDynamic* MakeMaterial(UObject* Outer, const FPeregonLook& Look);
-	// Полупрозрачное стекло (M_PSX2_Glass). Null, если материала нет — тогда стёкла лучше скрыть.
+	// Полупрозрачное стекло (M_PSX3_Glass или M_PSX2_Glass). Null, если материала нет — тогда стёкла лучше скрыть.
 	UMaterialInstanceDynamic* MakeGlassMaterial(UObject* Outer, const FLinearColor& Tint, float Opacity);
+	// Полупрозрачное с текстурой (альфа — прозрачность) и исчезанием ближе NearFadeCm к камере. Только M_PSX3_Glass.
+	UMaterialInstanceDynamic* MakeTranslucent(UObject* Outer, EPeregonTex Texture, const FLinearColor& Tint, float Opacity, float Emissive,
+		float NearFadeCm = -100000.f);
 	bool HasPsxMaterial();
+	// Есть материалы второго поколения (погода, ветер, прозрачность по альфе).
+	bool HasWeatherMaterials();
+
+	// Общая погода для всех материалов мира: мокрость, снег, ветер (см смещения), ночь (0..1, для NightGlow).
+	void SetWorldParams(float Wetness, float Snow, const FVector& WindCm, float Night);
+	float GetWetness() const { return CurWetness; }
+	float GetSnow() const { return CurSnow; }
 
 private:
 	void EnsureBaseMaterial();
@@ -124,6 +148,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> GlassMaterial;
 
+	// Надписи — на непрозрачном M_PSX2 (альфа текстуры-холста не всегда 1, маска M_PSX3 могла бы её вырезать).
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> LabelMaterial;
+
 	UPROPERTY(Transient)
 	TMap<int32, TObjectPtr<UFont>> CanvasFonts;
 
@@ -133,6 +161,23 @@ private:
 	static TWeakObjectPtr<UPeregonArtSubsystem> Instance;
 
 	TArray<FLinearColor> AverageColors;
+
+	struct FGlow
+	{
+		TWeakObjectPtr<UMaterialInstanceDynamic> Mid;
+		float Base = 0.f;
+		float Glow = 0.f;
+	};
+	TArray<TWeakObjectPtr<UMaterialInstanceDynamic>> WeatherMids;
+	TArray<FGlow> GlowMids;
+	float CurWetness = 0.f;
+	float CurSnow = 0.f;
+	FVector CurWind = FVector::ZeroVector;
+	float CurNight = 0.f;
+	void ApplyWeather(UMaterialInstanceDynamic* Mid) const;
+
+	bool bPsx3 = false;
+	bool bGlass3 = false;
 	bool bPsx = false;
 	bool bTriedLoad = false;
 };

@@ -506,17 +506,37 @@ void BuildGreenhouse(MeshSet& M)
 	Glass(WindshieldBase, WindshieldTop, V3(1.f, 0.f, 1.f));
 	Glass(RearGlassBase, RearGlassTop, V3(-1.f, 0.f, 1.f));
 
-	// Дворники в положении покоя: лежат вдоль низа лобового стекла.
+
+	// Плёнка воды на лобовом стекле — снаружи, поверх стекла; её прозрачность задаёт игра (дождь, дворники).
+	{
+		Grid G = SampleGrid(Range(0.f, 1.f, 0.125f), Range(-1.f, 1.f, 0.1f), [](float A, float T) { return Lerp(WindshieldBase(T), WindshieldTop(T), A); },
+			Constant(V3(1.f, 0.f, 1.f)), 0.002f);
+		for (size_t K = 0; K < G.P.size(); ++K)
+		{
+			G.P[K] = G.P[K] - G.N[K] * 0.6f;
+		}
+		EmitGrid(M, Mat::Water, G, 0.025f);
+	}
+}
+
+// Дворники: отдельные узлы, лежат вдоль низа лобового стекла; ось — перпендикуляр к стеклу.
+void BuildWipers(Builder& B)
+{
 	const V3 GlassN = Normalize(V3(1.f, 0.f, 0.7f));
 	auto OnGlass = [&](float T, float A, float Lift) { return Lerp(WindshieldBase(T), WindshieldTop(T), A) + GlassN * Lift; };
 	for (float T0 : {-0.05f, 0.6f})
 	{
-		Lathe(M, Mat::BlackTrim, WindshieldBase(T0) + V3(2.5f, 0.f, 0.4f), V3(0.f, 0.f, 1.f), V3(1.f, 0.f, 0.f), {{1.2f, 0.f}, {1.1f, 1.4f}, {0.f, 1.5f}},
-			10);
-		Tube(M, Mat::BlackTrim, {WindshieldBase(T0) + V3(2.5f, 0.f, 1.6f), OnGlass(T0 - 0.08f, 0.06f, 1.3f), OnGlass(T0 - 0.55f, 0.11f, 1.3f)}, 0.45f,
-			6);
-		Tube(M, Mat::BlackTrim, {OnGlass(T0 - 0.12f, 0.06f, 0.8f), OnGlass(T0 - 0.85f, 0.14f, 0.8f)}, 0.4f, 6);
+		MeshSet M;
+		const V3 Spindle = WindshieldBase(T0) + V3(2.5f, 0.f, 0.4f);
+		Lathe(M, Mat::BlackTrim, Spindle, V3(0.f, 0.f, 1.f), V3(1.f, 0.f, 0.f), {{1.2f, 0.f}, {1.1f, 1.4f}, {0.f, 1.5f}}, 10);
+		Tube(M, Mat::BlackTrim, {WindshieldBase(T0) + V3(2.5f, 0.f, 1.6f), OnGlass(T0 - 0.08f, 0.06f, 1.3f), OnGlass(T0 - 0.45f, 0.1f, 1.3f)}, 0.45f, 6);
+		Tube(M, Mat::BlackTrim, {OnGlass(T0 - 0.1f, 0.06f, 0.8f), OnGlass(T0 - 0.68f, 0.12f, 0.8f)}, 0.4f, 6);
+		B.Add(T0 < 0.f ? Part::WiperL : Part::WiperR, M, Spindle, true);
 	}
+	B.Out.WiperAxis = GlassN;
+	// Щётка лежит влево (−Y). Поворот вокруг оси n на угол θ: d' ≈ d + θ (n × d); n × (−Y) смотрит вниз,
+	// значит поднимает щётку отрицательный угол.
+	B.Out.WiperSweepDeg = -74.f;
 }
 
 void BuildFrontRear(MeshSet& M, Model& Out)
@@ -1074,6 +1094,7 @@ Model BuildSokol()
 		BuildDoor(B, Door);
 	}
 	BuildControls(B);
+	BuildWipers(B);
 	B.Out.SteeringColumnDir = Normalize(V3(-1.f, 0.f, 0.45f));
 	B.Out.DriverEye = V3(-22.f, -35.f, 74.f);
 	B.Out.ExitPoint = V3(-25.f, -150.f, 60.f);
@@ -1109,7 +1130,7 @@ const char* PartName(Part Id)
 {
 	static const char* Names[] = {"Body", "Hood", "Trunk", "DoorFL", "DoorFR", "DoorRL", "DoorRR", "Glovebox", "Steering", "Key", "LightKnob",
 		"GearLever", "Handbrake", "ClutchPedal", "BrakePedal", "GasPedal", "SpeedoNeedle", "TachoNeedle", "FuelNeedle", "TempNeedle", "WheelLeft",
-		"WheelRight"};
+		"WheelRight", "WiperL", "WiperR"};
 	const size_t I = static_cast<size_t>(Id);
 	return I < sizeof(Names) / sizeof(Names[0]) ? Names[I] : "?";
 }
@@ -1117,7 +1138,7 @@ const char* PartName(Part Id)
 const char* MatName(Mat Id)
 {
 	static const char* Names[] = {"Paint", "Chrome", "BlackTrim", "Rubber", "Glass", "Headlamp", "Taillamp", "Indicator", "Interior", "InteriorDark",
-		"Fabric", "Carpet", "Headliner", "GaugeFace", "Needle", "Engine", "Metal", "Plate"};
+		"Fabric", "Carpet", "Headliner", "GaugeFace", "Needle", "Engine", "Metal", "Plate", "Water"};
 	const size_t I = static_cast<size_t>(Id);
 	return I < sizeof(Names) / sizeof(Names[0]) ? Names[I] : "?";
 }

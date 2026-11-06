@@ -64,7 +64,8 @@ void Dump(const vmodel::Model& M, const char* Path)
 		std::fprintf(F, "%s{\"part\":\"%s\",\"tag\":\"%s\",\"c\":[%.2f,%.2f,%.2f],\"h\":[%.2f,%.2f,%.2f]}", K ? "," : "", vmodel::PartName(H.Owner),
 			H.Tag, H.Center.X, H.Center.Y, H.Center.Z, H.HalfSize.X, H.HalfSize.Y, H.HalfSize.Z);
 	}
-	std::fprintf(F, "],\"steeringDir\":[%.4f,%.4f,%.4f]}", M.SteeringColumnDir.X, M.SteeringColumnDir.Y, M.SteeringColumnDir.Z);
+	std::fprintf(F, "],\"steeringDir\":[%.4f,%.4f,%.4f],\"wiperAxis\":[%.4f,%.4f,%.4f],\"wiperSweep\":%.2f}", M.SteeringColumnDir.X,
+		M.SteeringColumnDir.Y, M.SteeringColumnDir.Z, M.WiperAxis.X, M.WiperAxis.Y, M.WiperAxis.Z, M.WiperSweepDeg);
 	std::fclose(F);
 }
 } // namespace
@@ -126,6 +127,42 @@ int main(int Argc, char** Argv)
 	const float CompressedCenterZ = -15.5f;
 	const float WorstReach = (CompressedCenterZ + 21.f) + std::sqrt(28.5f * 28.5f + 9.f * 9.f);
 	Check(WorstReach < 35.5f, "колесо помещается в арку на отбойнике и выкрутке");
+
+	// Дворники: поворот на WiperSweepDeg вокруг WiperAxis поднимает щётку по стеклу и не уводит её с него.
+	for (vmodel::Part Id : {vmodel::Part::WiperL, vmodel::Part::WiperR})
+	{
+		const vmodel::PartMesh* W = M.Find(Id);
+		Check(W != nullptr, std::string("дворник ") + vmodel::PartName(Id));
+		if (!W)
+		{
+			continue;
+		}
+		vmodel::V3 Tip;
+		float Far = 0.f;
+		for (const vmodel::Section& S : W->Sections)
+		{
+			for (const vmodel::V3& V : S.Positions)
+			{
+				const float D = std::sqrt(V.X * V.X + V.Y * V.Y + V.Z * V.Z);
+				if (D > Far)
+				{
+					Far = D;
+					Tip = V;
+				}
+			}
+		}
+		// Родригес: поворот Tip вокруг единичной оси.
+		const vmodel::V3 N = M.WiperAxis;
+		const float A = M.WiperSweepDeg * 3.14159265f / 180.f;
+		const float C = std::cos(A), Sn = std::sin(A);
+		const float Dot = N.X * Tip.X + N.Y * Tip.Y + N.Z * Tip.Z;
+		const vmodel::V3 Cr(N.Y * Tip.Z - N.Z * Tip.Y, N.Z * Tip.X - N.X * Tip.Z, N.X * Tip.Y - N.Y * Tip.X);
+		const vmodel::V3 R(Tip.X * C + Cr.X * Sn + N.X * Dot * (1.f - C), Tip.Y * C + Cr.Y * Sn + N.Y * Dot * (1.f - C), Tip.Z * C + Cr.Z * Sn + N.Z * Dot * (1.f - C));
+		const vmodel::V3 World(R.X + W->Origin.X, R.Y + W->Origin.Y, R.Z + W->Origin.Z);
+		std::printf("%s: длина %.1f см, верх щётки на ходу Z %.1f (в покое %.1f)\n", vmodel::PartName(Id), Far, World.Z, Tip.Z + W->Origin.Z);
+		Check(R.Z > Tip.Z + 20.f, std::string("щётка поднимается по стеклу: ") + vmodel::PartName(Id));
+		Check(World.Z < 85.f && World.X > 50.f, std::string("щётка остаётся на стекле: ") + vmodel::PartName(Id));
+	}
 
 	const char* Tags[] = {"Hood", "Trunk", "DoorFL", "DoorFR", "DoorRL", "DoorRR", "Glovebox", "Key", "Lights", "Handbrake", "Fuel", "GloveInside", "TrunkInside"};
 	for (const char* Tag : Tags)

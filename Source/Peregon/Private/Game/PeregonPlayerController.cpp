@@ -11,6 +11,8 @@
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonRoadWorld.h"
+#include "World/PeregonSky.h"
+#include "EngineUtils.h"
 #include "Widgets/SWeakWidget.h"
 
 APeregonPlayerController::APeregonPlayerController()
@@ -40,6 +42,34 @@ void APeregonPlayerController::SetupInputComponent()
 	}
 	InputComponent->BindKey(EKeys::Tab, IE_Pressed, this, &APeregonPlayerController::ToggleInventory);
 	InputComponent->BindKey(EKeys::M, IE_Pressed, this, &APeregonPlayerController::ToggleMap);
+	InputComponent->BindKey(EKeys::F6, IE_Pressed, this, &APeregonPlayerController::NextWeather);
+	InputComponent->BindKey(EKeys::F7, IE_Pressed, this, &APeregonPlayerController::SkipDays);
+}
+
+void APeregonPlayerController::NextWeather()
+{
+	for (TActorIterator<APeregonSky> It(GetWorld()); It; ++It)
+	{
+		It->CycleWeather();
+		if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+		{
+			GM->Toast(FString::Printf(TEXT("Погода меняется… %s"), *It->DescribeWeather()), 2.5f);
+		}
+		break;
+	}
+}
+
+void APeregonPlayerController::SkipDays()
+{
+	for (TActorIterator<APeregonSky> It(GetWorld()); It; ++It)
+	{
+		It->AdvanceDays(15);
+		if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+		{
+			GM->Toast(FString::Printf(TEXT("Дата: %s"), *It->DescribeDate()), 2.5f);
+		}
+		break;
+	}
 }
 
 void APeregonPlayerController::EndPlay(const EEndPlayReason::Type Reason)

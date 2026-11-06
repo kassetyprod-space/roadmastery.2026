@@ -15,7 +15,7 @@ class PEREGON_API UPeregonSaveGame : public USaveGame
 public:
 	static const FString SlotName;
 
-	UPROPERTY() int32 Version = 2;
+	UPROPERTY() int32 Version = 3;
 	UPROPERTY() FPeregonRunConfig Config;
 	UPROPERTY() FTransform CarTransform;
 	UPROPERTY() FPeregonCarState CarState;
@@ -29,4 +29,6 @@ public:
 	UPROPERTY() FPeregonContainer Glovebox;
 	UPROPERTY() FPeregonContainer Trunk;
 	UPROPERTY() float TraveledMaxS = 0.f;
+	// С версии 3: погода и время года.
+	UPROPERTY() FPeregonClimate Climate;
 };

@@ -47,6 +47,9 @@ public:
 	bool IsPanelOpen() const { return PanelContainer.IsValid(); }
 	void ToggleInventory();
 	void ToggleMap();
+	// Проверка погоды и сезонов: F6 — следующая погода, F7 — на 15 дней вперёд.
+	void NextWeather();
+	void SkipDays();
 
 	// Вещи. Storage::None — карманы.
 	FPeregonContainer* GetContainer(EPeregonStorage Storage) const;
