@@ -53,6 +53,7 @@ enum class EPeregonTex : uint8
 	PanelFacade,  // панельный дом: шов, окно, балкон — один пролёт 3 × 2.8 м
 	BrickFacade,  // кирпичный дом
 	Clouds,       // бесшовные облака (альфа — плотность), для PSX-неба
+	GlassDirt,    // стекло с пылью и разводами (альфа — плотность); видно и изнутри
 	Count UMETA(Hidden)
 };
 

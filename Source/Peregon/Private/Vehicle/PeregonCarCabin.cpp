@@ -16,13 +16,16 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonRoadWorld.h"
+#include "World/PeregonSky.h"
+#include "ProceduralMeshComponent.h"
 
 namespace PeregonCabin
 {
 // Глаза сидящего: водитель, переднее правое, заднее левое, заднее правое.
 const FVector SeatEyes[] = {FVector(-22.f, -35.f, 74.f), FVector(-22.f, 35.f, 74.f), FVector(-98.f, -35.f, 72.f), FVector(-98.f, 35.f, 72.f)};
 const TCHAR* SeatNames[] = {TEXT("за руль"), TEXT("на переднее сиденье"), TEXT("назад, слева"), TEXT("назад, справа")};
-const FVector DomeLocation(-35.f, 0.f, 83.f);
+// Плафон — тот, что в модели на потолке (между передними сиденьями).
+const FVector DomeLocation(-10.f, 0.f, 86.f);
 const FVector RadioLocation(74.f, 0.f, 30.f);
 } // namespace PeregonCabin
 
@@ -61,18 +64,14 @@ void APeregonCar::BuildCabinExtras()
 		}
 		return Mid;
 	};
-	// Плафон на потолке и лампа в нём.
-	FPeregonLook DomeLook(EPeregonTex::Plastic, FLinearColor(0.95f, 0.92f, 0.8f), 0.4f);
-	DomeLook.WetMask = 0.f;
-	DomeLook.SnowMask = 0.f;
-	DomeMaterial = AddPlate(TEXT("DomeLamp"), PeregonCabin::DomeLocation, FVector(16.f, 10.f, 1.6f), DomeLook);
+	// Лампа — прямо в плафоне модели (его материал светится, когда она горит): жёлтая и тусклая, как лампочка накаливания.
 	DomeLight = NewObject<UPointLightComponent>(this, TEXT("DomeLight"));
 	DomeLight->SetupAttachment(Body);
-	DomeLight->SetRelativeLocation(PeregonCabin::DomeLocation - FVector(0.f, 0.f, 4.f));
+	DomeLight->SetRelativeLocation(PeregonCabin::DomeLocation - FVector(0.f, 0.f, 2.5f));
 	DomeLight->SetIntensityUnits(ELightUnits::Candelas);
-	DomeLight->SetIntensity(0.9f);
-	DomeLight->SetAttenuationRadius(240.f);
-	DomeLight->SetLightColor(FLinearColor(1.f, 0.85f, 0.6f));
+	DomeLight->SetIntensity(0.45f);
+	DomeLight->SetAttenuationRadius(200.f);
+	DomeLight->SetLightColor(FLinearColor(1.f, 0.72f, 0.32f));
 	DomeLight->SetCastShadows(false);
 	DomeLight->SetVisibility(false);
 	DomeLight->RegisterComponent();
@@ -137,6 +136,28 @@ void APeregonCar::UpdateCabin(float DeltaSeconds)
 	}
 
 	// Радио: в салоне — громко и чисто, снаружи — глухо и тише с расстоянием. Шум эфира — вдали от городов.
+	// Плафон «по дверям»: горит, пока открыта любая дверь.
+	if (DomeMode == 0)
+	{
+		bool bOpenDoor = false;
+		for (const FPeregonMovingPart& Moving : MovingParts)
+		{
+			bOpenDoor |= Moving.Tag.ToString().StartsWith(TEXT("Door")) && Moving.Alpha > 0.05f;
+		}
+		if (bOpenDoor != bDome)
+		{
+			bDome = bOpenDoor;
+			if (DomeLight)
+			{
+				DomeLight->SetVisibility(bDome);
+			}
+			if (DomeMaterial)
+			{
+				DomeMaterial->SetScalarParameterValue(TEXT("Emissive"), bDome ? 2.f : 0.f);
+			}
+		}
+	}
+
 	if (Radio)
 	{
 		FVector Listener = GetActorLocation();
@@ -150,7 +171,7 @@ void APeregonCar::UpdateCabin(float DeltaSeconds)
 			bListenerInside = PC->GetPawn() == this && bFirstPerson;
 		}
 		const float Distance = static_cast<float>(FVector::Dist(Listener, GetActorLocation()));
-		const float Volume = bListenerInside ? 0.75f : 0.75f * FMath::Clamp(1.f - Distance / 2500.f, 0.f, 1.f);
+		const float Volume = RadioVolume * (bListenerInside ? 1.f : FMath::Clamp(1.f - Distance / 2500.f, 0.f, 1.f));
 		float Static = 0.1f;
 		if (!RoadWorldRef.IsValid())
 		{
@@ -187,7 +208,7 @@ void APeregonCar::SetDomeLight(bool bOn)
 	}
 	if (DomeMaterial)
 	{
-		DomeMaterial->SetScalarParameterValue(TEXT("Emissive"), bOn ? 4.f : 0.f);
+		DomeMaterial->SetScalarParameterValue(TEXT("Emissive"), bOn ? 2.f : 0.f);
 	}
 	PeregonAudio::PlayEvent(this, TEXT("lights.switch"), GetActorTransform().TransformPosition(PeregonCabin::DomeLocation), 0.4f, 1.4f);
 }
@@ -276,7 +297,148 @@ void APeregonCar::OnRadioNext(const FInputActionValue&)
 	}
 }
 
-void APeregonCar::OnDome(const FInputActionValue&) { SetDomeLight(!bDome); }
+// O: по дверям → горит → выключен.
+void APeregonCar::OnDome(const FInputActionValue&)
+{
+	DomeMode = (DomeMode + 1) % 3;
+	SetDomeLight(DomeMode == 1);
+	if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+	{
+		static const TCHAR* Modes[] = {TEXT("Плафон: по дверям"), TEXT("Плафон: горит"), TEXT("Плафон: выключен")};
+		GM->Toast(Modes[DomeMode], 1.2f);
+	}
+}
+
+int32 APeregonCar::WindowIndex(const UPrimitiveComponent* Part) const
+{
+	static const FName Tags[] = {FName(TEXT("WindowFL")), FName(TEXT("WindowFR")), FName(TEXT("WindowRL")), FName(TEXT("WindowRR"))};
+	for (int32 K = 0; K < 4; ++K)
+	{
+		if (Part && Part->ComponentHasTag(Tags[K]))
+		{
+			return K;
+		}
+	}
+	return -1;
+}
+
+void APeregonCar::OnWheel(const FInputActionValue& Value)
+{
+	// Колесо мыши по тому, на что смотрим: ручка стеклоподъёмника, громкость, переключение песни.
+	const float Delta = Value.Get<float>();
+	const UPrimitiveComponent* Part = Focus.Part.Get();
+	if (!Part || FMath::IsNearlyZero(Delta) || Focus.Actor.Get() != this)
+	{
+		return;
+	}
+	APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	const int32 Win = WindowIndex(Part);
+	if (Win >= 0)
+	{
+		const float Prev = WindowOpen[Win];
+		WindowOpen[Win] = FMath::Clamp(WindowOpen[Win] - Delta * 0.1f, 0.f, 1.f);
+		if (!FMath::IsNearlyEqual(Prev, WindowOpen[Win]))
+		{
+			PeregonAudio::PlayEvent(this, TEXT("window.crank"), Part->GetComponentLocation(), 0.3f, 1.f + 0.2f * Delta);
+		}
+		return;
+	}
+	if (Radio && Part->ComponentHasTag(TEXT("RadioVol")))
+	{
+		if (!Radio->IsPowered())
+		{
+			Radio->SetPower(true);
+		}
+		RadioVolume = FMath::Clamp(RadioVolume + Delta * 0.05f, 0.f, 1.f);
+		if (GM)
+		{
+			GM->Toast(FString::Printf(TEXT("Громкость %d%%"), FMath::RoundToInt(RadioVolume * 100.f)), 0.8f);
+		}
+		return;
+	}
+	if (Radio && Part->ComponentHasTag(TEXT("RadioTune")))
+	{
+		if (!Radio->IsPowered())
+		{
+			Radio->SetPower(true);
+		}
+		Delta > 0.f ? Radio->NextTrack() : Radio->PrevTrack();
+		if (GM)
+		{
+			GM->Toast(FString::Printf(TEXT("Радио: %s"), *Radio->GetTrackName()), 2.f);
+		}
+	}
+}
+
+void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
+{
+	// Стёкла дверей ходят вниз до 36 см (в дверь).
+	for (int32 K = 0; K < WindowGlass.Num() && K < 4; ++K)
+	{
+		if (UProceduralMeshComponent* Win = WindowGlass[K])
+		{
+			Win->SetRelativeLocation(FVector(0.f, 0.f, -36.f * WindowOpen[K]));
+		}
+	}
+	const FPeregonTelemetry T = Movement->GetTelemetry();
+	EngineWarm = FMath::Clamp(EngineWarm + DeltaSeconds * (T.bEngineRunning ? 1.f / 240.f : -1.f / 900.f), 0.f, 1.f);
+	float Rain = 0.f;
+	float Temperature = 15.f;
+	for (TActorIterator<APeregonSky> It(GetWorld()); It; ++It)
+	{
+		Rain = static_cast<float>(It->GetWeather().Rain + It->GetWeather().Snow);
+		Temperature = It->GetTemperature();
+		break;
+	}
+	// Запотевание: в холод и сырость, когда в машине кто-то есть и окна закрыты; печка и открытые окна сушат.
+	const float Open = (WindowOpen[0] + WindowOpen[1] + WindowOpen[2] + WindowOpen[3]) * 0.25f;
+	const float Cold = FMath::SmoothStep(14.f, 2.f, Temperature);
+	const float Humid = Rain > 0.05f ? 1.f : 0.45f;
+	const float Breath = Controller ? 1.f : 0.f;
+	FogLevel = FMath::Clamp(FogLevel + DeltaSeconds * (Breath * Cold * Humid * (1.f - FMath::Min(1.f, Open * 3.f)) * 0.01f
+		- EngineWarm * 0.012f - Open * 0.06f - 0.0015f), 0.f, 1.f);
+
+	// Грязь: пыль с гравия, брызги с мокрой и грунтовой дороги; дождь понемногу смывает.
+	const float Speed = FMath::Abs(Movement->GetForwardSpeed());
+	const float Rough = Movement->GetSurfaceRoughness();
+	const UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	const float Wet = Art ? Art->GetWetness() : 0.f;
+	DirtLevel = FMath::Clamp(DirtLevel + DeltaSeconds * (FMath::Min(Speed, 30.f) / 25.f * (0.0015f + 0.02f * Rough + 0.008f * Wet) - Rain * 0.003f), 0.f, 1.f);
+	if (FMath::Abs(DirtLevel - AppliedDirt) > 0.03f)
+	{
+		ApplyDirt();
+	}
+	if (GlassMaterial)
+	{
+		const FLinearColor Clean(0.42f, 0.5f, 0.52f);
+		FLinearColor Tint = FMath::Lerp(Clean, FLinearColor(0.85f, 0.87f, 0.88f), FogLevel);
+		Tint = FMath::Lerp(Tint, FLinearColor(0.45f, 0.38f, 0.3f), DirtLevel * 0.35f);
+		GlassMaterial->SetVectorParameterValue(TEXT("Color"), Tint);
+		GlassMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.3f + 0.5f * FogLevel + 0.15f * DirtLevel);
+	}
+}
+
+void APeregonCar::ApplyDirt()
+{
+	AppliedDirt = DirtLevel;
+	const FLinearColor Mud(0.42f, 0.34f, 0.25f);
+	for (const FDirtSection& Dirty : DirtSections)
+	{
+		UProceduralMeshComponent* Mesh = Dirty.Mesh.Get();
+		if (!Mesh)
+		{
+			continue;
+		}
+		TArray<FColor> Colors;
+		Colors.SetNumUninitialized(Dirty.Vertices.Num());
+		for (int32 K = 0; K < Colors.Num(); ++K)
+		{
+			const float A = FMath::Clamp(DirtLevel * Dirty.Mask[K] * 1.3f, 0.f, 0.85f);
+			Colors[K] = FMath::Lerp(FLinearColor::White, Mud, A).ToFColor(false);
+		}
+		Mesh->UpdateMeshSection(Dirty.Section, Dirty.Vertices, Dirty.Normals, Dirty.UVs, Colors, TArray<FProcMeshTangent>());
+	}
+}
 void APeregonCar::OnHornPressed(const FInputActionValue&) { bHorn = CanDrive(); }
 void APeregonCar::OnHornReleased(const FInputActionValue&) { bHorn = false; }
 void APeregonCar::OnBlinkLeft(const FInputActionValue&) { SetBlinkers(BlinkMode == 1 ? 0 : 1); }

@@ -60,6 +60,9 @@ struct PEREGON_API FPeregonKitMaterials
 	UMaterialInterface* Needles = nullptr;
 	UMaterialInterface* BirchBark = nullptr;
 	UMaterialInterface* PineBark = nullptr;
+	UMaterialInterface* Asphalt = nullptr;
+	UMaterialInterface* Dirt = nullptr;
+	UMaterialInterface* Paint = nullptr;      // белая краска — оттенок задаёт цвет вершин
 
 	static FPeregonKitMaterials Create(UObject* Outer);
 };
@@ -79,6 +82,13 @@ public:
 
 	// Город: многоэтажки (со светом в окнах), цеха, трубы, храм, мачта.
 	void Buildings(const std::vector<rgen::Building>& List);
+	// Дворовые проезды (асфальт с бортиком вниз, по ним можно ехать) и фонари вдоль них.
+	void Streets(const std::vector<rgen::Street>& List);
+	// Деревня: огород с грядками, теплица, стог сена, грунтовка от A до B (по точкам земли).
+	void Garden(const FVector& Base, const FRotator& Rot);
+	void Greenhouse(const FVector& Base, const FRotator& Rot);
+	void Haystack(const FVector& Base);
+	void DirtRoad(const TArray<FVector>& Points, float WidthCm);
 	// Стела на въезде в город. Base — точка у земли, Rot — лицом к водителю. Size как у rgen::Settlement.
 	void CityStele(const FVector& Base, const FRotator& Rot, const FString& Name, int32 Size, const FString& Year, bool bLeaving);
 	// Стела на границе областей: спереди — After, сзади — Before.
@@ -104,6 +114,12 @@ public:
 	static UStaticMesh* Cone();
 
 private:
+	class UInstancedStaticMeshComponent* Instanced(UStaticMesh* Mesh, UMaterialInterface* Material, bool bCollision, bool bShadow = true);
+	// Двор многоэтажки: машины у подъездов, лавочки, мусорные баки, берёзы.
+	void Yard(const rgen::Building& B, FPeregonMeshBuffers& Props, FPeregonMeshBuffers& Wheels);
+	// Деревья во дворах — инстансами (сотни штук на город).
+	class UInstancedStaticMeshComponent* YardTrunks = nullptr;
+	class UInstancedStaticMeshComponent* YardCrowns = nullptr;
 	AActor* Owner;
 	USceneComponent* Root;
 	TArray<TWeakObjectPtr<UActorComponent>>& Out;

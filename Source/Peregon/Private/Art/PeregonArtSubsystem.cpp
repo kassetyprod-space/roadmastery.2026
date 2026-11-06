@@ -122,6 +122,7 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 	case EPeregonTex::PanelFacade:
 	case EPeregonTex::BrickFacade: W = 32; H = 32; break;
 	case EPeregonTex::Clouds: W = H = 128; break;
+	case EPeregonTex::GlassDirt: W = H = 64; break;
 	default: break;
 	}
 	Px.SetNumUninitialized(W * H);
@@ -409,6 +410,16 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 				{
 					C = Rgb(210.f, 200.f, 186.f); // перемычка
 				}
+				break;
+			}
+			case EPeregonTex::GlassDirt:
+			{
+				// Почти прозрачное стекло: пыль пятнами, засохшие капли, разводы — блики видно и из салона.
+				const float Dust = 0.5f * TileNoise(X, Y, 16, W, H, 231) + 0.5f * TileNoise(X, Y, 4, W, H, 232);
+				const float Streak = FMath::Max(0.f, FMath::Sin((static_cast<float>(X) * 0.35f + static_cast<float>(Y) * 0.12f)) - 0.85f) * 4.f;
+				const float Speck = Rand(X, Y, 233) > 0.985f ? 0.6f : 0.f;
+				const float A = FMath::Clamp(0.55f + 0.35f * Dust + 0.25f * Streak + Speck, 0.f, 1.f);
+				C = Rgba(205.f + 30.f * Dust, 208.f + 25.f * Dust, 200.f + 20.f * Dust, 255.f * A);
 				break;
 			}
 			case EPeregonTex::Clouds:

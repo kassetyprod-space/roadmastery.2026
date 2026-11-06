@@ -342,6 +342,9 @@ FPeregonKitMaterials APeregonRoadWorld::KitMaterials() const
 	K.Needles = Mat(EPeregonWorldMat::Needles);
 	K.BirchBark = Mat(EPeregonWorldMat::BirchBark);
 	K.PineBark = Mat(EPeregonWorldMat::PineBark);
+	K.Asphalt = Mat(EPeregonWorldMat::Pad);
+	K.Dirt = Mat(EPeregonWorldMat::Shoulder);
+	K.Paint = Mat(EPeregonWorldMat::VertexPaint);
 	return K;
 }
 
@@ -349,6 +352,7 @@ void APeregonRoadWorld::BuildCity(const rgen::Settlement& Town)
 {
 	FPeregonKit Kit(this, RootComponent, Scenery, KitMaterials());
 	Kit.Buildings(Town.Buildings);
+	Kit.Streets(Town.Streets);
 
 	// Фонари вдоль дороги в черте города: ночью светятся.
 	const double Half = Route.RoadHalfWidth();

@@ -50,6 +50,8 @@ public:
 	// Проверка погоды и сезонов: F6 — следующая погода, F7 — на 15 дней вперёд.
 	void NextWeather();
 	void SkipDays();
+	// F8 — часы на час вперёд (временно, для проверки освещения).
+	void SkipHour();
 
 	// Вещи. Storage::None — карманы.
 	FPeregonContainer* GetContainer(EPeregonStorage Storage) const;

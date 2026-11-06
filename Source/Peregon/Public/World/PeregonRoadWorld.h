@@ -52,6 +52,7 @@ enum class EPeregonWorldMat : uint8
 	LampGlow,
 	Stele,
 	SteleAccent,
+	VertexPaint,
 	Count UMETA(Hidden)
 };
 

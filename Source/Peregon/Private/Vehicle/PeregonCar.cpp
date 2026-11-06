@@ -167,8 +167,9 @@ APeregonCar::APeregonCar()
 		FVector Center;
 		FVector Half;
 	};
-	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-35.f, 0.f, 82.f), FVector(9.f, 7.f, 3.f)},
-		{TEXT("Radio"), Body.Get(), FVector(74.f, 0.f, 30.f), FVector(3.f, 10.f, 4.f)},
+	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 85.5f), FVector(7.f, 5.f, 2.5f)},
+		{TEXT("RadioVol"), Body.Get(), FVector(73.f, -5.f, 30.f), FVector(3.f, 5.f, 4.f)},
+		{TEXT("RadioTune"), Body.Get(), FVector(73.f, 5.f, 30.f), FVector(3.f, 5.f, 4.f)},
 		{TEXT("Horn"), SteeringPivot.Get(), FVector::ZeroVector, FVector(4.f, 7.f, 7.f)}};
 	for (const FExtraHit& E : Extras)
 	{
@@ -308,7 +309,9 @@ void APeregonCar::UpdateSounds(float DeltaSeconds, const FPeregonTelemetry& T)
 			bDoorsClosed = false;
 		}
 	}
-	const bool bCabin = bFirstPerson && Controller && bDoorsClosed;
+	// Открытое окно — улица слышна почти как снаружи.
+	const float MaxWindow = FMath::Max(FMath::Max(WindowOpen[0], WindowOpen[1]), FMath::Max(WindowOpen[2], WindowOpen[3]));
+	const bool bCabin = bFirstPerson && Controller && bDoorsClosed && MaxWindow < 0.3f;
 	for (UPeregonSynth* Voice : {EngineSound.Get(), TireSound.Get(), WindSound.Get(), SkidSound.Get()})
 	{
 		Voice->SetMuffled(bCabin);
@@ -393,7 +396,13 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	const vmodel::Mat M = static_cast<vmodel::Mat>(Slot);
 	if (M == vmodel::Mat::Glass)
 	{
-		return Art->MakeGlassMaterial(this, FLinearColor(0.42f, 0.5f, 0.52f), 0.22f);
+		// Пыль и разводы на стекле (альфа текстуры): стекло видно и изнутри; запотевание и грязь — UpdateGlassAndDirt.
+		GlassMaterial = Art->MakeGlassMaterial(this, FLinearColor(0.42f, 0.5f, 0.52f), 0.3f);
+		if (GlassMaterial && Art->HasWeatherMaterials())
+		{
+			GlassMaterial->SetTextureParameterValue(TEXT("Tex"), Art->GetTexture(EPeregonTex::GlassDirt));
+		}
+		return GlassMaterial;
 	}
 	if (M == vmodel::Mat::Water)
 	{
@@ -416,6 +425,7 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	case vmodel::Mat::Fabric: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.34f, 0.16f, 0.08f), 0.95f); break;
 	case vmodel::Mat::Carpet: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.09f, 0.08f, 0.07f), 1.f); break;
 	case vmodel::Mat::Headliner: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.6f, 0.58f, 0.52f), 0.95f); break;
+	case vmodel::Mat::Dome: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(1.f, 0.88f, 0.6f), 0.4f); break;
 	case vmodel::Mat::GaugeFace: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.85f, 0.83f, 0.74f), 0.6f); break;
 	case vmodel::Mat::Needle: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.95f, 0.3f, 0.05f), 0.5f); break;
 	case vmodel::Mat::Engine: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.16f, 0.16f, 0.17f), 0.5f, 0.7f); break;
@@ -434,6 +444,10 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	}
 	Look.SnowMask = 0.f;
 	UMaterialInstanceDynamic* Mid = Art->MakeMaterial(this, Look);
+	if (M == vmodel::Mat::Dome)
+	{
+		DomeMaterial = Mid;
+	}
 	if (Mid && (M == vmodel::Mat::Headlamp || M == vmodel::Mat::Taillamp))
 	{
 		LampMaterials.Add(Mid);
@@ -456,7 +470,11 @@ void APeregonCar::BuildModelMeshes()
 		SlotMaterials.Add(MakeSlotMaterial(static_cast<uint8>(Slot)));
 	}
 
+	WindowGlass.SetNum(4);
+	DirtSections.Reset();
 	auto Spawn = [&](const vmodel::PartMesh& Part, USceneComponent* Parent, const FString& Name) {
+		const int32 Door = Part.Id == vmodel::Part::DoorFL ? 0 : (Part.Id == vmodel::Part::DoorFR ? 1 : (Part.Id == vmodel::Part::DoorRL ? 2 : (Part.Id == vmodel::Part::DoorRR ? 3 : -1)));
+		const bool bWheel = Part.Id == vmodel::Part::WheelLeft || Part.Id == vmodel::Part::WheelRight;
 		UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this, *Name);
 		Mesh->SetupAttachment(Parent);
 		Mesh->SetMobility(EComponentMobility::Movable);
@@ -504,7 +522,50 @@ void APeregonCar::BuildModelMeshes()
 				}
 				continue;
 			}
+			if (Door >= 0 && S.Material == vmodel::Mat::Glass)
+			{
+				// Стекло двери — отдельный узел: его опускает ручка стеклоподъёмника.
+				UProceduralMeshComponent* Win = NewObject<UProceduralMeshComponent>(this, *FString::Printf(TEXT("WindowGlass%d"), Door));
+				Win->SetupAttachment(Parent);
+				Win->SetMobility(EComponentMobility::Movable);
+				Win->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Win->SetCanEverAffectNavigation(false);
+				Win->RegisterComponent();
+				Win->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+				if (UMaterialInterface* GlassMat = SlotMaterials[static_cast<int32>(S.Material)])
+				{
+					Win->SetMaterial(0, GlassMat);
+				}
+				else
+				{
+					Win->SetMeshSectionVisible(0, false);
+				}
+				WindowGlass[Door] = Win;
+				continue;
+			}
 			Mesh->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+			// Снаружи кузов пачкается: низ и колёса сильнее, пятнами.
+			const bool bExterior = S.Material == vmodel::Mat::Paint || S.Material == vmodel::Mat::Chrome || S.Material == vmodel::Mat::BlackTrim ||
+				S.Material == vmodel::Mat::Rubber || S.Material == vmodel::Mat::Plate || S.Material == vmodel::Mat::Headlamp || S.Material == vmodel::Mat::Taillamp;
+			if (bExterior)
+			{
+				FDirtSection& Dirty = DirtSections.AddDefaulted_GetRef();
+				Dirty.Mesh = Mesh;
+				Dirty.Section = SectionIndex;
+				Dirty.Vertices = Vertices;
+				Dirty.Normals = Normals;
+				Dirty.UVs = UVs;
+				Dirty.Mask.SetNumUninitialized(N);
+				const float OriginZ = bWheel ? 0.f : Part.Origin.Z;
+				for (int32 K = 0; K < N; ++K)
+				{
+					const FVector& V = Vertices[K];
+					const float Height = bWheel ? 0.f : static_cast<float>(V.Z) + OriginZ;
+					const float Low = FMath::Clamp(1.f - (Height - 8.f) / 55.f, 0.12f, 1.f);
+					const float Blot = 0.6f + 0.4f * (0.5f + 0.5f * FMath::PerlinNoise3D(FVector(V) * 0.08f + FVector(OriginZ)));
+					Dirty.Mask[K] = Low * Blot;
+				}
+			}
 			UMaterialInterface* Material = SlotMaterials[static_cast<int32>(S.Material)];
 			if (Material)
 			{
@@ -602,6 +663,7 @@ void APeregonCar::Tick(float DeltaSeconds)
 	UpdateCockpit(DeltaSeconds, T);
 	UpdateWipers(DeltaSeconds);
 	UpdateCabin(DeltaSeconds);
+	UpdateGlassAndDirt(DeltaSeconds);
 	UpdateSounds(DeltaSeconds, T);
 	if (IsPlayerControlled())
 	{
@@ -874,12 +936,23 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 		}
 		if (Part->ComponentHasTag(TEXT("Dome")))
 		{
-			return bDome ? FString(TEXT("Выключить плафон (O)")) : FString(TEXT("Включить плафон (O)"));
+			static const TCHAR* Modes[] = {TEXT("Плафон: по дверям"), TEXT("Плафон: горит"), TEXT("Плафон: выключен")};
+			return FString::Printf(TEXT("%s · переключить (O)"), Modes[FMath::Clamp(DomeMode, 0, 2)]);
 		}
-		if (Part->ComponentHasTag(TEXT("Radio")))
+		if (Part->ComponentHasTag(TEXT("RadioVol")))
 		{
-			return Radio && Radio->IsPowered() ? FString::Printf(TEXT("Радио: %s · выключить (N), дальше (J)"), *Radio->GetTrackName())
-											   : FString(TEXT("Включить радио (N)"));
+			return Radio && Radio->IsPowered() ? FString::Printf(TEXT("Громкость %d%% — колесо мыши · ЛКМ выключить"), FMath::RoundToInt(RadioVolume * 100.f))
+											   : FString(TEXT("Включить радио (ЛКМ / N)"));
+		}
+		if (Part->ComponentHasTag(TEXT("RadioTune")))
+		{
+			return Radio && Radio->IsPowered() ? FString::Printf(TEXT("%s — колесо мыши: другая песня"), *Radio->GetTrackName())
+											   : FString(TEXT("Включить радио (ЛКМ / N)"));
+		}
+		const int32 Win = WindowIndex(Part);
+		if (Win >= 0)
+		{
+			return FString::Printf(TEXT("Стекло: колесо мыши (опущено на %d%%)"), FMath::RoundToInt(WindowOpen[Win] * 100.f));
 		}
 		if (Part->ComponentHasTag(TEXT("Horn")))
 		{
@@ -981,9 +1054,9 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		}
 		else if (Part->ComponentHasTag(TEXT("Dome")))
 		{
-			SetDomeLight(!bDome);
+			OnDome(FInputActionValue());
 		}
-		else if (Part->ComponentHasTag(TEXT("Radio")))
+		else if (Part->ComponentHasTag(TEXT("RadioVol")) || Part->ComponentHasTag(TEXT("RadioTune")))
 		{
 			OnRadioPower(FInputActionValue());
 		}
@@ -1114,6 +1187,7 @@ void APeregonCar::BuildInput()
 	BlinkRightAction = MakeAction(TEXT("IA_Car_BlinkRight"), EInputActionValueType::Boolean);
 	HazardAction = MakeAction(TEXT("IA_Car_Hazard"), EInputActionValueType::Boolean);
 	SeatAction = MakeAction(TEXT("IA_Car_Seat"), EInputActionValueType::Boolean);
+	WheelAction = MakeAction(TEXT("IA_Car_Wheel"), EInputActionValueType::Axis1D);
 
 	Mapping = NewObject<UInputMappingContext>(this, TEXT("IMC_Car"));
 	auto Map = [this](UInputAction* Action, const FKey& Key, bool bNegate = false, bool bDeadZone = false) {
@@ -1180,6 +1254,7 @@ void APeregonCar::BuildInput()
 	Map(BlinkRightAction, EKeys::X);
 	Map(HazardAction, EKeys::Y);
 	Map(SeatAction, EKeys::T);
+	Map(WheelAction, EKeys::MouseWheelAxis);
 }
 
 void APeregonCar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -1230,6 +1305,7 @@ void APeregonCar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	EIC->BindAction(BlinkRightAction, ETriggerEvent::Started, this, &APeregonCar::OnBlinkRight);
 	EIC->BindAction(HazardAction, ETriggerEvent::Started, this, &APeregonCar::OnHazard);
 	EIC->BindAction(SeatAction, ETriggerEvent::Started, this, &APeregonCar::OnNextSeat);
+	EIC->BindAction(WheelAction, ETriggerEvent::Triggered, this, &APeregonCar::OnWheel);
 }
 
 void APeregonCar::PawnClientRestart()

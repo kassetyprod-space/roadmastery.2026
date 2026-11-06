@@ -313,6 +313,17 @@ int main()
 			Check(Kemerovo->Buildings.size() > 150, "Кемерово — сотни домов", static_cast<double>(Kemerovo->Buildings.size()));
 			Check(High > 40, "многоэтажки в Кемерово (силуэт города)", High);
 			Check(Chimneys >= 2 && Churches == 1, "заводские трубы и храм", Chimneys);
+			int Garages = 0, Shops = 0, Playgrounds = 0;
+			for (const Building& B : Kemerovo->Buildings)
+			{
+				Garages += B.Kind == BuildingKind::Garages ? 1 : 0;
+				Shops += B.Kind == BuildingKind::Shop ? 1 : 0;
+				Playgrounds += B.Kind == BuildingKind::Playground ? 1 : 0;
+			}
+			std::printf("  Кемерово: гаражей %d, магазинов %d, площадок %d, проездов %zu\n", Garages, Shops, Playgrounds, Kemerovo->Streets.size());
+			Check(Garages > 5 && Shops > 10 && Playgrounds > 5, "во дворах гаражи, магазины, площадки", Garages + Shops + Playgrounds);
+			Check(Kemerovo->Streets.size() > 150, "дворовые проезды между кварталами", static_cast<double>(Kemerovo->Streets.size()));
+
 		}
 		Check(bOffRoad, "дома не стоят на дороге", 1.0);
 		Check(bNoOverlap, "дома не пересекаются", 1.0);

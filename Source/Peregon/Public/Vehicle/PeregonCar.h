@@ -197,6 +197,11 @@ private:
 	void OnBlinkRight(const FInputActionValue& Value);
 	void OnHazard(const FInputActionValue& Value);
 	void OnNextSeat(const FInputActionValue& Value);
+	void OnWheel(const FInputActionValue& Value);
+	// Стёкла (опускание, запотевание) и грязь на кузове.
+	void UpdateGlassAndDirt(float DeltaSeconds);
+	void ApplyDirt();
+	int32 WindowIndex(const UPrimitiveComponent* Part) const;
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> Mapping;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ThrottleAction;
@@ -227,6 +232,28 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> BlinkRightAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> HazardAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> SeatAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> WheelAction;
+	// Опускные стёкла дверей (FL, FR, RL, RR) и общий материал стёкол.
+	UPROPERTY(Transient) TArray<TObjectPtr<UProceduralMeshComponent>> WindowGlass;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> GlassMaterial;
+	float WindowOpen[4] = {0.f, 0.f, 0.f, 0.f};
+	float FogLevel = 0.f;     // 0..1 запотевание изнутри
+	float DirtLevel = 0.f;    // 0..1 грязь на кузове
+	float AppliedDirt = -1.f;
+	float EngineWarm = 0.f;   // 0..1 печка прогрелась
+	float RadioVolume = 0.75f;
+	int32 DomeMode = 0;       // 0 — по дверям (авто), 1 — горит, 2 — выключен
+	// Секции кузова, которые пачкаются: копия геометрии и маска грязи по вершинам.
+	struct FDirtSection
+	{
+		TWeakObjectPtr<UProceduralMeshComponent> Mesh;
+		int32 Section = 0;
+		TArray<FVector> Vertices;
+		TArray<FVector> Normals;
+		TArray<FVector2D> UVs;
+		TArray<float> Mask;
+	};
+	TArray<FDirtSection> DirtSections;
 
 	UPROPERTY(Transient) TObjectPtr<UPeregonRadio> Radio;
 	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> HornSound;

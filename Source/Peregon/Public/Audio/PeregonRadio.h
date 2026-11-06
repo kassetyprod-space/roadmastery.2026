@@ -49,6 +49,7 @@ public:
 	bool IsPowered() const { return bPower; }
 	// Следующая песня (из перемешанного списка).
 	void NextTrack();
+	void PrevTrack();
 	FString GetTrackName() const { return TrackName; }
 	int32 GetTrackCount() const { return Playlist.Num(); }
 	// Шум эфира 0..1, «снаружи машины» 0..1 (глуше), громкость 0..1.

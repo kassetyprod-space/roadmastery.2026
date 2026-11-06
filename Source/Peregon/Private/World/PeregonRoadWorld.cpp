@@ -245,6 +245,7 @@ void APeregonRoadWorld::SetupAssets()
 	Lamp.WetMask = 0.f;
 	Lamp.SnowMask = 0.f;
 	Set(EPeregonWorldMat::LampGlow, Lamp);
+	Set(EPeregonWorldMat::VertexPaint, FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.6f));
 	Set(EPeregonWorldMat::Stele, FPeregonLook(EPeregonTex::Concrete, FLinearColor(0.95f, 0.95f, 0.93f), 0.8f));
 	Set(EPeregonWorldMat::SteleAccent, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.08f, 0.22f, 0.5f), 0.5f));
 	FPeregonLook Leaves(EPeregonTex::Leaves, FLinearColor::White, 0.9f);
@@ -980,6 +981,34 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 			Kit.BusStop(Base, FRotator(0.0, FMath::RadiansToDegrees(Smp.Heading) + (Side > 0 ? -90.0 : 90.0), 0.0), Name);
 		}
 	}
+	// Магазин «Продукты» на въезде (до первых домов) и грунтовка в поля в конце села.
+	const double StoreS = Poi.S - 195.0;
+	if (StoreS >= S0 && StoreS < S1)
+	{
+		const rgen::RouteSample Smp = Route.Sample(StoreS);
+		const double StoreT = Half + 12.0;
+		rgen::Building Store;
+		Store.Kind = rgen::BuildingKind::Shop;
+		Route.ToWorld(StoreS, StoreT, Store.X, Store.Y);
+		Store.Z = FMath::Min(Route.GroundHeight(StoreS, StoreT - 4.5), Route.GroundHeight(StoreS, StoreT + 4.5)) - 0.2;
+		// Вывеска на длинной стороне −Y здания: при Yaw = курсу дороги она смотрит на дорогу (влево).
+		Store.Yaw = Smp.Heading;
+		Store.Length = 14.0;
+		Store.Width = 9.0;
+		Store.Floors = 0;
+		Store.Seed = rgen::Hash(static_cast<uint32_t>(Poi.S), 77u);
+		Kit.Buildings({Store});
+	}
+	const double TrackS = Poi.S + 200.0;
+	if (TrackS >= S0 && TrackS < S1)
+	{
+		TArray<FVector> Track;
+		for (double T = Half + 1.0; T < 160.0; T += 8.0)
+		{
+			Track.Add(RouteToWorld(TrackS + FMath::Sin(T * 0.03) * 6.0, T, 0.04));
+		}
+		Kit.DirtRoad(Track, 400.f);
+	}
 	// Колодец и лавка у дороги в середине села.
 	if (Poi.S + 25.0 >= S0 && Poi.S + 25.0 < S1)
 	{
@@ -1021,6 +1050,21 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 				{
 					Kit.Woodpile(RouteToWorld(S - 6.0, Side * 40.0, 0.0), Along);
 				}
+				// Огород за домом, иногда теплица; у крайних домов — стог сена.
+				if (Pick > 0.2f)
+				{
+					Kit.Garden(RouteToWorld(S - 1.0, Side * 52.0, 0.0), Along);
+				}
+				if (Pick > 0.5f)
+				{
+					Kit.Greenhouse(RouteToWorld(S + 5.0, Side * 60.0, 0.0), Along);
+				}
+				if (Pick < 0.15f)
+				{
+					Kit.Haystack(RouteToWorld(S, Side * 70.0, 0.0));
+				}
+				// Подъезд к калитке.
+				Kit.DirtRoad({RouteToWorld(S + 3.0, Side * (Half + 0.5), 0.03), RouteToWorld(S + 3.0, Side * 14.0, 0.03)}, 260.f);
 				if (Pick > 0.75f)
 				{
 					Kit.Bench(RouteToWorld(S + 4.0, Side * 14.6, 0.0), Along + FRotator(0.0, Side > 0 ? 90.0 : -90.0, 0.0));

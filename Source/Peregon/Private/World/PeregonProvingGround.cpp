@@ -153,7 +153,27 @@ void APeregonProvingGround::BuildShowcase()
 	Add(rgen::BuildingKind::Chimney, 320.0, Row, 7.0, 7.0, 1, 6);
 	Add(rgen::BuildingKind::Church, 20.0, Row + 45.0, 26.0, 18.0, 1, 7);
 	Add(rgen::BuildingKind::Mast, 320.0, Row + 45.0, 12.0, 12.0, 1, 8);
+	Add(rgen::BuildingKind::Garages, 100.0, Row + 50.0, 54.0, 7.0, 1, 9);
+	Add(rgen::BuildingKind::Shop, 170.0, Row + 45.0, 16.0, 9.0, 0, 10);
+	Add(rgen::BuildingKind::Shop, 200.0, Row + 45.0, 14.0, 9.0, 1, 11);
+	Add(rgen::BuildingKind::Playground, 260.0, Row + 50.0, 22.0, 18.0, 1, 12);
 	Kit.Buildings(City);
+	// Дворовый проезд вдоль ряда домов и поперечный — к гаражам.
+	std::vector<rgen::Street> Lanes;
+	auto Lane = [&Lanes](double X0, double Y0, double X1, double Y1) {
+		rgen::Street St;
+		St.X0 = X0;
+		St.Y0 = Y0;
+		St.X1 = X1;
+		St.Y1 = Y1;
+		Lanes.push_back(St);
+	};
+	for (double X = -20.0; X < 340.0; X += 60.0)
+	{
+		Lane(X, Row + 25.0, X + 60.0, Row + 25.0);
+	}
+	Lane(60.0, (RoadY + 450.0) / 100.0, 60.0, Row - 15.0);
+	Kit.Streets(Lanes);
 
 	// Деревенский двор: колодец, лавка, поленница, сарай, штакетник; деревья и трава вокруг.
 	const FVector Yard(12500.f, RoadY + 2600.f, 0.f);

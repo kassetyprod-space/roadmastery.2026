@@ -343,8 +343,8 @@ void APeregonHUD::DrawDetails(const APeregonCar* Car)
 	}
 	Lines.Emplace(FString(TEXT("W/S газ-тормоз  A/D руль  E/Q передачи  Shift сцепление  Space ручник  P стояночный  L фары  K дворники")), Dim);
 	Lines.Emplace(FString(TEXT("R стартер  I зажигание  G автомат/механика  V вид  C приблизить  F выйти  ЛКМ взаимодействие")), Dim);
-	Lines.Emplace(FString(TEXT("N радио  J след. песня  O плафон  H сигнал  Z/X поворотники  Y аварийка  T пересесть")), Dim);
-	Lines.Emplace(FString(TEXT("Backspace на колёса  Tab вещи  M карта  F6 погода  F7 +15 дней")), Dim);
+	Lines.Emplace(FString(TEXT("N радио  колесо: громкость/песня/стёкла  O плафон  H сигнал  Z/X поворотники  Y аварийка  T пересесть")), Dim);
+	Lines.Emplace(FString(TEXT("Backspace на колёса  Tab вещи  M карта  F6 погода  F7 +15 дней  F8 +1 час")), Dim);
 
 	float W = 0.f;
 	float LineH = 0.f;

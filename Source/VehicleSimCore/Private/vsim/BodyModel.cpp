@@ -711,7 +711,7 @@ void BuildDoor(Builder& B, Part Id)
 	{
 		Tube(M, Mat::Chrome, {V3(83.f, -73.5f, 40.6f), V3(80.f, -83.f, 44.f)}, 0.7f, 8);
 		RoundedBox(M, Mat::BlackTrim, V3(78.8f, -86.5f, 45.f), V3(2.f, 6.5f, 4.5f), 2.f);
-		Box(M, Mat::Glass, V3(76.7f, -86.5f, 45.f), V3(0.1f, 5.6f, 3.6f));
+		Box(M, Mat::Chrome, V3(76.7f, -86.5f, 45.f), V3(0.1f, 5.6f, 3.6f)); // зеркальце — хром, стекло двери опускается отдельно
 	}
 
 	B.Add(Id, M, Hinge);
@@ -720,6 +720,9 @@ void BuildDoor(Builder& B, Part Id)
 	B.Hit(Id, Tag, V3(MidX, S * 75.5f, 12.f), V3(0.5f * (X1 - X0), 5.f, 27.f), Hinge);
 	B.Hit(Id, Tag, Inner, V3(4.5f, 2.f, 2.f), Hinge);
 	B.Hit(Id, Tag, Outer, V3(6.5f, 2.f, 2.f), Hinge);
+	// Ручка стеклоподъёмника: колесо мыши опускает и поднимает стекло.
+	const char* WinTag = Id == Part::DoorFL ? "WindowFL" : Id == Part::DoorFR ? "WindowFR" : Id == Part::DoorRL ? "WindowRL" : "WindowRR";
+	B.Hit(Id, WinTag, Crank + Inward * 2.f + V3(-2.5f, 0.f, -2.f), V3(4.5f, 2.5f, 4.5f), Hinge);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -864,7 +867,7 @@ void BuildInterior(MeshSet& M)
 			0.05f));
 
 	// Потолок: плафон, козырьки, зеркало.
-	RoundedBox(M, Mat::GaugeFace, V3(-10.f, 0.f, 86.6f), V3(5.f, 3.f, 0.5f), 0.4f);
+	RoundedBox(M, Mat::Dome, V3(-10.f, 0.f, 86.6f), V3(5.f, 3.f, 0.5f), 0.4f);
 	for (float S : {-1.f, 1.f})
 	{
 		RoundedBox(M, Mat::Interior, V3(49.5f, S * 30.f, 82.6f), V3(6.5f, 18.f, 0.7f), 0.6f, V3(std::cos(Rad(20.f)), 0.f, std::sin(Rad(20.f))), Ey,
@@ -1138,7 +1141,7 @@ const char* PartName(Part Id)
 const char* MatName(Mat Id)
 {
 	static const char* Names[] = {"Paint", "Chrome", "BlackTrim", "Rubber", "Glass", "Headlamp", "Taillamp", "Indicator", "Interior", "InteriorDark",
-		"Fabric", "Carpet", "Headliner", "GaugeFace", "Needle", "Engine", "Metal", "Plate", "Water"};
+		"Fabric", "Carpet", "Headliner", "GaugeFace", "Needle", "Engine", "Metal", "Plate", "Water", "Dome"};
 	const size_t I = static_cast<size_t>(Id);
 	return I < sizeof(Names) / sizeof(Names[0]) ? Names[I] : "?";
 }

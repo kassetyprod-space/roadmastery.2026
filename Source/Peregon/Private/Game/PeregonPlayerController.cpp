@@ -44,6 +44,7 @@ void APeregonPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::M, IE_Pressed, this, &APeregonPlayerController::ToggleMap);
 	InputComponent->BindKey(EKeys::F6, IE_Pressed, this, &APeregonPlayerController::NextWeather);
 	InputComponent->BindKey(EKeys::F7, IE_Pressed, this, &APeregonPlayerController::SkipDays);
+	InputComponent->BindKey(EKeys::F8, IE_Pressed, this, &APeregonPlayerController::SkipHour);
 }
 
 void APeregonPlayerController::NextWeather()
@@ -57,6 +58,25 @@ void APeregonPlayerController::NextWeather()
 		}
 		break;
 	}
+}
+
+void APeregonPlayerController::SkipHour()
+{
+	UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+	if (!GI)
+	{
+		return;
+	}
+	GI->TimeOfDayHours += 1.f;
+	if (GI->TimeOfDayHours >= 24.f)
+	{
+		GI->TimeOfDayHours -= 24.f;
+		GI->Day += 1;
+		GI->Climate.DayOfYear = GI->Climate.DayOfYear >= 365.f ? 1.f : GI->Climate.DayOfYear + 1.f;
+	}
+	const int32 Hours = FMath::FloorToInt(GI->TimeOfDayHours);
+	const int32 Minutes = FMath::FloorToInt((GI->TimeOfDayHours - Hours) * 60.f);
+	Toast(FString::Printf(TEXT("Время: %02d:%02d"), Hours, Minutes));
 }
 
 void APeregonPlayerController::SkipDays()

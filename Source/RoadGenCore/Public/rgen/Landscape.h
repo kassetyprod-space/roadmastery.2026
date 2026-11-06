@@ -23,6 +23,9 @@ enum class BuildingKind : uint8_t
 	Chimney,    // заводская труба
 	Church,     // храм с куполами
 	Mast,       // телевышка / мачта связи
+	Garages,    // ряд гаражей (гаражный кооператив)
+	Shop,       // одноэтажный магазин с вывеской («Продукты», «Аптека», «Хозтовары»)
+	Playground, // детская площадка во дворе
 	Count
 };
 
@@ -41,6 +44,13 @@ struct RGEN_API Building
 	double Height() const;
 };
 
+// Улица (дворовый проезд) — отрезок по сетке кварталов, концы на земле.
+struct Street
+{
+	double X0 = 0.0, Y0 = 0.0, Z0 = 0.0;
+	double X1 = 0.0, Y1 = 0.0, Z1 = 0.0;
+};
+
 struct Settlement
 {
 	std::string Name;
@@ -50,6 +60,7 @@ struct Settlement
 	double Radius = 300.0;
 	int Size = 0;        // 0 — посёлок с парой пятиэтажек, 1 — город, 2 — областной центр
 	std::vector<Building> Buildings;
+	std::vector<Street> Streets;
 };
 
 class RGEN_API Landscape

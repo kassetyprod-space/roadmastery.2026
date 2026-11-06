@@ -47,6 +47,9 @@ double Building::Height() const
 	case BuildingKind::Mast: return 110.0 + static_cast<double>(Floors) * 4.0;
 	case BuildingKind::Church: return 14.0;
 	case BuildingKind::Industrial: return 9.0 + static_cast<double>(Floors) * 3.0;
+	case BuildingKind::Garages: return 2.6;
+	case BuildingKind::Shop: return 3.6;
+	case BuildingKind::Playground: return 2.4;
 	default: return static_cast<double>(Floors) * 2.8 + 1.2;
 	}
 }
@@ -473,6 +476,118 @@ void Landscape::BuildCity(Settlement& Town)
 				continue;
 			}
 			Place(B);
+		}
+	}
+
+	// Второй проход по пустым кварталам: гаражи, магазинчики, детские площадки — город не «дома в поле».
+	{
+		Rng Fill(Hash(Seed, static_cast<uint32_t>(Town.S + 991.0)));
+		for (int I = -N; I <= N; ++I)
+		{
+			for (int J = -N; J <= N; ++J)
+			{
+				const double Lx = I * Cell + Fill.Range(-10.0, 10.0);
+				const double Ly = J * Cell + Fill.Range(-10.0, 10.0);
+				const double Rn = std::hypot(Lx, Ly) / Town.Radius;
+				if (Rn > 1.0)
+				{
+					continue;
+				}
+				Building B;
+				B.X = Town.X + Cx * Lx - Cy * Ly;
+				B.Y = Town.Y + Cy * Lx + Cx * Ly;
+				B.Yaw = Heading + (Fill.Chance(0.5) ? 0.0 : kPi * 0.5);
+				const double Pick = Fill.Unit();
+				if (Town.Size > 0 && Rn > 0.35 && Pick < 0.14)
+				{
+					B.Kind = BuildingKind::Garages;
+					B.Length = Fill.Chance(0.5) ? 36.0 : 54.0;
+					B.Width = 7.0;
+					B.Floors = 1;
+				}
+				else if (Pick < 0.24)
+				{
+					B.Kind = BuildingKind::Shop;
+					B.Length = Fill.Range(12.0, 20.0);
+					B.Width = 9.0;
+					B.Floors = static_cast<int>(Fill.Range(0.0, 3.0)); // вывеска: 0 продукты, 1 аптека, 2 хозтовары
+				}
+				else if (Town.Size > 0 && Pick < 0.36)
+				{
+					B.Kind = BuildingKind::Playground;
+					B.Length = 22.0;
+					B.Width = 18.0;
+					B.Floors = 1;
+				}
+				else
+				{
+					continue;
+				}
+				if (!Blocked(B.X, B.Y, 0.5 * std::hypot(B.Length, B.Width), Out))
+				{
+					Place(B);
+				}
+			}
+		}
+	}
+
+	// Дворовые проезды по линиям между кварталами: асфальт подходит к домам, гаражам, магазинам.
+	if (Town.Size > 0)
+	{
+		auto InsideAny = [&](double X, double Y, double Margin) {
+			for (const Building& B : Out)
+			{
+				const double Dx = X - B.X;
+				const double Dy = Y - B.Y;
+				const double U = Dx * std::cos(B.Yaw) + Dy * std::sin(B.Yaw);
+				const double V = -Dx * std::sin(B.Yaw) + Dy * std::cos(B.Yaw);
+				if (std::abs(U) < B.Length * 0.5 + Margin && std::abs(V) < B.Width * 0.5 + Margin)
+				{
+					return true;
+				}
+			}
+			return false;
+		};
+		for (int Dir = 0; Dir < 2; ++Dir)
+		{
+			for (int A = -N; A < N; ++A)
+			{
+				for (int B = -N; B <= N; ++B)
+				{
+					// Линия между кварталами (полуцелые координаты), отрезок — длиной в квартал.
+					const double Gap = (A + 0.5) * Cell;
+					const double From = (B - 0.5) * Cell;
+					const double To = (B + 0.5) * Cell;
+					const double L0x = Dir == 0 ? Gap : From, L0y = Dir == 0 ? From : Gap;
+					const double L1x = Dir == 0 ? Gap : To, L1y = Dir == 0 ? To : Gap;
+					if (std::hypot(0.5 * (L0x + L1x), 0.5 * (L0y + L1y)) > Town.Radius * 0.92)
+					{
+						continue;
+					}
+					Street St;
+					St.X0 = Town.X + Cx * L0x - Cy * L0y;
+					St.Y0 = Town.Y + Cy * L0x + Cx * L0y;
+					St.X1 = Town.X + Cx * L1x - Cy * L1y;
+					St.Y1 = Town.Y + Cy * L1x + Cx * L1y;
+					bool bFree = true;
+					for (int K = 0; K <= 4 && bFree; ++K)
+					{
+						const double T = K / 4.0;
+						const double Px = St.X0 + (St.X1 - St.X0) * T;
+						const double Py = St.Y0 + (St.Y1 - St.Y0) * T;
+						double S = 0.0, Tt = 0.0, D = 0.0;
+						Nearest(Px, Py, S, Tt, D);
+						bFree = D > 26.0 && !InsideAny(Px, Py, 3.0);
+					}
+					if (!bFree)
+					{
+						continue;
+					}
+					St.Z0 = GroundAt(St.X0, St.Y0);
+					St.Z1 = GroundAt(St.X1, St.Y1);
+					Town.Streets.push_back(St);
+				}
+			}
 		}
 	}
 

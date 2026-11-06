@@ -159,6 +159,9 @@ FPeregonKitMaterials FPeregonKitMaterials::Create(UObject* Outer)
 	M.Needles = Make(Needles);
 	M.BirchBark = Make(FPeregonLook(EPeregonTex::BirchBark, FLinearColor::White, 0.9f));
 	M.PineBark = Make(FPeregonLook(EPeregonTex::PineBark, FLinearColor::White, 0.95f));
+	M.Asphalt = Make(FPeregonLook(EPeregonTex::Asphalt, FLinearColor(0.95f, 0.95f, 0.95f), 0.85f));
+	M.Dirt = Make(FPeregonLook(EPeregonTex::Dirt, FLinearColor::White, 0.95f));
+	M.Paint = Make(FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.6f));
 	return M;
 }
 
@@ -314,6 +317,10 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 		WhiteBands = MakeIsm(Mats.White);
 	};
 
+	FPeregonMeshBuffers Props;   // окрашено цветом вершин (машины, лавки, баки, площадки, гаражные ворота)
+	FPeregonMeshBuffers Wheels;  // тёмное: колёса, шины-клумбы
+	FPeregonMeshBuffers ShopWalls;
+	FPeregonMeshBuffers GarageBlocks;
 	for (const rgen::Building& B : List)
 	{
 		const FVector Base = FVector(B.X, B.Y, B.Z) * M;
@@ -344,6 +351,7 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 						FColor::White, true, true);
 				}
 			}
+			Yard(B, Props, Wheels);
 			// Свет в окнах вечером: на месте окон текстуры (пролёт 3 м, этаж 2.8 м от верха стены).
 			const int32 Floors = FMath::FloorToInt(H / 280.f);
 			const float LitShare = 0.1f + 0.1f * static_cast<float>(Rand.Unit());
@@ -372,6 +380,83 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 							Corner + Along * U0 + FVector(0, 0, Z1), Outward, FVector2D(0, 1), FVector2D(1, 0), FColor::White, 0);
 					}
 				}
+			}
+			break;
+		}
+		case rgen::BuildingKind::Garages:
+		{
+			// Ряд кирпичных боксов 3.5 × 7 м с воротами разного цвета и общей плоской крышей.
+			const FRotator Rot(0.f, Yaw, 0.f);
+			const FVector Ax = Rot.RotateVector(FVector::ForwardVector);
+			const FVector Ay = Rot.RotateVector(FVector::RightVector);
+			GarageBlocks.AddBox(Base, Yaw, Size, FVector2D(300.f, 280.f), ToColor(FLinearColor(0.85f, 0.78f, 0.7f)), false, false);
+			Roofs.AddBox(Base + FVector(0.f, 0.f, H), Yaw, FVector(Size.X + 40.f, Size.Y + 60.f, 20.f), FVector2D(400.f, 400.f), FColor::White, true, true);
+			static const FLinearColor Doors[] = {FLinearColor(0.25f, 0.4f, 0.25f), FLinearColor(0.45f, 0.28f, 0.15f), FLinearColor(0.2f, 0.3f, 0.5f),
+				FLinearColor(0.5f, 0.5f, 0.5f), FLinearColor(0.55f, 0.18f, 0.12f)};
+			const int32 Boxes = FMath::Max(1, FMath::FloorToInt(static_cast<float>(Size.X) / 350.f));
+			const FVector Front = Base - Ay * (Size.Y * 0.5 + 2.0);
+			for (int32 K = 0; K < Boxes; ++K)
+			{
+				const FVector C = Front + Ax * (-Size.X * 0.5 + 175.0 + K * 350.0);
+				const FColor Tint = ToColor(Doors[(B.Seed + K * 7) % UE_ARRAY_COUNT(Doors)]);
+				Props.AddQuad(C - Ax * 130.f, C + Ax * 130.f, C + Ax * 130.f + FVector(0, 0, 220.f), C - Ax * 130.f + FVector(0, 0, 220.f), -Ay, FVector2D(0, 1),
+					FVector2D(1, 0), Tint, 0);
+			}
+			break;
+		}
+		case rgen::BuildingKind::Shop:
+		{
+			// Магазинчик: оштукатуренный короб, витрина (вечером горит), вывеска.
+			const FRotator Rot(0.f, Yaw, 0.f);
+			const FVector Ay = Rot.RotateVector(FVector::RightVector);
+			const FVector Ax = Rot.RotateVector(FVector::ForwardVector);
+			static const FLinearColor Walls[] = {FLinearColor(0.9f, 0.85f, 0.7f), FLinearColor(0.8f, 0.85f, 0.9f), FLinearColor(0.85f, 0.9f, 0.8f)};
+			ShopWalls.AddBox(Base, Yaw, Size, FVector2D(300.f, 280.f), ToColor(Walls[B.Seed % 3]), false, false);
+			Roofs.AddBox(Base + FVector(0.f, 0.f, H), Yaw, FVector(Size.X + 30.f, Size.Y + 30.f, 25.f), FVector2D(400.f, 400.f), FColor::White, true, false);
+			const FVector Face = Base - Ay * (Size.Y * 0.5 + 3.0);
+			Windows.AddQuad(Face - Ax * (Size.X * 0.35) + FVector(0, 0, 80.f), Face + Ax * (Size.X * 0.35) + FVector(0, 0, 80.f),
+				Face + Ax * (Size.X * 0.35) + FVector(0, 0, 230.f), Face - Ax * (Size.X * 0.35) + FVector(0, 0, 230.f), -Ay, FVector2D(0, 1), FVector2D(1, 0),
+				FColor::White, 0);
+			static const TCHAR* Signs[] = {TEXT("ПРОДУКТЫ"), TEXT("АПТЕКА"), TEXT("ХОЗТОВАРЫ")};
+			static const FLinearColor Paper[] = {FLinearColor(0.6f, 0.08f, 0.06f), FLinearColor(0.1f, 0.45f, 0.25f), FLinearColor(0.12f, 0.25f, 0.5f)};
+			const int32 Sign = FMath::Clamp(B.Floors, 0, 2);
+			Label(FTransform((-Ay).Rotation(), Face - Ay * 2.0 + FVector(0, 0, 290.f)), Signs[Sign], static_cast<float>(Size.X) * 0.6f, 70.f, 64,
+				FLinearColor(0.95f, 0.95f, 0.9f), Paper[Sign]);
+			break;
+		}
+		case rgen::BuildingKind::Playground:
+		{
+			// Детская площадка: качели, горка-лесенка, песочница, лавки — всё в одном меше с цветом вершин.
+			const FRotator Rot(0.f, Yaw, 0.f);
+			auto At = [&](float Lx, float Ly, float Lz) { return Base + Rot.RotateVector(FVector(Lx, Ly, Lz)); };
+			const FColor Red = ToColor(FLinearColor(0.8f, 0.15f, 0.1f));
+			const FColor Yellow = ToColor(FLinearColor(0.9f, 0.75f, 0.15f));
+			const FColor Blue = ToColor(FLinearColor(0.15f, 0.35f, 0.7f));
+			const FColor Brown = ToColor(FLinearColor(0.45f, 0.32f, 0.2f));
+			const FColor Sand = ToColor(FLinearColor(0.85f, 0.75f, 0.5f));
+			// Качели: две стойки и перекладина, сиденье.
+			for (float Y : {-120.f, 120.f})
+			{
+				Props.AddBox(At(-500.f, Y, 0.f), Yaw, FVector(10.f, 10.f, 250.f), FVector2D(100.f, 100.f), Blue, false, false);
+			}
+			Props.AddBox(At(-500.f, 0.f, 245.f), Yaw, FVector(10.f, 260.f, 10.f), FVector2D(100.f, 100.f), Blue, true, true);
+			Props.AddBox(At(-500.f, 0.f, 50.f), Yaw, FVector(35.f, 50.f, 5.f), FVector2D(100.f, 100.f), Yellow, true, true);
+			// Горка: лесенка-башенка и скат ступеньками.
+			Props.AddBox(At(200.f, -300.f, 0.f), Yaw, FVector(120.f, 120.f, 150.f), FVector2D(100.f, 100.f), Red, true, false);
+			for (int32 Step = 0; Step < 5; ++Step)
+			{
+				Props.AddBox(At(200.f, -180.f + Step * 50.f, 0.f), Yaw, FVector(70.f, 50.f, 140.f - Step * 28.f), FVector2D(100.f, 100.f), Yellow, true, false);
+			}
+			// Песочница и «грибок».
+			Props.AddBox(At(400.f, 350.f, 0.f), Yaw, FVector(300.f, 300.f, 25.f), FVector2D(100.f, 100.f), Brown, false, false);
+			Props.AddBox(At(400.f, 350.f, 0.f), Yaw, FVector(280.f, 280.f, 18.f), FVector2D(100.f, 100.f), Sand, true, false);
+			Props.AddBox(At(400.f, 350.f, 0.f), Yaw, FVector(10.f, 10.f, 200.f), FVector2D(100.f, 100.f), Brown, false, false);
+			Props.AddBox(At(400.f, 350.f, 200.f), Yaw, FVector(220.f, 220.f, 15.f), FVector2D(100.f, 100.f), Red, true, true);
+			// Лавки по краю и шины-клумбы.
+			for (float X : {-800.f, 800.f})
+			{
+				Props.AddBox(At(X, 700.f, 40.f), Yaw, FVector(170.f, 40.f, 6.f), FVector2D(100.f, 100.f), Brown, true, true);
+				Wheels.AddBox(At(X, -700.f, 0.f), Yaw, FVector(70.f, 70.f, 25.f), FVector2D(100.f, 100.f), FColor::White, true, false);
 			}
 			break;
 		}
@@ -437,6 +522,169 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 	AddProc(Windows, Mats.LitWindow, false, false);
 	AddProc(Plant, Mats.Concrete, true);
 	AddProc(PlantRoof, Mats.MetalRoof, false);
+	AddProc(GarageBlocks, Mats.Concrete, true);
+	AddProc(ShopWalls, Mats.Concrete, true);
+	AddProc(Props, Mats.Paint, true);
+	AddProc(Wheels, Mats.Pole, false);
+}
+
+UInstancedStaticMeshComponent* FPeregonKit::Instanced(UStaticMesh* InMesh, UMaterialInterface* Material, bool bCollision, bool bShadow)
+{
+	UInstancedStaticMeshComponent* Comp = NewObject<UInstancedStaticMeshComponent>(Owner);
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetupAttachment(Root);
+	Comp->SetStaticMesh(InMesh);
+	Comp->SetCollisionProfileName(bCollision ? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
+	Comp->SetCastShadow(bShadow);
+	Comp->SetCanEverAffectNavigation(false);
+	if (Material)
+	{
+		Comp->SetMaterial(0, Material);
+	}
+	Comp->RegisterComponent();
+	Out.Add(Comp);
+	return Comp;
+}
+
+void FPeregonKit::Yard(const rgen::Building& B, FPeregonMeshBuffers& Props, FPeregonMeshBuffers& Wheels)
+{
+	using namespace PeregonKitDetail;
+	constexpr double M = 100.0;
+	rgen::Rng Rand(B.Seed ^ 0x9A3Du);
+	const FVector Base = FVector(B.X, B.Y, B.Z) * M;
+	const float Yaw = FMath::RadiansToDegrees(static_cast<float>(B.Yaw));
+	const FRotator Rot(0.f, Yaw, 0.f);
+	const FVector Ax = Rot.RotateVector(FVector::ForwardVector);
+	const FVector Ay = Rot.RotateVector(FVector::RightVector);
+	const float Half = static_cast<float>(B.Length * M * 0.5);
+	const float Depth = static_cast<float>(B.Width * M * 0.5);
+	// Дворовый проезд вдоль подъездов и машины на нём.
+	const FVector Lane = Base - Ay * (Depth + 650.f);
+	Props.AddBox(Lane + FVector(0, 0, -40.f), Yaw, FVector(Half * 2.f + 600.f, 600.f, 48.f), FVector2D(400.f, 400.f), ToColor(FLinearColor(0.28f, 0.28f, 0.3f)), true,
+		false);
+	static const FLinearColor CarColors[] = {FLinearColor(0.75f, 0.1f, 0.08f), FLinearColor(0.85f, 0.85f, 0.8f), FLinearColor(0.15f, 0.25f, 0.5f),
+		FLinearColor(0.3f, 0.45f, 0.3f), FLinearColor(0.8f, 0.65f, 0.2f), FLinearColor(0.2f, 0.2f, 0.22f), FLinearColor(0.55f, 0.6f, 0.62f)};
+	for (float X = -Half + 300.f; X < Half - 300.f; X += 520.f)
+	{
+		if (Rand.Chance(0.45))
+		{
+			continue;
+		}
+		const FVector C = Lane + Ax * X - Ay * 180.f + FVector(0, 0, 8.f);
+		const FColor Paint = ToColor(CarColors[Rand.Next() % UE_ARRAY_COUNT(CarColors)]);
+		// Кузов, кабина, колёса: условная «легковушка».
+		Props.AddBox(C + FVector(0, 0, 30.f), Yaw + 90.f, FVector(420.f, 165.f, 60.f), FVector2D(100.f, 100.f), Paint, true, false);
+		Props.AddBox(C + FVector(0, 0, 90.f) - Ay * 20.f, Yaw + 90.f, FVector(230.f, 150.f, 50.f), FVector2D(100.f, 100.f), ToColor(FLinearColor(0.25f, 0.3f, 0.33f)),
+			true, false);
+		for (float Wx : {-140.f, 140.f})
+		{
+			for (float Wy : {-80.f, 80.f})
+			{
+				Wheels.AddBox(C + Ay * Wx + Ax * Wy, Yaw, FVector(25.f, 60.f, 60.f), FVector2D(100.f, 100.f), FColor::White, true, false);
+			}
+		}
+	}
+	// Лавочки у подъездов, мусорные баки в конце дома.
+	for (float X = -Half + 1500.f; X < Half - 600.f; X += 1500.f)
+	{
+		const FVector P = Base - Ay * (Depth + 180.f) + Ax * (X + 250.f);
+		Props.AddBox(P + FVector(0, 0, 40.f), Yaw, FVector(160.f, 40.f, 6.f), FVector2D(100.f, 100.f), ToColor(FLinearColor(0.45f, 0.3f, 0.2f)), true, true);
+	}
+	for (int32 K = 0; K < 3; ++K)
+	{
+		Props.AddBox(Base + Ax * (Half + 300.f) - Ay * (Depth - 200.f - K * 140.f), Yaw, FVector(120.f, 100.f, 110.f), FVector2D(100.f, 100.f),
+			ToColor(FLinearColor(0.2f, 0.4f, 0.25f)), true, false);
+	}
+	// Берёзы и тополя с обратной стороны дома.
+	if (!YardTrunks)
+	{
+		YardTrunks = Instanced(Cylinder(), Mats.BirchBark, true);
+		YardCrowns = Instanced(Sphere(), Mats.Leaves, false);
+	}
+	for (float X = -Half; X < Half; X += 900.f)
+	{
+		if (Rand.Chance(0.4))
+		{
+			const float Scale = static_cast<float>(Rand.Range(0.8, 1.25));
+			const FVector Foot = Base + Ay * (Depth + 700.f + static_cast<float>(Rand.Range(0.0, 600.0))) + Ax * X;
+			YardTrunks->AddInstance(FTransform(FRotator::ZeroRotator, Foot + FVector(0, 0, 500.f * Scale), FVector(0.25f * Scale, 0.25f * Scale, 10.f * Scale)), false);
+			YardCrowns->AddInstance(FTransform(FRotator::ZeroRotator, Foot + FVector(0, 0, 800.f * Scale), FVector(4.2f * Scale, 4.2f * Scale, 6.f * Scale)), false);
+		}
+	}
+}
+
+void FPeregonKit::Streets(const std::vector<rgen::Street>& List)
+{
+	FPeregonMeshBuffers Road;
+	UInstancedStaticMeshComponent* Poles = Instanced(Cylinder(), Mats.Pole, false);
+	UInstancedStaticMeshComponent* Heads = Instanced(Cube(), Mats.Lamp, false, false);
+	int32 Index = 0;
+	for (const rgen::Street& St : List)
+	{
+		const FVector A = FVector(St.X0, St.Y0, St.Z0 + 0.05) * 100.0;
+		const FVector B = FVector(St.X1, St.Y1, St.Z1 + 0.05) * 100.0;
+		const FVector Dir = (B - A).GetSafeNormal2D();
+		const FVector Side = FVector::CrossProduct(FVector::UpVector, Dir) * 350.f;
+		const float Len = static_cast<float>(FVector::Dist2D(A, B) / 400.0);
+		// Чуть длиннее отрезка — перекрёстки без щелей; бортики вниз прячут ступеньки на склонах.
+		const FVector A2 = A - Dir * 350.f;
+		const FVector B2 = B + Dir * 350.f;
+		Road.AddQuad(A2 - Side, B2 - Side, B2 + Side, A2 + Side, FVector::UpVector, FVector2D(0, 0), FVector2D(Len, 1.75f), FColor::White, 0);
+		for (const FVector& S : {Side, -Side})
+		{
+			Road.AddQuad(A2 + S - FVector(0, 0, 60.f), B2 + S - FVector(0, 0, 60.f), B2 + S, A2 + S, S, FVector2D(0, 0.15f), FVector2D(Len, 0), FColor::White, 0);
+		}
+		// Фонарь на каждом третьем отрезке.
+		if (++Index % 3 == 0)
+		{
+			const FVector Foot = (A + B) * 0.5 + Side * 1.15f;
+			Poles->AddInstance(FTransform(FRotator::ZeroRotator, Foot + FVector(0, 0, 350), FVector(0.14, 0.14, 7.0)), false);
+			Heads->AddInstance(FTransform(Dir.Rotation(), Foot + FVector(0, 0, 700) - Side.GetSafeNormal() * 60.0, FVector(0.5, 0.25, 0.1)), false);
+		}
+	}
+	AddProc(Road, Mats.Asphalt ? Mats.Asphalt : Mats.Concrete, true, false);
+}
+
+void FPeregonKit::Garden(const FVector& Base, const FRotator& Rot)
+{
+	// Огород: грядки (тёмные земляные валики) рядами и пугало-кол.
+	for (int32 Row = 0; Row < 6; ++Row)
+	{
+		Box(Base + Rot.RotateVector(FVector(0.f, -500.f + Row * 200.f, 10.f)), Rot, FVector(9.f, 0.9f, 0.25f), Mats.Dirt, false);
+	}
+	Box(Base + Rot.RotateVector(FVector(500.f, 600.f, 80.f)), Rot, FVector(0.06f, 0.06f, 1.6f), Mats.DarkWood, false);
+}
+
+void FPeregonKit::Greenhouse(const FVector& Base, const FRotator& Rot)
+{
+	// Теплица под плёнкой: каркас и полупрозрачные скаты.
+	UPeregonArtSubsystem* Art = Owner ? UPeregonArtSubsystem::Get(Owner) : nullptr;
+	UMaterialInterface* Film = Art ? Art->MakeGlassMaterial(Owner, FLinearColor(0.85f, 0.9f, 0.88f), 0.45f) : Mats.Glass;
+	for (float Y : {-140.f, 140.f})
+	{
+		Box(Base + Rot.RotateVector(FVector(0.f, Y * 0.55f, 120.f)), FRotator(0.0, Rot.Yaw, Y > 0.f ? 32.0 : -32.0), FVector(5.f, 1.7f, 0.02f), Film, false);
+		Box(Base + Rot.RotateVector(FVector(0.f, Y, 55.f)), Rot, FVector(5.f, 0.02f, 1.1f), Film, false);
+	}
+	Box(Base + Rot.RotateVector(FVector(0.f, 0.f, 205.f)), Rot, FVector(5.1f, 0.08f, 0.08f), Mats.DarkWood, false);
+}
+
+void FPeregonKit::Haystack(const FVector& Base)
+{
+	AddMesh(Sphere(), FTransform(FRotator::ZeroRotator, Base + FVector(0, 0, 120.f), FVector(3.2f, 3.2f, 3.4f)), Mats.Dirt ? Mats.Dirt : Mats.Wood, true);
+	AddMesh(Cylinder(), FTransform(FRotator::ZeroRotator, Base + FVector(0, 0, 300.f), FVector(0.08f, 0.08f, 1.5f)), Mats.DarkWood, false);
+}
+
+void FPeregonKit::DirtRoad(const TArray<FVector>& Points, float WidthCm)
+{
+	FPeregonMeshBuffers Data;
+	for (int32 K = 0; K + 1 < Points.Num(); ++K)
+	{
+		const FVector A = Points[K];
+		const FVector B = Points[K + 1];
+		const FVector Side = FVector::CrossProduct(FVector::UpVector, (B - A).GetSafeNormal2D()) * (WidthCm * 0.5f);
+		Data.AddQuad(A - Side, B - Side, B + Side, A + Side, FVector::UpVector, FVector2D(0, K * 0.5f), FVector2D(1, (K + 1) * 0.5f), FColor::White, 0);
+	}
+	AddProc(Data, Mats.Dirt, false, false);
 }
 
 void FPeregonKit::StreetLamp(const FVector& Foot, const FVector& Toward)

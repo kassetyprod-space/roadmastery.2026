@@ -221,6 +221,16 @@ void UPeregonRadio::NextTrack()
 	StartLoad(Current);
 }
 
+void UPeregonRadio::PrevTrack()
+{
+	if (Playlist.Num() == 0 || bLoading)
+	{
+		return;
+	}
+	Current = (Current - 1 + Playlist.Num()) % Playlist.Num();
+	StartLoad(Current);
+}
+
 void UPeregonRadio::StartLoad(int32 Index)
 {
 	const FString Path = Playlist[Index];
