@@ -559,6 +559,22 @@ void APeregonSky::ApplyTime(float Hours)
 		P.AutoExposureMinBrightness = FMath::Lerp(-0.9f, 1.4f - 0.9f * Cover, Day);
 		P.AutoExposureMaxBrightness = FMath::Lerp(0.7f, 4.6f, Day);
 		P.LumenSkylightLeaking = 0.1f + 0.12f * Night;
+
+		// Стиль «живопись» (как «Заря»): тёплые света, прохладные синие тени, мягкий контраст, плёночное зерно.
+		const bool bPainted = UPeregonGameUserSettings::Get()->VisualStyle == 0;
+		const float Warm = bPainted ? 1.f : 0.f;
+		P.bOverride_ColorSaturation = true;
+		P.ColorSaturation = FVector4(1.f + 0.12f * Warm, 1.f + 0.12f * Warm, 1.f + 0.12f * Warm, 1.f);
+		P.bOverride_ColorContrast = true;
+		P.ColorContrast = FVector4(1.f - 0.08f * Warm, 1.f - 0.08f * Warm, 1.f - 0.08f * Warm, 1.f);
+		P.bOverride_ColorGainShadows = true;
+		P.ColorGainShadows = FVector4(1.f - 0.08f * Warm, 1.f - 0.03f * Warm, 1.f + 0.08f * Warm, 1.f);
+		P.bOverride_ColorGainHighlights = true;
+		P.ColorGainHighlights = FVector4(1.f + 0.05f * Warm, 1.f, 1.f - 0.07f * Warm, 1.f);
+		P.bOverride_FilmGrainIntensity = true;
+		P.FilmGrainIntensity = 0.12f * Warm;
+		P.BloomIntensity = bPainted ? 0.5f : 0.3f;
+		P.VignetteIntensity = bPainted ? 0.38f : 0.25f;
 	}
 
 	// Объёмные облака движка (если двигаются): ветер и плотность.

@@ -333,6 +333,45 @@ int main()
 			MaxRelief = std::max(MaxRelief, std::abs(L.FarHeight(X, Y) - R.Sample(S).Z));
 		}
 		Check(bUnder, "дальний рельеф спрятан под придорожной землёй", 1.0);
+		// Между узлами сетки 140 м (как в игре) дальний рельеф тоже не выше земли чанков.
+		{
+			double MinX = 0.0, MinY = 0.0, MaxX = 0.0, MaxY = 0.0;
+			L.Bounds(MinX, MinY, MaxX, MaxY);
+			const double Ox = MinX - 6740.0;
+			const double Oy = MinY - 6740.0;
+			constexpr double Step = 140.0;
+			int Above = 0, Tested = 0;
+			double Worst = 0.0;
+			Rng Rand(77);
+			for (int K = 0; K < 4000; ++K)
+			{
+				const double S = Rand.Range(50.0, R.Length() - 50.0);
+				const double T = Rand.Range(-285.0, 285.0);
+				double X = 0.0, Y = 0.0;
+				R.ToWorld(S, T, X, Y);
+				const double Gx = std::floor((X - Ox) / Step), Gy = std::floor((Y - Oy) / Step);
+				const double Fx = (X - Ox) / Step - Gx, Fy = (Y - Oy) / Step - Gy;
+				const double X0 = Ox + Gx * Step, Y0 = Oy + Gy * Step;
+				const double H00 = L.FarHeight(X0, Y0), H10 = L.FarHeight(X0 + Step, Y0), H01 = L.FarHeight(X0, Y0 + Step), H11 = L.FarHeight(X0 + Step, Y0 + Step);
+				// Треугольники сетки делят квадрат по диагонали (1,0)–(0,1).
+				const double H = Fx + Fy <= 1.0 ? H00 + (H10 - H00) * Fx + (H01 - H00) * Fy : H11 + (H01 - H11) * (1.0 - Fx) + (H10 - H11) * (1.0 - Fy);
+				const double Ground = R.GroundHeight(S, T);
+				++Tested;
+				if (H > Ground - 0.05)
+				{
+					++Above;
+					Worst = std::max(Worst, H - Ground);
+				}
+			}
+			std::printf("  дальний рельеф выше земли: %d из %d (до %.2f м)\n", Above, Tested, Worst);
+			Check(Above <= Tested / 500, "сетка дальнего рельефа не протыкает землю у дороги", Above);
+		}
+		// Деревья и трава не растут в домах.
+		if (Kemerovo && !Kemerovo->Buildings.empty())
+		{
+			const Building& B = Kemerovo->Buildings.front();
+			Check(L.InsideBuilding(B.X, B.Y, 0.0), "центр дома — внутри дома", 1.0);
+		}
 		Check(MaxRelief > 15.0 && MaxRelief < 120.0, "вдали холмы (перепад 15–120 м)", MaxRelief);
 		const auto T1 = std::chrono::steady_clock::now();
 		double Sum = 0.0;

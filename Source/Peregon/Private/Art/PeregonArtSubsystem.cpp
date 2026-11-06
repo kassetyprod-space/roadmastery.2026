@@ -1,4 +1,5 @@
 #include "Art/PeregonArtSubsystem.h"
+#include "Game/PeregonGameUserSettings.h"
 
 #include "Components/MeshComponent.h"
 #include "Engine/Canvas.h"
@@ -618,7 +619,8 @@ UTexture2D* UPeregonArtSubsystem::Generate(EPeregonTex Type)
 	{
 		return nullptr;
 	}
-	Tex->Filter = TF_Nearest;   // пиксели без размытия — PSX
+	// «Живопись»: мягкая фильтрация, мазки сливаются; «PSX»: крупные пиксели без размытия.
+	Tex->Filter = UPeregonGameUserSettings::Get()->VisualStyle == 1 ? TF_Nearest : TF_Trilinear;
 	Tex->SRGB = true;
 	Tex->LODGroup = TEXTUREGROUP_World;
 	FTexturePlatformData* Platform = Tex->GetPlatformData();

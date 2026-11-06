@@ -59,6 +59,8 @@ public:
 	float GetShopPrice(FName Id) const;
 	bool CanBuyItem(FName Id) const;
 	void BuyItem(FName Id);
+	// Взять товар с полки и заплатить на месте. false — не хватило денег или места в карманах.
+	bool BuyItemAt(FName Id, float Price);
 	float GetMoney() const;
 	// Карта области под рукой: в карманах или (если сидим в машине) в бардачке.
 	bool HasMapForRegion(int32 Region) const;

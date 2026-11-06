@@ -11,6 +11,7 @@
 class UStaticMesh;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UMaterialInterface;
 
 UENUM(BlueprintType)
 enum class EPeregonService : uint8
@@ -57,6 +58,15 @@ private:
 	UStaticMeshComponent* AddBox(const FVector& Center, const FVector& SizeM, const FPeregonLook& Look, bool bCollision, FName InteractTag = NAME_None);
 	// Надпись-табличка (лицом к дороге). SizeCm — высота букв.
 	void AddLabel(const FVector& Location, const FString& Text, float SizeCm, const FColor& Ink, const FLinearColor& Paper);
+	UStaticMeshComponent* AddShape(UStaticMesh* Mesh, const FVector& Center, const FVector& SizeM, UMaterialInterface* Material, bool bCollision);
+	void AddLight(const FVector& Location, float Candela, const FLinearColor& Color);
+	// Помещение, в которое можно войти: дверной проём DoorY и окна (Y от–до) в передней стене (+X).
+	void AddRoom(const FVector& FloorCenter, const FVector& SizeM, float DoorY, const TArray<FVector2D>& WindowsY, const FPeregonLook& Walls,
+		const FPeregonLook& Floor, const FPeregonLook& Inner);
+	void AddPerson(const FVector& Feet, const FLinearColor& Clothes);
+	void AddShelf(const FVector& Base, double LengthY, int32 Levels, const TArray<FName>& Items, int32& ItemCursor);
+	void AddItemProp(FName Id, const FVector& OnSurface);
+	float ItemPrice(FName Id) const;
 	void BuildFuel();
 	void BuildCafe();
 	void BuildShop();
@@ -66,4 +76,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> CubeMesh;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> CylinderMesh;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> SphereMesh;
 };

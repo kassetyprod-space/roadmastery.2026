@@ -456,6 +456,29 @@ void APeregonPlayerController::BuyItem(FName Id)
 	Toast(FString::Printf(TEXT("Куплено: %s"), *PeregonItems::DisplayName(Id)));
 }
 
+bool APeregonPlayerController::BuyItemAt(FName Id, float Price)
+{
+	UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+	FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	if (!GI || !Pockets)
+	{
+		return false;
+	}
+	if (!Pockets->CanAdd(Id, 1))
+	{
+		Toast(TEXT("Карманы полны — оставьте что-нибудь в машине"));
+		return false;
+	}
+	if (!GI->TrySpend(Price))
+	{
+		Toast(TEXT("Не хватает денег"));
+		return false;
+	}
+	Pockets->Add(Id, 1);
+	Toast(FString::Printf(TEXT("Взято: %s"), *PeregonItems::DisplayName(Id)));
+	return true;
+}
+
 void APeregonPlayerController::UseItem(FName Id, EPeregonStorage From)
 {
 	FPeregonContainer* C = GetContainer(From);

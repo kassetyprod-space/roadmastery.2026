@@ -56,7 +56,8 @@ enum class EPeregonProcedural : uint8
 	Land,
 	Paper,
 	Rain,    // петля: шелест дождя и капли (интенсивность 0..1)
-	Wiper    // разовый: мотор и резинка дворника по стеклу
+	Wiper,   // разовый: мотор и резинка дворника по стеклу
+	Horn     // петля: двухтональный клаксон
 };
 
 UCLASS(ClassGroup = Peregon)

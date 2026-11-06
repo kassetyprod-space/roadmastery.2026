@@ -67,6 +67,8 @@ public:
 	double CanopyHeight(double X, double Y) const;
 	// Густота леса 0..1 (та же, по которой расставлены деревья у дороги).
 	double ForestDensity(double X, double Y) const;
+	// Точка внутри здания (с запасом Margin, м) — чтобы деревья, трава и столбы не росли сквозь дома.
+	bool InsideBuilding(double X, double Y, double Margin) const;
 	// 0..1 — насколько точка внутри города.
 	double UrbanMask(double X, double Y) const;
 	// Силуэт гор на горизонте: высота (м) над уровнем дороги для азимута (° от севера по часовой).
@@ -78,6 +80,7 @@ public:
 
 private:
 	void BuildCity(Settlement& Town);
+	double OuterHeight(double X, double Y, double S, double D) const;
 	bool Blocked(double X, double Y, double Radius, const std::vector<Building>& Placed) const;
 
 	const Route* R = nullptr;

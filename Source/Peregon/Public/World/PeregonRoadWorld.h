@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "World/PeregonKit.h"
 #include "rgen/Climate.h"
 #include "rgen/Landscape.h"
 #include "rgen/Route.h"
@@ -102,21 +103,6 @@ private:
 		TArray<TWeakObjectPtr<AActor>> Actors;
 	};
 
-	struct FMeshBuffers
-	{
-		TArray<FVector> Vertices;
-		TArray<int32> Triangles;
-		TArray<FVector> Normals;
-		TArray<FVector2D> UVs;
-		TArray<FColor> Colors;
-
-		// Четырёхугольник A→B→C→D (по контуру), лицом к Normal; UV — по углам.
-		void AddQuad(const FVector& A, const FVector& B, const FVector& C, const FVector& D, const FVector& Normal, const FVector2D& UvA,
-			const FVector2D& UvC, const FColor& Color = FColor::White, uint8 TopAlpha = 255);
-		// Коробка: основание в Center (низ), оси — Yaw; стены с UV в метрах / Tile.
-		void AddBox(const FVector& BaseCenter, float YawDeg, const FVector& SizeCm, const FVector2D& TileCm, const FColor& Color, bool bTop, bool bBottom);
-	};
-
 	void SetupAssets();
 	FVector FocusLocation() const;
 	void UpdateStreaming(bool bBuildAll);
@@ -125,8 +111,8 @@ private:
 	void AnnouncePlaces(double PrevS, double NewS);
 
 	// Сетка (S × T) → треугольники. Pos(s, t) возвращает точку в см, UV — свою.
-	void BuildGrid(FMeshBuffers& Out, const TArray<double>& Ss, const TArray<double>& Ts, double ZOffsetM, double UvTileM, bool bRoadUV) const;
-	UProceduralMeshComponent* AddSurface(FChunk& Chunk, const FMeshBuffers& Data, EPeregonWorldMat Mat, UPhysicalMaterial* Phys);
+	void BuildGrid(FPeregonMeshBuffers& Out, const TArray<double>& Ss, const TArray<double>& Ts, double ZOffsetM, double UvTileM, bool bRoadUV) const;
+	UProceduralMeshComponent* AddSurface(FChunk& Chunk, const FPeregonMeshBuffers& Data, EPeregonWorldMat Mat, UPhysicalMaterial* Phys);
 	UStaticMeshComponent* AddMesh(FChunk& Chunk, UStaticMesh* Mesh, const FTransform& Transform, UMaterialInterface* Material, bool bCollision);
 	UInstancedStaticMeshComponent* AddInstanced(FChunk& Chunk, UStaticMesh* Mesh, EPeregonWorldMat Mat, bool bCollision);
 	void AddSign(FChunk& Chunk, double S, double T, const FString& Text, bool bCrossed, bool bFacingDriver = true);
@@ -147,10 +133,11 @@ private:
 	void BuildRegionStele(FChunk& Chunk, double S, const FString& Before, const FString& After);
 	void BuildFoliage(FChunk& Chunk, int32 Index, double S0, double S1);
 	void UpdateSeason(bool bForce);
-	UProceduralMeshComponent* AddProc(TArray<TWeakObjectPtr<UActorComponent>>& OutList, const FMeshBuffers& Data, UMaterialInterface* Material, bool bCollision,
+	UProceduralMeshComponent* AddProc(TArray<TWeakObjectPtr<UActorComponent>>& OutList, const FPeregonMeshBuffers& Data, UMaterialInterface* Material, bool bCollision,
 		bool bShadow = true);
 	UStaticMeshComponent* AddSceneryMesh(UStaticMesh* Mesh, const FTransform& Transform, UMaterialInterface* Material);
 	APeregonSky* FindSky();
+	FPeregonKitMaterials KitMaterials() const;
 
 	rgen::Route Route;
 	rgen::Landscape Landscape;

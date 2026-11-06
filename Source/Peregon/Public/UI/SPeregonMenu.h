@@ -66,6 +66,7 @@ private:
 	// Настройки (копия до «Применить»).
 	float Sensitivity = 1.f;
 	bool bInvertY = false;
+	int32 StyleIndex = 0;
 	float Fov = 80.f;
 	float HeadMotion = 1.f;
 	int32 StartViewIndex = 0;

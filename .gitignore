@@ -40,3 +40,7 @@ Tools/CarPreview/car.json
 Content/Sounds/**/*.wav
 Content/Sounds/**/*.WAV
 Content/Sounds/**/*.ogg
+
+# Музыка для радио — у каждого своя
+Content/Radio/**/*.mp3
+Content/Radio/**/*.MP3

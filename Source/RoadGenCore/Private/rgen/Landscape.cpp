@@ -228,38 +228,46 @@ double Landscape::UrbanMask(double X, double Y) const
 	return M;
 }
 
+bool Landscape::InsideBuilding(double X, double Y, double Margin) const
+{
+	for (const Settlement& T : Towns)
+	{
+		if (std::hypot(X - T.X, Y - T.Y) > T.Radius * 1.3 + 150.0)
+		{
+			continue;
+		}
+		for (const Building& B : T.Buildings)
+		{
+			const double Dx = X - B.X;
+			const double Dy = Y - B.Y;
+			// В осях здания.
+			const double U = Dx * std::cos(B.Yaw) + Dy * std::sin(B.Yaw);
+			const double V = -Dx * std::sin(B.Yaw) + Dy * std::cos(B.Yaw);
+			if (std::abs(U) < B.Length * 0.5 + Margin && std::abs(V) < B.Width * 0.5 + Margin)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 double Landscape::CanopyHeight(double X, double Y) const
 {
 	// Дальние массивы — «шапкой» над рельефом: так лес виден до горизонта, а деревьев на это не нужно.
 	return 11.0 * Smooth(0.42, 0.62, ForestDensity(X, Y));
 }
 
-double Landscape::FarHeight(double X, double Y) const
+double Landscape::OuterHeight(double X, double Y, double S, double D) const
 {
-	if (!R)
-	{
-		return 0.0;
-	}
-	double S = 0.0;
-	double T = 0.0;
-	double D = 0.0;
-	Nearest(X, Y, S, T, D);
 	const double RoadZ = R->Sample(S).Z;
-	const double Urban = UrbanMask(X, Y);
+	// В городе рельеф спокойнее — но только вдали от дороги, у дороги земля та же, что у чанков.
+	const double Urban = UrbanMask(X, Y) * Smooth(450.0, 800.0, D);
 	const double Natural = RoadZ + R->Params().TerrainAmplitude * R->NaturalNoise(X, Y) * (1.0 - 0.7 * Urban);
 	// Холмы растут с удалением от трассы: у дороги рельеф спокойный, к горизонту — увалы и гривы.
 	const double Hills = 34.0 * Smooth(350.0, 3000.0, D) * (1.0 - Urban) *
 		(0.65 * Noise2D(X / 2100.0, Y / 2100.0, Seed + 11u) + 0.35 * Noise2D(X / 760.0, Y / 760.0, Seed + 12u));
-	double Z = Natural + Hills;
-	if (D < 380.0)
-	{
-		// Здесь лежит настоящая земля чанков — дальний рельеф прячем под неё.
-		const double Near = D < 300.0 ? R->GroundHeight(S, T) : Natural;
-		// В городе рельеф спокойный — хватает меньшего запаса (дома не «висят» над дальним рельефом).
-		const double Sink = 4.0 * (1.0 - 0.7 * Urban);
-		Z = std::min(Z, Near) - Sink * (1.0 - Smooth(300.0, 380.0, D));
-	}
-	return Z;
+	return Natural + Hills;
 }
 
 double Landscape::GroundAt(double X, double Y) const
@@ -272,7 +280,37 @@ double Landscape::GroundAt(double X, double Y) const
 	double T = 0.0;
 	double D = 0.0;
 	Nearest(X, Y, S, T, D);
-	return D < 300.0 ? R->GroundHeight(S, T) : FarHeight(X, Y);
+	return D < 300.0 ? R->GroundHeight(S, T) : OuterHeight(X, Y, S, D);
+}
+
+double Landscape::FarHeight(double X, double Y) const
+{
+	if (!R)
+	{
+		return 0.0;
+	}
+	double S = 0.0;
+	double T = 0.0;
+	double D = 0.0;
+	Nearest(X, Y, S, T, D);
+	const double Outer = OuterHeight(X, Y, S, D);
+	if (D >= 520.0)
+	{
+		return Outer;
+	}
+	// У дороги лежит настоящая земля чанков. Сетка дальнего рельефа редкая (140 м), и между её узлами
+	// земля может проседать — поэтому узел берёт минимум земли во всём квадрате ±140 м (это все
+	// треугольники, где он участвует) и ещё 1.5 м запаса: дальний рельеф гарантированно под землёй.
+	double Low = 1e30;
+	for (int I = -3; I <= 3; ++I)
+	{
+		for (int J = -3; J <= 3; ++J)
+		{
+			Low = std::min(Low, GroundAt(X + I * 46.67, Y + J * 46.67));
+		}
+	}
+	Low -= 1.5;
+	return D < 380.0 ? Low : Low + (Outer - Low) * Smooth(380.0, 520.0, D);
 }
 
 double Landscape::RidgeHeight(double AzimuthDeg, int Layer, double ViewerX, double ViewerY) const

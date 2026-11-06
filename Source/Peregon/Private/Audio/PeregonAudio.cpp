@@ -257,6 +257,10 @@ EPeregonProcedural Fallback(const FString& Event)
 	{
 		return EPeregonProcedural::Paper;
 	}
+	if (Event == TEXT("horn"))
+	{
+		return EPeregonProcedural::Horn;
+	}
 	if (Event.StartsWith(TEXT("wiper")))
 	{
 		return EPeregonProcedural::Wiper;
@@ -622,6 +626,17 @@ float UPeregonSynth::ProceduralSample()
 			Excite = 0.4f + 0.6f * FMath::Abs(Noise());
 		}
 		return Hiss.Process(N) * 0.35f * Amount + Tone.Process(N * Excite) * 1.4f * Amount;
+	}
+	case EPeregonProcedural::Horn:
+	{
+		// Два рупорных сигнала ~420 и ~510 Гц: почти меандр, срезанный по верху.
+		// Фазы — по модулю 1, чтобы за долгую поездку не терялась точность.
+		Cycle = FMath::Frac(Cycle + 420.f / Rate);
+		FirePhase = FMath::Frac(FirePhase + 512.f / Rate);
+		const float A = FMath::Sin(2.f * PI * Cycle);
+		const float B = FMath::Sin(2.f * PI * FirePhase);
+		Tone.Lowpass(2400.f, 0.7f, Rate);
+		return Tone.Process(std::tanh(4.f * A) * 0.5f + std::tanh(4.f * B) * 0.4f) * 0.6f;
 	}
 	case EPeregonProcedural::Skid:
 	{

@@ -500,7 +500,7 @@ void APeregonRoadWorld::DestroyChunk(int32 Index)
 // ---------------------------------------------------------------------------------------------
 // Геометрия
 // ---------------------------------------------------------------------------------------------
-void APeregonRoadWorld::BuildGrid(FMeshBuffers& Out, const TArray<double>& Ss, const TArray<double>& Ts, double ZOffsetM, double UvTileM, bool bRoadUV) const
+void APeregonRoadWorld::BuildGrid(FPeregonMeshBuffers& Out, const TArray<double>& Ss, const TArray<double>& Ts, double ZOffsetM, double UvTileM, bool bRoadUV) const
 {
 	const int32 Rows = Ss.Num();
 	const int32 Cols = Ts.Num();
@@ -558,7 +558,7 @@ void APeregonRoadWorld::BuildGrid(FMeshBuffers& Out, const TArray<double>& Ss, c
 	}
 }
 
-UProceduralMeshComponent* APeregonRoadWorld::AddSurface(FChunk& Chunk, const FMeshBuffers& Data, EPeregonWorldMat MatType, UPhysicalMaterial* Phys)
+UProceduralMeshComponent* APeregonRoadWorld::AddSurface(FChunk& Chunk, const FPeregonMeshBuffers& Data, EPeregonWorldMat MatType, UPhysicalMaterial* Phys)
 {
 	UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this);
 	Mesh->SetMobility(EComponentMobility::Movable);
@@ -662,11 +662,11 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 
 	// Полотно, обочины, рельеф.
 	{
-		FMeshBuffers Road;
+		FPeregonMeshBuffers Road;
 		BuildGrid(Road, Ss, {-Half, Half}, 0.0, 1.0, true);
 		AddSurface(Chunk, Road, EPeregonWorldMat::Road, AsphaltPhys);
 
-		FMeshBuffers Shoulders;
+		FPeregonMeshBuffers Shoulders;
 		BuildGrid(Shoulders, Ss, {-Shoulder, -(Half + Shoulder) * 0.5, -Half}, 0.0, 3.5, false);
 		BuildGrid(Shoulders, Ss, {Half, (Half + Shoulder) * 0.5, Shoulder}, 0.0, 3.5, false);
 		AddSurface(Chunk, Shoulders, EPeregonWorldMat::Shoulder, GravelPhys);
@@ -678,7 +678,7 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 			Right.Add(T);
 			Left.Insert(-T, 0);
 		}
-		FMeshBuffers Terrain;
+		FPeregonMeshBuffers Terrain;
 		BuildGrid(Terrain, Ss, Left, 0.0, 8.0, false);
 		BuildGrid(Terrain, Ss, Right, 0.0, 8.0, false);
 		AddSurface(Chunk, Terrain, EPeregonWorldMat::Grass, GrassPhys);
@@ -793,7 +793,7 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 				}
 				Algo::Reverse(PadT);
 			}
-			FMeshBuffers Pad;
+			FPeregonMeshBuffers Pad;
 			BuildGrid(Pad, PadS, PadT, 0.0, 4.0, false);
 			for (int32 V = 0; V < Pad.Vertices.Num(); ++V)
 			{
@@ -853,6 +853,17 @@ bool APeregonRoadWorld::IsClearZone(double S, double T) const
 			return true;
 		}
 	}
+	// В городах — не сквозь дома.
+	if (FMath::Abs(T) > 25.0)
+	{
+		double X = 0.0;
+		double Y = 0.0;
+		Route.ToWorld(S, T, X, Y);
+		if (Landscape.UrbanMask(X, Y) > 0.0 && Landscape.InsideBuilding(X, Y, 4.0))
+		{
+			return true;
+		}
+	}
 	return false;
 }
 
@@ -870,7 +881,7 @@ void APeregonRoadWorld::BuildTrees(FChunk& Chunk, int32 Index, double S0, double
 	// Берёзы по сезону: крона гуще летом, реже осенью, зимой — голые ветки (плоские «веники»).
 	const double LeafAmount = bSeasonApplied ? AppliedSeason.Leaves : 1.0;
 	const bool bBare = LeafAmount < 0.15;
-	FMeshBuffers Twigs;
+	FPeregonMeshBuffers Twigs;
 	rgen::Rng Rand(rgen::Hash(static_cast<uint32_t>(Index + 100000), Route.Params().Seed));
 	const uint32_t ForestSeed = rgen::Hash(Route.Params().Seed, 0xF0E57u);
 	for (double S = S0; S < S1; S += 9.0)
@@ -889,8 +900,8 @@ void APeregonRoadWorld::BuildTrees(FChunk& Chunk, int32 Index, double S0, double
 				double Y = 0.0;
 				Route.ToWorld(Sj, T, X, Y);
 				// Лес пятнами: перелески, поля, опушки.
-				const double Forest = rgen::Noise2D(X / 380.0, Y / 380.0, ForestSeed);
-				const double Density = FMath::SmoothStep(-0.25, 0.35, Forest) * 0.75 + 0.04;
+				// Та же густота, что у дальних массивов (rgen::Landscape); в городах деревьев меньше.
+				const double Density = Landscape.ForestDensity(X, Y) + 0.03 * Landscape.UrbanMask(X, Y);
 				if (!Rand.Chance(Density))
 				{
 					continue;
@@ -956,6 +967,28 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 		AddSign(Chunk, ExitS, Half + 3.0, Name, true);
 	}
 
+	FPeregonKit Kit(this, RootComponent, Chunk.Components, KitMaterials());
+	// Остановки по обе стороны: в сторону Кемерово — справа до центра, обратно — слева после.
+	for (int32 Side : {1, -1})
+	{
+		const double StopS = Poi.S + (Side > 0 ? -70.0 : 70.0);
+		if (StopS >= S0 && StopS < S1)
+		{
+			const rgen::RouteSample Smp = Route.Sample(StopS);
+			const FVector Base = RouteToWorld(StopS, Side * (Half + 4.2), 0.0);
+			// Лицом к дороге.
+			Kit.BusStop(Base, FRotator(0.0, FMath::RadiansToDegrees(Smp.Heading) + (Side > 0 ? -90.0 : 90.0), 0.0), Name);
+		}
+	}
+	// Колодец и лавка у дороги в середине села.
+	if (Poi.S + 25.0 >= S0 && Poi.S + 25.0 < S1)
+	{
+		const rgen::RouteSample Smp = Route.Sample(Poi.S + 25.0);
+		const FRotator Along(0.0, FMath::RadiansToDegrees(Smp.Heading), 0.0);
+		Kit.Well(RouteToWorld(Poi.S + 25.0, 12.0, 0.0), Along);
+		Kit.Bench(RouteToWorld(Poi.S + 31.0, 12.4, 0.0), Along + FRotator(0.0, -90.0, 0.0));
+	}
+
 	UInstancedStaticMeshComponent* Roofs = nullptr;
 	UInstancedStaticMeshComponent* Fence = nullptr;
 	rgen::Rng Rand(rgen::Hash(static_cast<uint32_t>(Poi.S), Route.Params().Seed));
@@ -975,6 +1008,24 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 				Fence = AddInstanced(Chunk, CubeMesh, EPeregonWorldMat::Wood, false);
 			}
 			BuildHouse(Chunk, S, Side, HouseSeed, Roofs);
+			// Двор: сарай, поленница, иногда лавка у калитки.
+			{
+				const rgen::RouteSample Smp = Route.Sample(S);
+				const FRotator Along(0.0, FMath::RadiansToDegrees(Smp.Heading), 0.0);
+				const float Pick = rgen::HashToUnit(rgen::Hash(HouseSeed, 31u));
+				if (Pick < 0.6f)
+				{
+					Kit.Shed(RouteToWorld(S + 6.0, Side * 41.0, 0.0), Along);
+				}
+				if (Pick > 0.3f)
+				{
+					Kit.Woodpile(RouteToWorld(S - 6.0, Side * 40.0, 0.0), Along);
+				}
+				if (Pick > 0.75f)
+				{
+					Kit.Bench(RouteToWorld(S + 4.0, Side * 14.6, 0.0), Along + FRotator(0.0, Side > 0 ? 90.0 : -90.0, 0.0));
+				}
+			}
 
 			// Штакетник вдоль улицы перед домом.
 			for (double Fs = S - 12.0; Fs < S + 12.0; Fs += 2.0)

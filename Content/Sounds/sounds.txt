@@ -39,6 +39,10 @@
 # key.turn =
 # lights.switch =
 # handbrake =
+# horn =                   # клаксон (петля, пока держите H)
+# blinker.on =             # щелчок реле поворотника
+# blinker.off =
+# item.pickup =            # взять товар с полки
 # wiper.swipe =            # один ход дворника (мотор + резинка по стеклу)
 
 # --- Пешком

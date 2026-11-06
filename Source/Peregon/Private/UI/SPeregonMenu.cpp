@@ -441,6 +441,7 @@ TSharedRef<SWidget> SPeregonMenu::BuildSettingsPage()
 	Add(MakeRow(INVTEXT("Длина суток"), MakeChoice(&TimeIndex, {INVTEXT("96 минут"), INVTEXT("48 минут"), INVTEXT("24 минуты"), INVTEXT("6 минут")})));
 
 	Add(MakeHeader(INVTEXT("ГРАФИКА")));
+	Add(MakeRow(INVTEXT("Стиль (текстуры — после перезапуска)"), MakeChoice(&StyleIndex, {INVTEXT("Живопись"), INVTEXT("Пиксели PSX")})));
 	Add(MakeRow(INVTEXT("Режим окна"), MakeChoice(&WindowModeIndex, {INVTEXT("Полный экран"), INVTEXT("Окно без рамки"), INVTEXT("Окно")})));
 	Add(MakeRow(INVTEXT("Разрешение"), MakeChoice(&ResolutionIndex, ResolutionNames)));
 	Add(MakeRow(INVTEXT("Качество"), MakeChoice(&QualityIndex,
@@ -469,6 +470,7 @@ void SPeregonMenu::LoadSettings()
 	Fov = S->FieldOfView;
 	HeadMotion = S->HeadMotion;
 	StartViewIndex = S->bStartFirstPerson ? 0 : 1;
+	StyleIndex = FMath::Clamp(S->VisualStyle, 0, 1);
 	TimeIndex = 1;
 	for (int32 I = 0; I < static_cast<int32>(UE_ARRAY_COUNT(TimeScales)); ++I)
 	{
@@ -527,6 +529,7 @@ void SPeregonMenu::ApplySettings()
 	S->FieldOfView = Fov;
 	S->HeadMotion = HeadMotion;
 	S->bStartFirstPerson = StartViewIndex == 0;
+	S->VisualStyle = StyleIndex;
 	S->TimeScale = TimeScales[FMath::Clamp(TimeIndex, 0, static_cast<int32>(UE_ARRAY_COUNT(TimeScales)) - 1)];
 
 	const EWindowMode::Type Modes[] = {EWindowMode::Fullscreen, EWindowMode::WindowedFullscreen, EWindowMode::Windowed};

@@ -22,6 +22,8 @@ class USpringArmComponent;
 class UMaterialInterface;
 class UProceduralMeshComponent;
 class UPeregonSynth;
+class UPeregonRadio;
+class UPointLightComponent;
 struct FInputActionValue;
 struct FPeregonTelemetry;
 
@@ -70,7 +72,7 @@ public:
 	int32 GetWiperMode() const { return WiperMode; }
 	bool HasDriver() const { return Driver != nullptr; }
 
-	void EnterCar(APeregonCharacter* Character);
+	void EnterCar(APeregonCharacter* Character, int32 InSeat = 0);
 	void ExitCar();
 	APeregonCharacter* GetDriver() const { return Driver; }
 
@@ -176,6 +178,26 @@ private:
 	void OnCycleWipers(const FInputActionValue& Value);
 	void UpdateWipers(float DeltaSeconds);
 
+	// Салон (PeregonCarCabin.cpp): радио, плафон, сигнал, поворотники, места, виды камеры.
+	void BuildCabinExtras();
+	void UpdateCabin(float DeltaSeconds);
+	void SetDomeLight(bool bOn);
+	void SetBlinkers(int32 Mode);
+	void SwitchSeat(int32 NewSeat);
+	FVector SeatEye(int32 InSeat) const;
+	FName SeatDoor(int32 InSeat) const;
+	void SetCameraMode(int32 Mode);
+	bool CanDrive() const { return Seat == 0; }
+	void OnRadioPower(const FInputActionValue& Value);
+	void OnRadioNext(const FInputActionValue& Value);
+	void OnDome(const FInputActionValue& Value);
+	void OnHornPressed(const FInputActionValue& Value);
+	void OnHornReleased(const FInputActionValue& Value);
+	void OnBlinkLeft(const FInputActionValue& Value);
+	void OnBlinkRight(const FInputActionValue& Value);
+	void OnHazard(const FInputActionValue& Value);
+	void OnNextSeat(const FInputActionValue& Value);
+
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> Mapping;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ThrottleAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> BrakeAction;
@@ -197,6 +219,30 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> DetailsAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ZoomAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> WipersAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> RadioAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> RadioNextAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> DomeAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> HornAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> BlinkLeftAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> BlinkRightAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> HazardAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> SeatAction;
+
+	UPROPERTY(Transient) TObjectPtr<UPeregonRadio> Radio;
+	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> HornSound;
+	UPROPERTY(Transient) TObjectPtr<UPointLightComponent> DomeLight;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> DomeMaterial;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> RadioDialMaterial;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> BlinkerLeft;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> BlinkerRight;
+	TWeakObjectPtr<AActor> RoadWorldRef;
+	int32 Seat = 0;          // 0 — водитель, 1 — переднее пассажирское, 2 — заднее левое, 3 — заднее правое
+	int32 CameraMode = 0;    // 0 — из салона, 1 — сзади, 2 — сверху издалека
+	int32 BlinkMode = 0;     // 0 — нет, 1 — левый, 2 — правый, 3 — аварийка
+	float BlinkTime = 0.f;
+	bool bBlinkLit = false;
+	bool bDome = false;
+	bool bHorn = false;
 
 	// Дворники и вода на лобовом стекле.
 	UPROPERTY() TObjectPtr<USceneComponent> WiperL;

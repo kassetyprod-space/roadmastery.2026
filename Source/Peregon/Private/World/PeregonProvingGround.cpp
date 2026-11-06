@@ -17,6 +17,8 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
+#include "World/PeregonKit.h"
+#include "World/PeregonServicePoint.h"
 
 namespace PeregonGround
 {
@@ -47,6 +49,130 @@ void APeregonProvingGround::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 	Build();
+}
+
+void APeregonProvingGround::BeginPlay()
+{
+	Super::BeginPlay();
+	if (GetWorld() && GetWorld()->IsGameWorld() && CubeMesh)
+	{
+		BuildShowcase();
+	}
+}
+
+void APeregonProvingGround::EndPlay(const EEndPlayReason::Type Reason)
+{
+	for (TWeakObjectPtr<AActor>& Actor : ShowActors)
+	{
+		if (Actor.IsValid())
+		{
+			Actor->Destroy();
+		}
+	}
+	ShowActors.Reset();
+	Super::EndPlay(Reason);
+}
+
+void APeregonProvingGround::BuildShowcase()
+{
+	using namespace PeregonGround;
+	// Улица выставки: асфальт вдоль X на Y = 90 м, газон к северу.
+	constexpr float RoadY = 9000.f;
+	const float Z = -Thickness * 0.5f;
+	AddBox(TEXT("ShowRoad"), FVector(14000.f, RoadY, Z + 2.f), FVector(32000.f, 800.f, Thickness), FRotator::ZeroRotator, Asphalt, AsphaltColor);
+	if (UStaticMeshComponent* Lawn = AddBox(TEXT("ShowLawn"), FVector(14000.f, RoadY + 9000.f, Z), FVector(32000.f, 17200.f, Thickness), FRotator::ZeroRotator,
+			Gravel, GravelColor))
+	{
+		FPeregonLook Grass(EPeregonTex::Grass, FLinearColor::White, 0.95f);
+		Grass.WorldTileCm = 400.f;
+		UPeregonArtSubsystem::ApplyLook(this, Lawn, Grass);
+	}
+	if (UStaticMeshComponent* Verge = AddBox(TEXT("ShowVerge"), FVector(14000.f, RoadY - 1000.f, Z), FVector(32000.f, 1200.f, Thickness), FRotator::ZeroRotator,
+			Gravel, GravelColor))
+	{
+		FPeregonLook Grass(EPeregonTex::Grass, FLinearColor::White, 0.95f);
+		Grass.WorldTileCm = 400.f;
+		UPeregonArtSubsystem::ApplyLook(this, Verge, Grass);
+	}
+
+	FPeregonKit Kit(this, RootComponent, Showcase, FPeregonKitMaterials::Create(this));
+	const FTransform Me = GetActorTransform();
+	// Сервис — как на трассе: в 24 м от оси, лицом (+X) к дороге.
+	struct FServiceSpot
+	{
+		EPeregonService Kind;
+		const TCHAR* Name;
+		float X;
+	};
+	const FServiceSpot Services[] = {{EPeregonService::Fuel, TEXT("АЗС «Полигон»"), 1500.f}, {EPeregonService::Cafe, TEXT("Кафе «Испытатель»"), 5500.f},
+		{EPeregonService::Shop, TEXT("Магазин"), 8500.f}};
+	for (const FServiceSpot& Spot : Services)
+	{
+		const FTransform Local(FRotator(0.f, -90.f, 0.f), FVector(Spot.X, RoadY + 2400.f, 1.f));
+		const FTransform World = Local * Me;
+		APeregonServicePoint* Service = GetWorld()->SpawnActorDeferred<APeregonServicePoint>(APeregonServicePoint::StaticClass(), World, this, nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (Service)
+		{
+			Service->Kind = Spot.Kind;
+			Service->DisplayName = Spot.Name;
+			Service->Region = 0;
+			Service->FinishSpawning(World);
+			ShowActors.Add(Service);
+		}
+	}
+	// Остановка напротив кафе, на южной стороне, лицом к дороге (+Y).
+	Kit.BusStop(FVector(5500.f, RoadY - 820.f, 0.f), FRotator(0.f, 90.f, 0.f), TEXT("Полигон"));
+	// Стелы вдоль южной обочины: областной центр, город, посёлок, граница областей. Лицом к едущему по +X.
+	Kit.CityStele(FVector(11500.f, RoadY - 1500.f, 0.f), FRotator(0.f, 180.f, 0.f), TEXT("Кемерово"), 2, TEXT("1918"), false);
+	Kit.CityStele(FVector(14500.f, RoadY - 1300.f, 0.f), FRotator(0.f, 180.f, 0.f), TEXT("Юрга"), 1, TEXT("1949"), false);
+	Kit.CityStele(FVector(16500.f, RoadY - 1300.f, 0.f), FRotator(0.f, 180.f, 0.f), TEXT("Топки"), 0, TEXT("1933"), false);
+	Kit.RegionStele(FVector(19000.f, RoadY - 1600.f, 0.f), FRotator(0.f, 180.f, 0.f), TEXT("Новосибирская область"), TEXT("Кемеровская область — Кузбасс"));
+
+	// Город: все типы зданий в ряд к северу.
+	std::vector<rgen::Building> City;
+	auto Add = [&City](rgen::BuildingKind Kind, double X, double Y, double L, double W, int Floors, uint32 Seed) {
+		rgen::Building B;
+		B.Kind = Kind;
+		B.X = X;
+		B.Y = Y;
+		B.Z = 0.0;
+		B.Yaw = 0.0;
+		B.Length = L;
+		B.Width = W;
+		B.Floors = Floors;
+		B.Seed = Seed;
+		City.push_back(B);
+	};
+	const double Row = (RoadY + 6000.0) / 100.0; // м
+	Add(rgen::BuildingKind::Panel5, 20.0, Row, 60.0, 12.0, 5, 1);
+	Add(rgen::BuildingKind::Panel9, 100.0, Row, 90.0, 13.0, 9, 2);
+	Add(rgen::BuildingKind::Tower, 170.0, Row, 22.0, 20.0, 16, 3);
+	Add(rgen::BuildingKind::Brick, 215.0, Row, 40.0, 15.0, 4, 4);
+	Add(rgen::BuildingKind::Industrial, 275.0, Row, 55.0, 25.0, 1, 5);
+	Add(rgen::BuildingKind::Chimney, 320.0, Row, 7.0, 7.0, 1, 6);
+	Add(rgen::BuildingKind::Church, 20.0, Row + 45.0, 26.0, 18.0, 1, 7);
+	Add(rgen::BuildingKind::Mast, 320.0, Row + 45.0, 12.0, 12.0, 1, 8);
+	Kit.Buildings(City);
+
+	// Деревенский двор: колодец, лавка, поленница, сарай, штакетник; деревья и трава вокруг.
+	const FVector Yard(12500.f, RoadY + 2600.f, 0.f);
+	Kit.Fence(Yard + FVector(-1500.f, -1200.f, 0.f), Yard + FVector(1500.f, -1200.f, 0.f));
+	Kit.Well(Yard + FVector(-600.f, 0.f, 0.f), FRotator::ZeroRotator);
+	Kit.Bench(Yard + FVector(200.f, -900.f, 0.f), FRotator(0.f, 90.f, 0.f));
+	Kit.Woodpile(Yard + FVector(900.f, 600.f, 0.f), FRotator::ZeroRotator);
+	Kit.Shed(Yard + FVector(-800.f, 900.f, 0.f), FRotator::ZeroRotator);
+	Kit.GrassPatch(Yard + FVector(3500.f, 0.f, 0.f), 2500.f, 900, 11u);
+	Kit.GrassPatch(FVector(23000.f, RoadY + 4000.f, 0.f), 3500.f, 1400, 12u);
+	for (int32 K = 0; K < 14; ++K)
+	{
+		Kit.Tree(FVector(20000.f + K * 700.f, RoadY + 2500.f + (K % 3) * 900.f, 0.f), K % 2 == 0, 0.8f + 0.05f * (K % 5));
+	}
+	// Фонари вдоль улицы (ночью светятся).
+	for (float X = 0.f; X < 28000.f; X += 4000.f)
+	{
+		Kit.StreetLamp(FVector(X, RoadY + 620.f, 0.f), FVector(0.f, -1.f, 0.f));
+	}
 }
 
 FTransform APeregonProvingGround::GetSpawnTransform() const
