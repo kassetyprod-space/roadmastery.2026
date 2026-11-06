@@ -147,7 +147,7 @@ private:
 	void BuildRegionStele(FChunk& Chunk, double S, const FString& Before, const FString& After);
 	void BuildFoliage(FChunk& Chunk, int32 Index, double S0, double S1);
 	void UpdateSeason(bool bForce);
-	UProceduralMeshComponent* AddProc(TArray<TWeakObjectPtr<UActorComponent>>& Owner, const FMeshBuffers& Data, UMaterialInterface* Material, bool bCollision,
+	UProceduralMeshComponent* AddProc(TArray<TWeakObjectPtr<UActorComponent>>& OutList, const FMeshBuffers& Data, UMaterialInterface* Material, bool bCollision,
 		bool bShadow = true);
 	UStaticMeshComponent* AddSceneryMesh(UStaticMesh* Mesh, const FTransform& Transform, UMaterialInterface* Material);
 	APeregonSky* FindSky();

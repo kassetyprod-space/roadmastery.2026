@@ -120,7 +120,7 @@ void APeregonRoadWorld::FMeshBuffers::AddBox(const FVector& BaseCenter, float Ya
 	}
 }
 
-UProceduralMeshComponent* APeregonRoadWorld::AddProc(TArray<TWeakObjectPtr<UActorComponent>>& Owner, const FMeshBuffers& Data, UMaterialInterface* Material,
+UProceduralMeshComponent* APeregonRoadWorld::AddProc(TArray<TWeakObjectPtr<UActorComponent>>& OutList, const FMeshBuffers& Data, UMaterialInterface* Material,
 	bool bCollision, bool bShadow)
 {
 	if (Data.Vertices.Num() == 0)
@@ -143,7 +143,7 @@ UProceduralMeshComponent* APeregonRoadWorld::AddProc(TArray<TWeakObjectPtr<UActo
 	{
 		Mesh->SetMaterial(0, Material);
 	}
-	Owner.Add(Mesh);
+	OutList.Add(Mesh);
 	return Mesh;
 }
 
@@ -570,11 +570,11 @@ void APeregonRoadWorld::BuildCity(const rgen::Settlement& Town)
 // ---------------------------------------------------------------------------------------------
 void APeregonRoadWorld::BuildStele(FChunk& Chunk, double S, int32 TownIndex)
 {
-	if (!Landscape.Settlements().IsValidIndex(TownIndex))
+	if (TownIndex < 0 || static_cast<size_t>(TownIndex) >= Landscape.Settlements().size())
 	{
 		return;
 	}
-	const rgen::Settlement& Town = Landscape.Settlements()[TownIndex];
+	const rgen::Settlement& Town = Landscape.Settlements()[static_cast<size_t>(TownIndex)];
 	const FString Name = FString(UTF8_TO_TCHAR(Town.Name.c_str()));
 	const FString Year = PeregonScenery::TownYear(Name);
 	const bool bLeaving = Town.S < 1.0; // выезд из Новосибирска
