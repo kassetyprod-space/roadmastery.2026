@@ -28,7 +28,8 @@ enum class PoiType
 	Finish,
 	Shop,    // магазин у дороги (карты, мелочи)
 	Border,  // граница области
-	Waypoint // точка формы дороги без названия
+	Waypoint, // точка формы дороги без названия
+	Parts     // фирменный магазин автозапчастей (в городах)
 };
 
 // Опорная точка маршрута (в метрах игрового мира).
@@ -111,9 +112,17 @@ struct FlattenZone
 	double Strength = 1.0;
 };
 
+// Двор у начала маршрута (справа от дороги): пятиэтажка, гаражный кооператив, помойка, разборка.
+// Рельеф там ровный, города и леса там не строятся.
+constexpr double StartYardS0 = 10.0;
+constexpr double StartYardS1 = 140.0;
+constexpr double StartYardTMin = 9.0;
+constexpr double StartYardTMax = 82.0;
+
 class RGEN_API Route
 {
 public:
+	static FlattenZone StartYard();
 	void Build(const RouteParams& InParams);
 
 	const RouteParams& Params() const { return P; }

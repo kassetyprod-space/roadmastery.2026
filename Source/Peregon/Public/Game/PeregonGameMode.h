@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "vsim/CarParts.h"
 #include "Game/PeregonGameInstance.h"
 #include "GameFramework/GameModeBase.h"
 #include "PeregonGameMode.generated.h"
@@ -56,7 +57,12 @@ public:
 	const TArray<FPeregonToast>& GetToasts() const { return Toasts; }
 
 	EPeregonMode GetMode() const { return Mode; }
+	// «Своя» машина — та, в которую сели последней. Остальные машины колонны стоят, где их оставили.
 	APeregonCar* GetCar() const { return Car; }
+	const TArray<TObjectPtr<APeregonCar>>& GetCars() const { return Cars; }
+	void SetActiveCar(APeregonCar* InCar);
+	// Ближайшая машина колонны к точке (не дальше MaxDistCm).
+	APeregonCar* NearestCar(const FVector& Where, float MaxDistCm) const;
 	APeregonCharacter* GetWalker() const { return Walker; }
 	APeregonRoadWorld* GetRoadWorld() const { return RoadWorld; }
 	APeregonSky* GetSky() const { return Sky; }
@@ -75,6 +81,9 @@ private:
 	UPROPERTY(Transient) TObjectPtr<APeregonRoadWorld> RoadWorld;
 	UPROPERTY(Transient) TObjectPtr<APeregonProvingGround> ProvingGround;
 	UPROPERTY(Transient) TObjectPtr<APeregonCar> Car;
+	UPROPERTY(Transient) TArray<TObjectPtr<APeregonCar>> Cars;
+	UPROPERTY(Transient) TObjectPtr<AActor> GarageYard;
+	APeregonCar* SpawnCar(const FTransform& Where, const FLinearColor& Color, const vsim::parts::CarState* Parts);
 	UPROPERTY(Transient) TObjectPtr<APeregonCharacter> Walker;
 	UPROPERTY(Transient) TObjectPtr<APeregonSky> Sky;
 	UPROPERTY(Transient) TObjectPtr<ACameraActor> MenuCamera;

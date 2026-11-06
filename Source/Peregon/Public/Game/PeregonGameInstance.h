@@ -26,6 +26,8 @@ struct FPeregonRunConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartMoney = 3000.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartHour = 9.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") bool bProvingGround = false;
+	// Сюжетное начало: пятиэтажка, гаражный кооператив, «Сокол» без половины деталей, помойка и разборка рядом.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") bool bGarageStart = true;
 	// День года старта (1..365). 258 — 15 сентября, золотая осень.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") int32 StartDayOfYear = 258;
 };
@@ -131,7 +133,7 @@ public:
 	void ResetInventory()
 	{
 		Pockets = FPeregonContainer();
-		Pockets.Capacity = 6;
+		Pockets.Capacity = 10;
 		Glovebox = FPeregonContainer();
 		Glovebox.Capacity = 4;
 		Glovebox.Add(PeregonItems::Documents);

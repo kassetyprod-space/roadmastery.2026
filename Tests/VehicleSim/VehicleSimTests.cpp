@@ -363,6 +363,17 @@ int main()
 		using namespace vsim::parts;
 		CarState Wreck = MakeGarageWreck(7u);
 		Effects E = Evaluate(Wreck);
+		{
+			CarState Copy;
+			const bool bOk = Unpack(Pack(Wreck), Copy);
+			Check(bOk && Copy.Has(Slot::Radiator) == Wreck.Has(Slot::Radiator) && !Copy.Has(Slot::Battery)
+					  && std::abs(Copy.PanelAt(Panel::SillL).Holes - Wreck.PanelAt(Panel::SillL).Holes) < 1e-9,
+				"сохранение деталей и кузова: Pack → Unpack без потерь", Overall(Copy));
+			CarState Bat = MakeFactoryNew(nullptr);
+			const PartItem Old = Remove(Bat, Slot::Battery);
+			Install(Bat, Old);
+			Check(Bat.BatteryCharge > 0.99 && Overall(MakeFactoryNew(nullptr)) > Overall(Wreck) + 0.3, "аккумулятор уносит заряд с собой", Bat.BatteryCharge);
+		}
 		Check(!E.bSpark && !E.bFuel && E.StarterFactor < 0.01, "гаражная находка: нет искры, топлива, аккумулятора", E.StarterFactor);
 		// Собираем: аккумулятор, свечи, карбюратор, фильтр, радиатор, антифриз.
 		Check(!CanInstall(Wreck, {Slot::SparkPlugs, 0.6, 0}, true, false).bOk, "под капотом — только с открытым капотом", 0.0);

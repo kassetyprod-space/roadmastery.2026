@@ -15,7 +15,7 @@ class PEREGON_API UPeregonSaveGame : public USaveGame
 public:
 	static const FString SlotName;
 
-	UPROPERTY() int32 Version = 3;
+	UPROPERTY() int32 Version = 4;
 	UPROPERTY() FPeregonRunConfig Config;
 	UPROPERTY() FTransform CarTransform;
 	UPROPERTY() FPeregonCarState CarState;
@@ -31,4 +31,7 @@ public:
 	UPROPERTY() float TraveledMaxS = 0.f;
 	// С версии 3: погода и время года.
 	UPROPERTY() FPeregonClimate Climate;
+	// С версии 4: детали и кузов машины (vsim::parts::Pack) и её цвет.
+	UPROPERTY() TArray<double> Parts;
+	UPROPERTY() FLinearColor CarColor = FLinearColor(0.32f, 0.04f, 0.04f);
 };

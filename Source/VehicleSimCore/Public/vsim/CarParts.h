@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace vsim
 {
@@ -92,6 +93,7 @@ struct PartItem
 	Slot Kind = Slot::Battery;
 	double Condition = 1.0; // 0..1
 	int Tier = 0;           // 0 — стоковая, 1 — улучшенная, 2 — спортивная (фирменный магазин)
+	double Charge = -1.0;   // заряд аккумулятора 0..1 (−1 — не задан: берётся Condition)
 };
 
 struct PanelState
@@ -210,5 +212,12 @@ VSIM_API CarState MakeGarageWreck(uint32_t Seed);
 // Брошенная машина: всё на месте, но в случайном состоянии Quality 0..1 (1 — как с завода).
 VSIM_API CarState MakeAbandoned(uint32_t Seed, double Quality);
 VSIM_API CarState MakeFactoryNew(const float* Color);
+
+// Сохранение: всё состояние одним плоским списком чисел (порядок фиксирован, в начале — версия).
+VSIM_API std::vector<double> Pack(const CarState& Car);
+// false — список пуст или не той версии (тогда Car не меняется).
+VSIM_API bool Unpack(const std::vector<double>& Data, CarState& Car);
+// Общая оценка машины 0..1 (детали + кузов) — для подсказок и цен.
+VSIM_API double Overall(const CarState& Car);
 } // namespace parts
 } // namespace vsim

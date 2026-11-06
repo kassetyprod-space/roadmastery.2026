@@ -314,6 +314,7 @@ void Route::BuildPois()
 		Item.RealKm = RealKmAt(Item.S);
 		AddFlatten(Item);
 	}
+	FlattenList.push_back(StartYard());
 }
 
 void Route::BuildGuidedPois()
@@ -349,6 +350,12 @@ void Route::BuildGuidedPois()
 			Shop.Side = 1;
 			Shop.Name = "Магазин «Продукты»";
 			PoiList.push_back(Shop);
+			Poi Spares;
+			Spares.Type = PoiType::Parts;
+			Spares.S = std::min(Item.S + 220.0, TotalLength - 120.0);
+			Spares.Side = 1;
+			Spares.Name = "Автозапчасти «ВАЗ»";
+			PoiList.push_back(Spares);
 		}
 	}
 	for (const ServiceSpec& Spec : P.Services)
@@ -367,6 +374,7 @@ void Route::BuildGuidedPois()
 		Item.Region = RegionAt(Item.S);
 		AddFlatten(Item);
 	}
+	FlattenList.push_back(StartYard());
 }
 
 int Route::RegionAt(double S) const
@@ -420,6 +428,17 @@ double Route::SAtRealKm(double Km) const
 	return TotalLength;
 }
 
+FlattenZone Route::StartYard()
+{
+	FlattenZone Z;
+	Z.S0 = StartYardS0;
+	Z.S1 = StartYardS1;
+	Z.TMin = StartYardTMin;
+	Z.TMax = StartYardTMax;
+	Z.Strength = 1.0;
+	return Z;
+}
+
 void Route::AddFlatten(const Poi& Item)
 {
 	{
@@ -429,6 +448,7 @@ void Route::AddFlatten(const Poi& Item)
 		case PoiType::Fuel:
 		case PoiType::Cafe:
 		case PoiType::Shop:
+		case PoiType::Parts:
 			Z.S0 = Item.S - 45.0;
 			Z.S1 = Item.S + 45.0;
 			Z.TMin = Item.Side > 0 ? 5.0 : -48.0;

@@ -56,6 +56,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Peregon|Visual")
 	TObjectPtr<UStaticMeshComponent> HeadMesh;
 
+	// Вещь в руках (ячейка карманов, выбранная клавишами 1–0).
+	UPROPERTY(VisibleAnywhere, Category = "Peregon|Visual")
+	TObjectPtr<UStaticMeshComponent> HeldMesh;
+	FName HeldShown;
+	void UpdateHeld();
+
 	UPROPERTY(EditAnywhere, Category = "Peregon|Movement")
 	float WalkSpeed = 170.f;
 

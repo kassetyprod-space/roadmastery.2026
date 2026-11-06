@@ -3,6 +3,7 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Game/PeregonHUD.h"
 #include "Game/PeregonPlayerController.h"
 #include "Game/PeregonSaveGame.h"
@@ -10,6 +11,8 @@
 #include "Player/PeregonCharacter.h"
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
+#include "World/PeregonGarageYard.h"
+#include "World/PeregonPickup.h"
 #include "World/PeregonProvingGround.h"
 #include "World/PeregonRoadWorld.h"
 #include "World/PeregonSky.h"
@@ -68,7 +71,17 @@ void APeregonGameMode::ClearSession()
 	{
 		PC->UnPossess();
 	}
-	for (AActor* Actor : TArray<AActor*>{Car.Get(), Walker.Get(), RoadWorld.Get(), ProvingGround.Get(), MenuCamera.Get()})
+	TArray<AActor*> Doomed{Car.Get(), Walker.Get(), RoadWorld.Get(), ProvingGround.Get(), MenuCamera.Get(), GarageYard.Get()};
+	for (APeregonCar* Other : Cars)
+	{
+		Doomed.AddUnique(Other);
+	}
+	// Вещи, разбросанные по миру (хлам на помойке, то, что игрок положил на землю).
+	for (TActorIterator<APeregonPickup> It(GetWorld()); It; ++It)
+	{
+		Doomed.Add(*It);
+	}
+	for (AActor* Actor : Doomed)
 	{
 		if (IsValid(Actor))
 		{
@@ -76,6 +89,8 @@ void APeregonGameMode::ClearSession()
 		}
 	}
 	Car = nullptr;
+	Cars.Reset();
+	GarageYard = nullptr;
 	Walker = nullptr;
 	RoadWorld = nullptr;
 	ProvingGround = nullptr;
@@ -174,7 +189,7 @@ bool APeregonGameMode::ContinueGame()
 		}
 		if (Save->Version >= 2)
 		{
-			GI->Pockets = Save->Pockets;
+			GI->Pockets = Save->Pockets; // бардачок и багажник уходят в машину в StartSession
 			GI->Glovebox = Save->Glovebox;
 			GI->Trunk = Save->Trunk;
 			GI->TraveledMaxS = Save->TraveledMaxS;
@@ -215,8 +230,11 @@ bool APeregonGameMode::SaveGame(const FString& PlaceName)
 	Save->SavedAt = FDateTime::Now();
 	Save->PlaceName = PlaceName.IsEmpty() ? RoadWorld->GetPlaceName(Save->RouteS) : PlaceName;
 	Save->Pockets = GI->Pockets;
-	Save->Glovebox = GI->Glovebox;
-	Save->Trunk = GI->Trunk;
+	Save->Glovebox = Car->GloveStore;
+	Save->Trunk = Car->TrunkStore;
+	Save->CarColor = Car->PaintColor;
+	const std::vector<double> Packed = vsim::parts::Pack(Car->GetParts());
+	Save->Parts.Append(Packed.data(), static_cast<int32>(Packed.size()));
 	Save->TraveledMaxS = GI->TraveledMaxS;
 	Save->Climate = GI->Climate;
 	return UGameplayStatics::SaveGameToSlot(Save, UPeregonSaveGame::SlotName, 0);
@@ -266,19 +284,75 @@ void APeregonGameMode::StartSession(const FPeregonRunConfig& Config, const UPere
 		}
 	}
 
-	Car = GetWorld()->SpawnActorDeferred<APeregonCar>(APeregonCar::StaticClass(), CarTransform, nullptr, nullptr,
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	Car->PaintColor = Config.CarColor;
-	Car->FinishSpawning(CarTransform);
+	// Сюжетное начало: двор с гаражами, машина без половины деталей.
+	const bool bGarage = Mode == EPeregonMode::Road && !Save && Config.bGarageStart;
+	APeregonGarageYard* Yard = nullptr;
+	if (bGarage)
+	{
+		Yard = GetWorld()->SpawnActor<APeregonGarageYard>(APeregonGarageYard::StaticClass(), FTransform::Identity, Params);
+		Yard->Build(RoadWorld, Config.Seed);
+		GarageYard = Yard;
+		CarTransform = Yard->GetCarSpot();
+	}
+
+	vsim::parts::CarState Parts;
+	const vsim::parts::CarState* PartsPtr = nullptr;
+	FLinearColor Color = Config.CarColor;
+	if (bGarage)
+	{
+		Parts = vsim::parts::MakeGarageWreck(static_cast<uint32>(Config.Seed));
+		const float Faded[3] = {Color.R * 0.85f, Color.G * 0.85f, Color.B * 0.85f};
+		for (vsim::parts::PanelState& P : Parts.Panels)
+		{
+			FMemory::Memcpy(P.Color, Faded, sizeof(Faded));
+		}
+		PartsPtr = &Parts;
+	}
+	else if (Save && Save->Version >= 4)
+	{
+		const std::vector<double> Packed(Save->Parts.GetData(), Save->Parts.GetData() + Save->Parts.Num());
+		if (vsim::parts::Unpack(Packed, Parts))
+		{
+			PartsPtr = &Parts;
+		}
+		Color = Save->CarColor;
+	}
+	Car = SpawnCar(CarTransform, Color, PartsPtr);
 	ApplyAssists(Config);
+	if (UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>())
+	{
+		Car->GloveStore = GI->Glovebox;
+		Car->TrunkStore = GI->Trunk;
+	}
 	if (Save)
 	{
 		Car->GetVehicleMovement()->ApplyCarState(Save->CarState);
 	}
+	else if (bGarage)
+	{
+		FPeregonCarState Tank = Car->GetVehicleMovement()->GetCarState();
+		Tank.FuelL = 6.f; // на донышке — до первой АЗС хватит
+		Car->GetVehicleMovement()->ApplyCarState(Tank);
+		// Брошенный «Сокол» на разборке: всё на месте, но всё уставшее. Донор или вторая машина колонны.
+		const vsim::parts::CarState Donor = vsim::parts::MakeAbandoned(static_cast<uint32>(Config.Seed) * 31u + 7u, 0.32);
+		if (APeregonCar* Second = SpawnCar(Yard->GetDonorSpot(), FLinearColor(0.45f, 0.38f, 0.22f), &Donor))
+		{
+			FPeregonCarState Dry = Second->GetVehicleMovement()->GetCarState();
+			Dry.FuelL = 2.f;
+			Second->GetVehicleMovement()->ApplyCarState(Dry);
+			Second->GetVehicleMovement()->SetParkingBrake(true);
+		}
+	}
 
-	// Игрок стоит у водительской двери, лицом по ходу машины.
-	const FRotator Facing(0.f, CarTransform.Rotator().Yaw, 0.f);
-	const FVector WalkerLocation = CarTransform.TransformPosition(FVector(20.f, -170.f, 40.f));
+	// Игрок стоит у водительской двери, лицом по ходу машины (или выходит из подъезда пятиэтажки).
+	FRotator Facing(0.f, CarTransform.Rotator().Yaw, 0.f);
+	FVector WalkerLocation = CarTransform.TransformPosition(FVector(20.f, -170.f, 40.f));
+	if (Yard)
+	{
+		const FTransform Door = Yard->GetSpawnSpot(0);
+		Facing = FRotator(0.f, Door.Rotator().Yaw, 0.f);
+		WalkerLocation = Door.GetLocation() + FVector(0.f, 0.f, 60.f);
+	}
 	Walker = GetWorld()->SpawnActor<APeregonCharacter>(APeregonCharacter::StaticClass(), WalkerLocation, Facing, Params);
 
 	if (APeregonPlayerController* PC = Cast<APeregonPlayerController>(GetPlayer()))
@@ -290,8 +364,17 @@ void APeregonGameMode::StartSession(const FPeregonRunConfig& Config, const UPere
 
 	if (Mode == EPeregonMode::Road)
 	{
-		Toast(Save ? FString::Printf(TEXT("С возвращением! %s"), *Save->PlaceName)
-				   : FString(TEXT("Новосибирск → Заречный, 15 км. Подойдите к водительской двери и нажмите E")), 7.f);
+		if (bGarage)
+		{
+			Toast(TEXT("Утро. «Сокол» ждёт в гаражном кооперативе — но без аккумулятора, свечей, карбюратора и фильтра."), 9.f);
+			Toast(TEXT("Инструмент — на верстаке у гаража. Хлам — на помойке у дороги, б/у узлы — на разборке за забором."), 9.f);
+			Toast(TEXT("1–0 — взять вещь в руки, E (держать) — работать, G — положить. Капот открывается E."), 9.f);
+		}
+		else
+		{
+			Toast(Save ? FString::Printf(TEXT("С возвращением! %s"), *Save->PlaceName)
+					   : FString(TEXT("Новосибирск → Заречный, 15 км. Подойдите к водительской двери и нажмите E")), 7.f);
+		}
 	}
 	else
 	{
@@ -370,4 +453,54 @@ void APeregonGameMode::Tick(float DeltaSeconds)
 		const FVector Target = RoadWorld->RouteToWorld(MenuCameraS + 45.0, 2.0, 1.5);
 		MenuCamera->SetActorLocationAndRotation(Eye, (Target - Eye).Rotation());
 	}
+}
+
+APeregonCar* APeregonGameMode::SpawnCar(const FTransform& Where, const FLinearColor& Color, const vsim::parts::CarState* Parts)
+{
+	APeregonCar* NewCar = GetWorld()->SpawnActorDeferred<APeregonCar>(APeregonCar::StaticClass(), Where, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!NewCar)
+	{
+		return nullptr;
+	}
+	NewCar->PaintColor = Color;
+	if (Parts)
+	{
+		NewCar->SetParts(*Parts);
+	}
+	NewCar->GloveStore.Capacity = 4;
+	NewCar->TrunkStore.Capacity = 12;
+	NewCar->FinishSpawning(Where);
+	Cars.Add(NewCar);
+	return NewCar;
+}
+
+void APeregonGameMode::SetActiveCar(APeregonCar* InCar)
+{
+	if (InCar && InCar != Car)
+	{
+		Car = InCar;
+		Cars.AddUnique(InCar);
+		ApplyAssists(GetGameInstance<UPeregonGameInstance>() ? GetGameInstance<UPeregonGameInstance>()->Config : FPeregonRunConfig());
+	}
+}
+
+APeregonCar* APeregonGameMode::NearestCar(const FVector& Where, float MaxDistCm) const
+{
+	APeregonCar* Best = nullptr;
+	float BestDist = MaxDistCm;
+	for (APeregonCar* Other : Cars)
+	{
+		if (!IsValid(Other))
+		{
+			continue;
+		}
+		const float D = FVector::Dist(Other->GetActorLocation(), Where);
+		if (D < BestDist)
+		{
+			BestDist = D;
+			Best = Other;
+		}
+	}
+	return Best;
 }

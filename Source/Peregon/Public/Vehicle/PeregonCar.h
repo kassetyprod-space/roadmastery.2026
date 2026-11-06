@@ -6,7 +6,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "Game/PeregonInventory.h"
 #include "Interaction/PeregonInteractable.h"
+#include "vsim/CarParts.h"
 #include "PeregonCar.generated.h"
 
 class APeregonCharacter;
@@ -84,6 +86,21 @@ public:
 	// Цвет кузова (задаётся до BeginPlay, например при создании новой игры).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon")
 	FLinearColor PaintColor = FLinearColor(0.32f, 0.04f, 0.04f);
+
+	// --- Узлы, детали и кузов (PeregonCarParts.cpp) ---
+	// Что стоит в машине и в каком состоянии. Задать до FinishSpawning — иначе машина «как с завода».
+	void SetParts(const vsim::parts::CarState& State);
+	const vsim::parts::CarState& GetParts() const { return PartsState; }
+	const vsim::parts::Effects& GetPartEffects() const { return PartsEffects; }
+	bool HasDashboard() const { return PartsEffects.bDashboard; }
+	// Бардачок и багажник у каждой машины свои.
+	FPeregonContainer* GetStorage(EPeregonStorage Storage);
+	// Идёт ли работа (снять/поставить/кузов) и насколько она сделана 0..1.
+	bool IsWorking() const { return Job.bActive; }
+	float GetWorkProgress() const { return Job.Duration > 0.f ? Job.Elapsed / Job.Duration : 0.f; }
+
+	UPROPERTY(SaveGame) FPeregonContainer TrunkStore;
+	UPROPERTY(SaveGame) FPeregonContainer GloveStore;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Peregon")
@@ -203,6 +220,41 @@ private:
 	void ApplyDirt();
 	int32 WindowIndex(const UPrimitiveComponent* Part) const;
 
+	// Узлы и кузов.
+	void BuildPartSlots();
+	void UpdateParts(float DeltaSeconds, const FPeregonTelemetry& T);
+	void RebuildPartsMesh();
+	FString PartsPrompt(const UPrimitiveComponent* Part, const APawn* User) const;
+	bool PartsInteract(UPrimitiveComponent* Part, APawn* User);
+	void PartsInteractStop(UPrimitiveComponent* Part);
+	// Панель кузова под прицелом (−1 — не панель).
+	int32 PanelOf(const UPrimitiveComponent* Part) const;
+	bool IsHoodOpen() const;
+	void StartJob(const FString& Label, float Seconds, UPrimitiveComponent* Part, APawn* User, TFunction<void()> Finish);
+	struct FPartsJob
+	{
+		bool bActive = false;
+		FString Label;
+		float Elapsed = 0.f;
+		float Duration = 1.f;
+		TWeakObjectPtr<UPrimitiveComponent> Part;
+		TWeakObjectPtr<APawn> User;
+		TFunction<void()> Finish;
+	};
+	FPartsJob Job;
+	vsim::parts::CarState PartsState;
+	vsim::parts::Effects PartsEffects;
+	bool bPartsAssigned = false;
+	bool bPartsDirty = true;
+	bool bBodyDirty = true;
+	double LastOdometerKm = -1.0;
+	float PartsToastCooldown = 0.f;
+	UPROPERTY(Transient) TArray<TObjectPtr<UBoxComponent>> SlotBoxes;   // по vsim::parts::Slot
+	UPROPERTY(Transient) TArray<TObjectPtr<UBoxComponent>> PanelBoxes;  // крылья, четверти, крыша, пороги
+	UPROPERTY(Transient) TArray<TObjectPtr<UBoxComponent>> FillBoxes;   // 0 — масло, 1 — антифриз
+	UPROPERTY(Transient) TObjectPtr<UProceduralMeshComponent> PartsMesh;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> PartsMaterial;
+
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> Mapping;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ThrottleAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> BrakeAction;
@@ -252,6 +304,9 @@ private:
 		TArray<FVector> Normals;
 		TArray<FVector2D> UVs;
 		TArray<float> Mask;
+		// Краска кузова: панель каждой вершины (255 — не краска) и шум для пятен ржавчины.
+		TArray<uint8> PanelIndex;
+		TArray<float> Noise;
 	};
 	TArray<FDirtSection> DirtSections;
 

@@ -374,9 +374,16 @@ void APeregonCar::ToggleMovingPart(FName Tag)
 void APeregonCar::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!bPartsAssigned)
+	{
+		const float Color[3] = {PaintColor.R, PaintColor.G, PaintColor.B};
+		PartsState = vsim::parts::MakeFactoryNew(Color);
+	}
+	PartsEffects = vsim::parts::Evaluate(PartsState);
 	BuildModelMeshes();
 	BuildSounds();
 	BuildCabinExtras();
+	BuildPartSlots();
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
 	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
 	PlaceOnGround(GetActorTransform());
@@ -413,7 +420,8 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	FPeregonLook Look;
 	switch (M)
 	{
-	case vmodel::Mat::Paint: Look = FPeregonLook(EPeregonTex::Paint, PaintColor, 0.35f); break;
+	// Цвет каждой панели — в цвете вершин (ApplyDirt), материал белый. Без M_PSX3 вершинный цвет не читается — тогда общий цвет.
+	case vmodel::Mat::Paint: Look = FPeregonLook(EPeregonTex::Paint, Art->HasWeatherMaterials() ? FLinearColor::White : PaintColor, 0.35f); break;
 	case vmodel::Mat::Chrome: Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.9f, 0.9f, 0.88f), 0.18f, 1.f); break;
 	case vmodel::Mat::BlackTrim: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.035f, 0.035f, 0.04f), 0.6f); break;
 	case vmodel::Mat::Rubber: Look = FPeregonLook(EPeregonTex::Rubber, FLinearColor(0.11f, 0.11f, 0.11f), 0.92f); break;
@@ -565,6 +573,54 @@ void APeregonCar::BuildModelMeshes()
 					const float Blot = 0.6f + 0.4f * (0.5f + 0.5f * FMath::PerlinNoise3D(FVector(V) * 0.08f + FVector(OriginZ)));
 					Dirty.Mask[K] = Low * Blot;
 				}
+				// Панель кузова у каждой вершины: двери, капот и багажник — свои узлы, остальное делим по месту.
+				Dirty.PanelIndex.Init(255, N);
+				Dirty.Noise.SetNumUninitialized(N);
+				for (int32 K = 0; K < N; ++K)
+				{
+					const FVector P = Vertices[K] + PeregonCarModel::ToVector(Part.Origin);
+					Dirty.Noise[K] = 0.5f + 0.5f * FMath::PerlinNoise3D(P * 0.045f + FVector(3.1f, 7.7f, 1.3f));
+				}
+				if (S.Material == vmodel::Mat::Paint)
+				{
+					using vsim::parts::Panel;
+					for (int32 K = 0; K < N; ++K)
+					{
+						const FVector P = Vertices[K] + PeregonCarModel::ToVector(Part.Origin);
+						Panel Which = Panel::Roof;
+						switch (Part.Id)
+						{
+						case vmodel::Part::Hood: Which = Panel::Hood; break;
+						case vmodel::Part::Trunk: Which = Panel::Trunk; break;
+						case vmodel::Part::DoorFL: Which = Panel::DoorFL; break;
+						case vmodel::Part::DoorFR: Which = Panel::DoorFR; break;
+						case vmodel::Part::DoorRL: Which = Panel::DoorRL; break;
+						case vmodel::Part::DoorRR: Which = Panel::DoorRR; break;
+						default:
+						{
+							const bool bLeft = P.Y < 0.0;
+							if (P.Z > 58.0)
+							{
+								Which = Panel::Roof;
+							}
+							else if (P.X > 95.0)
+							{
+								Which = bLeft ? Panel::FenderFL : Panel::FenderFR;
+							}
+							else if (P.X < -95.0)
+							{
+								Which = bLeft ? Panel::QuarterRL : Panel::QuarterRR;
+							}
+							else
+							{
+								Which = bLeft ? Panel::SillL : Panel::SillR;
+							}
+							break;
+						}
+						}
+						Dirty.PanelIndex[K] = static_cast<uint8>(Which);
+					}
+				}
 			}
 			UMaterialInterface* Material = SlotMaterials[static_cast<int32>(S.Material)];
 			if (Material)
@@ -664,6 +720,7 @@ void APeregonCar::Tick(float DeltaSeconds)
 	UpdateWipers(DeltaSeconds);
 	UpdateCabin(DeltaSeconds);
 	UpdateGlassAndDirt(DeltaSeconds);
+	UpdateParts(DeltaSeconds, T);
 	UpdateSounds(DeltaSeconds, T);
 	if (IsPlayerControlled())
 	{
@@ -856,13 +913,16 @@ void APeregonCar::SetHeadlights(bool bOn)
 		PeregonAudio::PlayEvent(this, TEXT("lights.switch"), LightKnobPivot ? LightKnobPivot->GetComponentLocation() : GetActorLocation(), 0.5f);
 	}
 	bHeadlights = bOn;
-	HeadlightL->SetVisibility(bOn);
-	HeadlightR->SetVisibility(bOn);
+	// Фары светят, только если они стоят и есть ток (аккумулятор или работающий генератор).
+	const bool bPower = PartsState.BatteryCharge > 0.03 || (Movement && Movement->GetTelemetry().bEngineRunning && PartsEffects.ChargeRate > 0.1);
+	const bool bLit = bOn && (!HasActorBegunPlay() || (PartsEffects.bHeadlights && bPower));
+	HeadlightL->SetVisibility(bLit);
+	HeadlightR->SetVisibility(bLit);
 	for (UMaterialInstanceDynamic* Mid : LampMaterials)
 	{
 		if (Mid)
 		{
-			Mid->SetScalarParameterValue(TEXT("Emissive"), bOn ? 6.f : 0.f);
+			Mid->SetScalarParameterValue(TEXT("Emissive"), bLit ? 6.f : 0.f);
 		}
 	}
 	// Подсветка приборов.
@@ -870,7 +930,7 @@ void APeregonCar::SetHeadlights(bool bOn)
 	{
 		if (Mid)
 		{
-			Mid->SetScalarParameterValue(TEXT("Emissive"), bOn ? 0.6f : 0.f);
+			Mid->SetScalarParameterValue(TEXT("Emissive"), bLit && PartsEffects.bDashboard ? 0.6f : 0.f);
 		}
 	}
 	// Ручка света «вытянута», когда фары горят.
@@ -894,6 +954,13 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 	}
 	const bool bInside = User == this;
 	const bool bOnFoot = User && User->IsA<APeregonCharacter>();
+	{
+		const FString Work = PartsPrompt(Part, User);
+		if (!Work.IsEmpty())
+		{
+			return Work;
+		}
+	}
 
 	if (Part->ComponentHasTag(DoorFL))
 	{
@@ -993,6 +1060,10 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 	}
 	const bool bInside = User == this;
 	APeregonCharacter* Walker = Cast<APeregonCharacter>(User);
+	if (PartsInteract(Part, User))
+	{
+		return;
+	}
 
 	if (Part->ComponentHasTag(DoorFL))
 	{
@@ -1049,7 +1120,7 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		{
 			if (APeregonPlayerController* DriverPC = Cast<APeregonPlayerController>(GetController()))
 			{
-				DriverPC->OpenInventory(EPeregonStorage::Glovebox);
+				DriverPC->OpenInventory(EPeregonStorage::Glovebox, this);
 			}
 		}
 		else if (Part->ComponentHasTag(TEXT("Dome")))
@@ -1069,7 +1140,7 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 	APeregonPlayerController* PC = User ? Cast<APeregonPlayerController>(User->GetController()) : nullptr;
 	if (Walker && Part->ComponentHasTag(TrunkInside) && PC)
 	{
-		PC->OpenInventory(EPeregonStorage::Trunk);
+		PC->OpenInventory(EPeregonStorage::Trunk, this);
 		return;
 	}
 	if (Walker && Part->ComponentHasTag(Fuel) && PC)
@@ -1080,6 +1151,7 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 
 void APeregonCar::InteractStop(UPrimitiveComponent* Part, APawn* /*User*/)
 {
+	PartsInteractStop(Part);
 	if (Part && Part->ComponentHasTag(TEXT("Horn")))
 	{
 		bHorn = false;
@@ -1104,6 +1176,10 @@ void APeregonCar::EnterCar(APeregonCharacter* Character, int32 InSeat)
 	}
 	Driver = Character;
 	Character->HideForVehicle();
+	if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+	{
+		GM->SetActiveCar(this); // в колонне «своя» машина — та, в которую сели последней
+	}
 	Seat = FMath::Clamp(InSeat, 0, 3);
 	HeadBaseLocation = SeatEye(Seat);
 	HeadPivot->SetRelativeLocation(HeadBaseLocation);

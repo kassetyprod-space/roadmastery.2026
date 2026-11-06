@@ -176,13 +176,17 @@ TSharedRef<SWidget> SPeregonInventoryPanel::MakeSmallButton(const FText& Label, 
 		];
 }
 
-TSharedRef<SWidget> SPeregonInventoryPanel::MakeItemRow(const FPeregonItemStack& Stack, bool bPockets)
+TSharedRef<SWidget> SPeregonInventoryPanel::MakeItemRow(const FPeregonItemStack& Stack, bool bPockets, int32 Index)
 {
 	using namespace PeregonPanelStyle;
 	const FPeregonItemDef* Def = PeregonItems::Find(Stack.Id);
-	const FString Name = Def ? Def->Name : Stack.Id.ToString();
-	const FString Label = Stack.Count > 1 ? FString::Printf(TEXT("%s  ×%d"), *Name, Stack.Count) : Name;
+	FString Label = PeregonItems::StackLabel(Stack);
 	const FName Id = Stack.Id;
+	const bool bHeld = bPockets && Owner.IsValid() && Owner->GetHeldIndex() == Index;
+	if (bPockets && Index < 10)
+	{
+		Label = FString::Printf(TEXT("[%d] %s%s"), (Index + 1) % 10, *Label, bHeld ? TEXT("  — в руках") : TEXT(""));
+	}
 	const EPeregonStorage From = bPockets ? EPeregonStorage::None : Storage;
 	const EPeregonStorage To = bPockets ? Storage : EPeregonStorage::None;
 	TWeakObjectPtr<APeregonPlayerController> PC = Owner;
@@ -200,15 +204,27 @@ TSharedRef<SWidget> SPeregonInventoryPanel::MakeItemRow(const FPeregonItemStack&
 			})
 		];
 	}
-	if (Storage != EPeregonStorage::None && ShopItems.Num() == 0)
+	if (bPockets && ShopItems.Num() == 0 && PC.IsValid())
 	{
-		const bool bCanMove = PC.IsValid() && PC->CanMoveItem(Id, From, To);
 		Buttons->AddSlot().AutoWidth().Padding(FMargin(6.f, 0.f, 0.f, 0.f))
 		[
-			MakeSmallButton(FText::FromString(bPockets ? TEXT("Положить →") : TEXT("← Взять")), [PC, Id, From, To]() {
+			MakeSmallButton(FText::FromString(bHeld ? TEXT("Убрать из рук") : TEXT("В руки")), [PC, Index]() {
 				if (PC.IsValid())
 				{
-					PC->MoveItem(Id, From, To);
+					PC->SelectHeld(Index);
+				}
+			})
+		];
+	}
+	if (Storage != EPeregonStorage::None && ShopItems.Num() == 0)
+	{
+		const bool bCanMove = PC.IsValid() && PC->CanMoveSlot(Index, From, To);
+		Buttons->AddSlot().AutoWidth().Padding(FMargin(6.f, 0.f, 0.f, 0.f))
+		[
+			MakeSmallButton(FText::FromString(bPockets ? TEXT("Положить →") : TEXT("← Взять")), [PC, Index, From, To]() {
+				if (PC.IsValid())
+				{
+					PC->MoveSlot(Index, From, To);
 				}
 			}, bCanMove)
 		];
@@ -320,9 +336,9 @@ void SPeregonInventoryPanel::Refresh()
 		{
 			return;
 		}
-		for (const FPeregonItemStack& Stack : C->Slots)
+		for (int32 Index = 0; Index < C->Slots.Num(); ++Index)
 		{
-			List->AddSlot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))[MakeItemRow(Stack, bPockets)];
+			List->AddSlot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))[MakeItemRow(C->Slots[Index], bPockets, Index)];
 		}
 		const int32 Free = FMath::Max(0, C->Capacity - C->Slots.Num());
 		List->AddSlot().AutoHeight().Padding(FMargin(2.f, 4.f))
@@ -601,8 +617,10 @@ int32 SPeregonPaperMap::OnPaint(const FPaintArgs& Args, const FGeometry& Allotte
 		case rgen::PoiType::Fuel:
 		case rgen::PoiType::Cafe:
 		case rgen::PoiType::Shop:
+		case rgen::PoiType::Parts:
 		{
-			const TCHAR* Mark = Poi.Type == rgen::PoiType::Fuel ? TEXT("АЗС") : (Poi.Type == rgen::PoiType::Cafe ? TEXT("К") : TEXT("М"));
+			const TCHAR* Mark = Poi.Type == rgen::PoiType::Fuel ? TEXT("АЗС")
+				: (Poi.Type == rgen::PoiType::Cafe ? TEXT("К") : (Poi.Type == rgen::PoiType::Parts ? TEXT("З/Ч") : TEXT("М")));
 			const FVector2f TS = Measure(Mark, SmallFont);
 			const FVector2f At = P + FVector2f(-TS.X * 0.5f - 3.f, Side < 0.f ? -TS.Y - 12.f : 8.f);
 			Box(OutDrawElements, Layer, AllottedGeometry, At, TS + FVector2f(6.f, 2.f), FLinearColor(0.2f, 0.32f, 0.6f, 0.9f));

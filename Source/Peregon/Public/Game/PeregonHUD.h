@@ -38,6 +38,7 @@ private:
 	void DrawDetails(const APeregonCar* Car);
 	void DrawTrip();
 	void DrawToasts();
+	void DrawHeld();
 
 	// Помощники вёрстки.
 	float Px(float Value) const { return Value * UiScale; }

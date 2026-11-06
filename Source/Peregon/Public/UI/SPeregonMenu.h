@@ -61,6 +61,7 @@ private:
 	FPeregonRunConfig NewConfig;
 	int32 AssistIndex = 0;
 	int32 ColorIndex = 0;
+	int32 StartIndex = 0; // 0 — гараж (сюжет), 1 — сразу на трассу
 	FString SeedText;
 
 	// Настройки (копия до «Применить»).

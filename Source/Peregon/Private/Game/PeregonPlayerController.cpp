@@ -11,6 +11,8 @@
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonRoadWorld.h"
+#include "World/PeregonPickup.h"
+#include "vsim/CarParts.h"
 #include "World/PeregonSky.h"
 #include "EngineUtils.h"
 #include "Widgets/SWeakWidget.h"
@@ -45,6 +47,218 @@ void APeregonPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::F6, IE_Pressed, this, &APeregonPlayerController::NextWeather);
 	InputComponent->BindKey(EKeys::F7, IE_Pressed, this, &APeregonPlayerController::SkipDays);
 	InputComponent->BindKey(EKeys::F8, IE_Pressed, this, &APeregonPlayerController::SkipHour);
+	// Что в руках: 1–0 — ячейка карманов, G — положить на землю (в машине G — коробка передач, её не трогаем).
+	for (const FKey& Key : {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine,
+			 EKeys::Zero, EKeys::G})
+	{
+		FInputKeyBinding Binding(FInputChord(Key), IE_Pressed);
+		Binding.bConsumeInput = false;
+		Binding.KeyDelegate.GetDelegateWithKeySignature().BindUObject(this, &APeregonPlayerController::OnHotkey);
+		InputComponent->KeyBindings.Add(Binding);
+	}
+}
+
+void APeregonPlayerController::OnHotkey(FKey Key)
+{
+	if (IsMenuOpen() || IsPanelOpen())
+	{
+		return;
+	}
+	if (Key == EKeys::G)
+	{
+		if (!(GetPawn() && GetPawn()->IsA<APeregonCar>()))
+		{
+			DropHeld();
+		}
+		return;
+	}
+	static const FKey Digits[] = {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight,
+		EKeys::Nine, EKeys::Zero};
+	for (int32 I = 0; I < 10; ++I)
+	{
+		if (Key == Digits[I])
+		{
+			SelectHeld(I);
+			return;
+		}
+	}
+}
+
+void APeregonPlayerController::SelectHeld(int32 PocketIndex)
+{
+	const FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	if (!Pockets)
+	{
+		return;
+	}
+	if (PocketIndex == GetHeldIndex() || !Pockets->Slots.IsValidIndex(PocketIndex))
+	{
+		HeldId = NAME_None; // та же клавиша ещё раз — руки свободны
+		if (!Pockets->Slots.IsValidIndex(PocketIndex) && PocketIndex >= 0)
+		{
+			Toast(FString::Printf(TEXT("Ячейка %d пуста — руки свободны"), PocketIndex + 1));
+		}
+		return;
+	}
+	const FPeregonItemStack& S = Pockets->Slots[PocketIndex];
+	HeldId = S.Id;
+	HeldCondition = S.Condition;
+	Toast(FString::Printf(TEXT("В руках: %s"), *PeregonItems::StackLabel(S)));
+}
+
+int32 APeregonPlayerController::GetHeldIndex() const
+{
+	const FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	if (!Pockets || HeldId.IsNone())
+	{
+		return INDEX_NONE;
+	}
+	// Ячейки сдвигаются, когда что-то берут или кладут, — ищем «ту же» вещь: тот же предмет, ближайшее состояние.
+	int32 Found = INDEX_NONE;
+	float BestDiff = 2.f;
+	for (int32 I = 0; I < Pockets->Slots.Num(); ++I)
+	{
+		const FPeregonItemStack& S = Pockets->Slots[I];
+		const float Diff = FMath::Abs(S.Condition - HeldCondition);
+		if (S.Id == HeldId && Diff < BestDiff)
+		{
+			BestDiff = Diff;
+			Found = I;
+		}
+	}
+	return Found;
+}
+
+const FPeregonItemStack* APeregonPlayerController::GetHeld() const
+{
+	const FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	const int32 Index = GetHeldIndex();
+	return Pockets && Pockets->Slots.IsValidIndex(Index) ? &Pockets->Slots[Index] : nullptr;
+}
+
+bool APeregonPlayerController::TakeHeld(FPeregonItemStack& Out)
+{
+	FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	const int32 Index = GetHeldIndex();
+	if (!Pockets || !Pockets->TakeAt(Index, Out))
+	{
+		return false;
+	}
+	if (GetHeldIndex() == INDEX_NONE)
+	{
+		HeldId = NAME_None;
+	}
+	return true;
+}
+
+void APeregonPlayerController::UseHeld(float Amount)
+{
+	FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	const int32 Index = GetHeldIndex();
+	if (!Pockets || !Pockets->Slots.IsValidIndex(Index))
+	{
+		return;
+	}
+	FPeregonItemStack& S = Pockets->Slots[Index];
+	S.Condition = FMath::Max(0.f, S.Condition - Amount);
+	HeldCondition = S.Condition;
+	if (S.Condition <= 0.02f)
+	{
+		Toast(FString::Printf(TEXT("%s — закончилось"), *PeregonItems::DisplayName(S.Id)));
+		Pockets->Slots.RemoveAt(Index);
+		HeldId = NAME_None;
+	}
+}
+
+bool APeregonPlayerController::HasTool(int32 Tool) const
+{
+	if (Tool <= 0)
+	{
+		return true;
+	}
+	const FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	return Pockets && Pockets->Has(PeregonItems::ToolItem(Tool));
+}
+
+bool APeregonPlayerController::HasConsumable(int32 Consumable) const
+{
+	const FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	const FName Id = PeregonItems::ConsumableItem(Consumable);
+	const int32 Index = Pockets ? Pockets->Best(Id) : INDEX_NONE;
+	return Index != INDEX_NONE && Pockets->Slots[Index].Condition > 0.02f;
+}
+
+bool APeregonPlayerController::UseConsumable(int32 Consumable, float Amount)
+{
+	FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	const FName Id = PeregonItems::ConsumableItem(Consumable);
+	const int32 Index = Pockets ? Pockets->Best(Id) : INDEX_NONE;
+	if (Index == INDEX_NONE)
+	{
+		return false;
+	}
+	FPeregonItemStack& S = Pockets->Slots[Index];
+	S.Condition = FMath::Max(0.f, S.Condition - Amount);
+	if (S.Condition <= 0.02f)
+	{
+		Toast(FString::Printf(TEXT("%s — закончились"), *PeregonItems::DisplayName(Id)));
+		Pockets->Slots.RemoveAt(Index);
+	}
+	return true;
+}
+
+void APeregonPlayerController::GiveOrDrop(const FPeregonItemStack& Stack)
+{
+	FPeregonContainer* Pockets = GetContainer(EPeregonStorage::None);
+	if (Pockets && Pockets->AddStack(Stack))
+	{
+		Toast(FString::Printf(TEXT("В карманах: %s"), *PeregonItems::StackLabel(Stack)));
+		return;
+	}
+	if (DropOnGround(Stack))
+	{
+		Toast(FString::Printf(TEXT("Карманы полны — %s на земле"), *PeregonItems::StackLabel(Stack)));
+	}
+}
+
+bool APeregonPlayerController::DropOnGround(const FPeregonItemStack& Stack)
+{
+	const APawn* Me = GetPawn();
+	if (!Me)
+	{
+		return false;
+	}
+	const FRotator Facing(0.f, GetControlRotation().Yaw, 0.f);
+	const FVector Ahead = Me->GetActorLocation() + Facing.Vector() * 70.f;
+	FHitResult Hit;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(PeregonDrop), false, Me);
+	FVector Ground = Ahead - FVector(0.f, 0.f, 90.f);
+	if (GetWorld()->LineTraceSingleByChannel(Hit, Ahead + FVector(0.f, 0.f, 50.f), Ahead - FVector(0.f, 0.f, 400.f), ECC_Visibility, Query))
+	{
+		Ground = Hit.ImpactPoint;
+	}
+	return APeregonPickup::Place(GetWorld(), Stack, FTransform(Facing, Ground)) != nullptr;
+}
+
+void APeregonPlayerController::DropHeld()
+{
+	const FPeregonItemStack* Held = GetHeld();
+	if (!Held)
+	{
+		Toast(TEXT("В руках ничего нет (1–0 — взять вещь из карманов)"));
+		return;
+	}
+	const FPeregonItemDef* Def = PeregonItems::Find(Held->Id);
+	if (Def && Def->bQuest)
+	{
+		Toast(TEXT("Документы лучше не бросать"));
+		return;
+	}
+	FPeregonItemStack Item;
+	if (TakeHeld(Item) && !DropOnGround(Item))
+	{
+		GetContainer(EPeregonStorage::None)->AddStack(Item);
+	}
 }
 
 void APeregonPlayerController::NextWeather()
@@ -299,8 +513,9 @@ void APeregonPlayerController::ClosePanel()
 	}
 }
 
-void APeregonPlayerController::OpenInventory(EPeregonStorage Storage)
+void APeregonPlayerController::OpenInventory(EPeregonStorage Storage, APeregonCar* FromCar)
 {
+	StorageCar = FromCar;
 	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
 	if (!GM || GM->GetMode() == EPeregonMode::Menu || IsMenuOpen())
 	{
@@ -350,7 +565,8 @@ bool APeregonPlayerController::HasMapForRegion(int32 Region) const
 		return false;
 	}
 	const bool bInCar = GetPawn() && GetPawn()->IsA<APeregonCar>();
-	return GI->Pockets.Has(Id) || (bInCar && GI->Glovebox.Has(Id));
+	const APeregonCar* Car = Cast<APeregonCar>(GetPawn());
+	return GI->Pockets.Has(Id) || (bInCar && Car && Car->GloveStore.Has(Id));
 }
 
 void APeregonPlayerController::OpenMap()
@@ -407,7 +623,48 @@ FPeregonContainer* APeregonPlayerController::GetContainer(EPeregonStorage Storag
 	{
 		return nullptr;
 	}
-	return Storage == EPeregonStorage::None ? &GI->Pockets : GI->GetStorage(Storage);
+	if (Storage == EPeregonStorage::None)
+	{
+		return &GI->Pockets;
+	}
+	// Бардачок и багажник — у той машины, которую открыли (или в которой сидим, или «своей»).
+	APeregonCar* Car = StorageCar.Get();
+	if (!Car)
+	{
+		Car = Cast<APeregonCar>(GetPawn());
+	}
+	if (!Car)
+	{
+		const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+		Car = GM ? GM->GetCar() : nullptr;
+	}
+	return Car ? Car->GetStorage(Storage) : GI->GetStorage(Storage);
+}
+
+bool APeregonPlayerController::CanMoveSlot(int32 Index, EPeregonStorage From, EPeregonStorage To) const
+{
+	const FPeregonContainer* A = GetContainer(From);
+	const FPeregonContainer* B = GetContainer(To);
+	if (!A || !B || A == B || !A->Slots.IsValidIndex(Index))
+	{
+		return false;
+	}
+	FPeregonItemStack One = A->Slots[Index];
+	One.Count = 1;
+	return B->CanAddStack(One);
+}
+
+void APeregonPlayerController::MoveSlot(int32 Index, EPeregonStorage From, EPeregonStorage To)
+{
+	if (!CanMoveSlot(Index, From, To))
+	{
+		return;
+	}
+	FPeregonItemStack One;
+	if (GetContainer(From)->TakeAt(Index, One))
+	{
+		GetContainer(To)->AddStack(One);
+	}
 }
 
 bool APeregonPlayerController::CanMoveItem(FName Id, EPeregonStorage From, EPeregonStorage To) const
@@ -423,8 +680,7 @@ void APeregonPlayerController::MoveItem(FName Id, EPeregonStorage From, EPeregon
 	{
 		return;
 	}
-	GetContainer(From)->Remove(Id, 1);
-	GetContainer(To)->Add(Id, 1);
+	MoveSlot(GetContainer(From)->Best(Id), From, To);
 }
 
 float APeregonPlayerController::GetMoney() const
@@ -516,9 +772,13 @@ void APeregonPlayerController::UseItem(FName Id, EPeregonStorage From)
 	if (Id == PeregonItems::CanisterFull)
 	{
 		APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
-		APeregonCar* Car = GM ? GM->GetCar() : nullptr;
 		const APawn* Me = GetPawn();
-		const bool bNear = Car && Me && (Me == Car || FVector::Dist(Me->GetActorLocation(), Car->GetActorLocation()) < 450.f);
+		APeregonCar* Car = Cast<APeregonCar>(GetPawn());
+		if (!Car && GM && Me)
+		{
+			Car = GM->NearestCar(Me->GetActorLocation(), 450.f);
+		}
+		const bool bNear = Car != nullptr;
 		if (!bNear || !Car->GetVehicleMovement())
 		{
 			Toast(TEXT("Подойдите к машине, чтобы залить бензин"));

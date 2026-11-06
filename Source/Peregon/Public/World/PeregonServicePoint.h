@@ -18,7 +18,8 @@ enum class EPeregonService : uint8
 {
 	Fuel,
 	Cafe,
-	Shop
+	Shop,
+	Parts // фирменный магазин автозапчастей: узлы, инструмент, краска, масло
 };
 
 UCLASS()

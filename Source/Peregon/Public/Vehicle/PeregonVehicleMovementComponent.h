@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "vsim/CarParts.h"
 #include "Components/ActorComponent.h"
 #include "Chaos/ChaosEngineInterface.h"
 #include "Engine/EngineTypes.h"
@@ -138,6 +139,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") FPeregonCarState GetCarState() const;
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") void ApplyCarState(const FPeregonCarState& State);
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") float GetFuelCapacityL() const;
+	// Узлы машины (vsim::parts::Evaluate) → физика: мощность, искра, подача топлива, охлаждение, тормоза, подвеска.
+	void ApplyPartEffects(const vsim::parts::Effects& Effects);
 
 	// Позиция визуального колеса относительно корня (см) — для пешки, которая строит меши.
 	FVector GetWheelAttachLocal(int32 Index) const;

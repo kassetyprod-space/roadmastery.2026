@@ -214,8 +214,13 @@ Verdict CanInstall(const CarState& Car, const PartItem& Part, bool bHasTool, boo
 PartItem Remove(CarState& Car, Slot S)
 {
 	SlotRecord& R = Car.Slots[static_cast<size_t>(S)];
-	const PartItem Out = R.Part;
+	PartItem Out = R.Part;
 	R.bInstalled = false;
+	if (S == Slot::Battery)
+	{
+		Out.Charge = Car.BatteryCharge; // заряд уходит вместе с аккумулятором
+		Car.BatteryCharge = 0.0;
+	}
 	if (S == Slot::Radiator || S == Slot::Hoses || S == Slot::WaterPump)
 	{
 		Car.CoolantL = std::min(Car.CoolantL, 1.0); // антифриз вытек
@@ -228,6 +233,10 @@ void Install(CarState& Car, const PartItem& Part)
 	SlotRecord& R = Car.Slots[static_cast<size_t>(Part.Kind)];
 	R.bInstalled = true;
 	R.Part = Part;
+	if (Part.Kind == Slot::Battery)
+	{
+		Car.BatteryCharge = Clamp01(Part.Charge >= 0.0 ? Part.Charge : Part.Condition);
+	}
 }
 
 const char* OpName(BodyOp Op)
@@ -454,5 +463,103 @@ CarState MakeFactoryNew(const float* Color)
 	Car.BatteryCharge = 1.0;
 	return Car;
 }
+
+namespace
+{
+constexpr double kPackVersion = 1.0;
+}
+
+std::vector<double> Pack(const CarState& Car)
+{
+	std::vector<double> D;
+	D.reserve(4 + SlotCount * 4 + PanelCount * 9);
+	D.push_back(kPackVersion);
+	D.push_back(static_cast<double>(SlotCount));
+	D.push_back(static_cast<double>(PanelCount));
+	for (const SlotRecord& R : Car.Slots)
+	{
+		D.push_back(R.bInstalled ? 1.0 : 0.0);
+		D.push_back(R.Part.Condition);
+		D.push_back(static_cast<double>(R.Part.Tier));
+		D.push_back(R.Part.Charge);
+	}
+	for (const PanelState& P : Car.Panels)
+	{
+		D.push_back(P.Rust);
+		D.push_back(P.Holes);
+		D.push_back(P.Paint);
+		D.push_back(P.Putty);
+		D.push_back((P.bSanded ? 1.0 : 0.0) + (P.bPrimed ? 2.0 : 0.0));
+		D.push_back(P.Color[0]);
+		D.push_back(P.Color[1]);
+		D.push_back(P.Color[2]);
+	}
+	D.push_back(Car.OilL);
+	D.push_back(Car.CoolantL);
+	D.push_back(Car.BatteryCharge);
+	return D;
+}
+
+bool Unpack(const std::vector<double>& Data, CarState& Car)
+{
+	const size_t Need = 3 + static_cast<size_t>(SlotCount) * 4 + static_cast<size_t>(PanelCount) * 8 + 3;
+	if (Data.size() != Need || Data[0] != kPackVersion || static_cast<int>(Data[1]) != SlotCount || static_cast<int>(Data[2]) != PanelCount)
+	{
+		return false;
+	}
+	size_t I = 3;
+	CarState Out;
+	for (int S = 0; S < SlotCount; ++S)
+	{
+		SlotRecord& R = Out.Slots[static_cast<size_t>(S)];
+		R.bInstalled = Data[I++] > 0.5;
+		R.Part.Kind = static_cast<Slot>(S);
+		R.Part.Condition = Clamp01(Data[I++]);
+		R.Part.Tier = static_cast<int>(Data[I++]);
+		R.Part.Charge = Data[I++];
+	}
+	for (PanelState& P : Out.Panels)
+	{
+		P.Rust = Clamp01(Data[I++]);
+		P.Holes = Clamp01(Data[I++]);
+		P.Paint = Clamp01(Data[I++]);
+		P.Putty = Clamp01(Data[I++]);
+		const int Flags = static_cast<int>(Data[I++]);
+		P.bSanded = (Flags & 1) != 0;
+		P.bPrimed = (Flags & 2) != 0;
+		for (float& C : P.Color)
+		{
+			C = static_cast<float>(Data[I++]);
+		}
+	}
+	Out.OilL = Data[I++];
+	Out.CoolantL = Data[I++];
+	Out.BatteryCharge = Clamp01(Data[I++]);
+	Car = Out;
+	return true;
+}
+
+double Overall(const CarState& Car)
+{
+	double Sum = 0.0;
+	int N = 0;
+	for (int S = 0; S < SlotCount; ++S)
+	{
+		if (Info(static_cast<Slot>(S)).bOptional)
+		{
+			continue;
+		}
+		const SlotRecord& R = Car.Slots[static_cast<size_t>(S)];
+		Sum += R.bInstalled ? R.Part.Condition : 0.0;
+		++N;
+	}
+	double Body = 0.0;
+	for (const PanelState& P : Car.Panels)
+	{
+		Body += PanelScore(P);
+	}
+	return 0.7 * Sum / std::max(1, N) + 0.3 * Body / PanelCount;
+}
+
 } // namespace parts
 } // namespace vsim

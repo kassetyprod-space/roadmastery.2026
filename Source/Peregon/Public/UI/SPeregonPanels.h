@@ -34,7 +34,7 @@ public:
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
-	TSharedRef<SWidget> MakeItemRow(const FPeregonItemStack& Stack, bool bPockets);
+	TSharedRef<SWidget> MakeItemRow(const FPeregonItemStack& Stack, bool bPockets, int32 Index);
 	TSharedRef<SWidget> MakeShopRow(FName Id);
 	TSharedRef<SWidget> MakeSmallButton(const FText& Label, TFunction<void()> OnClick, bool bEnabled = true);
 

@@ -20,6 +20,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Audio/PeregonAudio.h"
+#include "Game/PeregonPlayerController.h"
+#include "World/PeregonKit.h"
 
 namespace PeregonWalker
 {
@@ -58,6 +60,14 @@ APeregonCharacter::APeregonCharacter()
 	// Поворот камеры собираем сами (крен и «кивки» поверх взгляда игрока).
 	FirstPersonCamera->bUsePawnControlRotation = false;
 	FirstPersonCamera->SetFieldOfView(85.f);
+	// Вещь в руках: видна внизу справа, как в руке перед собой.
+	HeldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeldMesh"));
+	HeldMesh->SetupAttachment(FirstPersonCamera);
+	HeldMesh->SetRelativeLocation(FVector(42.f, 20.f, -20.f));
+	HeldMesh->SetRelativeRotation(FRotator(0.f, 25.f, 0.f));
+	HeldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HeldMesh->SetCastShadow(false);
+	HeldMesh->SetVisibility(false);
 
 	ThirdPersonArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("ThirdPersonArm"));
 	ThirdPersonArm->SetupAttachment(GetCapsuleComponent());
@@ -107,9 +117,43 @@ void APeregonCharacter::BeginPlay()
 	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
 }
 
+void APeregonCharacter::UpdateHeld()
+{
+	const APeregonPlayerController* PC = Cast<APeregonPlayerController>(GetController());
+	const FPeregonItemStack* Held = PC && !IsHidden() ? PC->GetHeld() : nullptr;
+	const FName Id = Held ? Held->Id : NAME_None;
+	if (Id == HeldShown)
+	{
+		return;
+	}
+	HeldShown = Id;
+	const FPeregonItemDef* Def = PeregonItems::Find(Id);
+	if (!Def)
+	{
+		HeldMesh->SetVisibility(false);
+		return;
+	}
+	// Крупное (радиатор, глушитель) держим «у пояса» — уменьшаем, чтобы не закрывало обзор.
+	const FVector Size = Def->SizeCm;
+	const float Fit = FMath::Min(1.f, 24.f / FMath::Max(1.f, Size.GetMax()));
+	const bool bRound = Def->Kind == EPeregonItemKind::Consumable && Size.X < 15.f;
+	HeldMesh->SetStaticMesh(bRound ? FPeregonKit::Cylinder() : FPeregonKit::Cube());
+	HeldMesh->SetRelativeScale3D(Size * Fit / 100.f);
+	if (UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this))
+	{
+		HeldMesh->SetMaterial(0, Art->MakeMaterial(this, FPeregonLook(EPeregonTex::Paint, Def->Color, 0.5f, Def->Kind == EPeregonItemKind::Tool ? 0.4f : 0.1f)));
+	}
+	HeldMesh->SetVisibility(bFirstPerson);
+}
+
 void APeregonCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (HeldMesh)
+	{
+		UpdateHeld();
+		HeldMesh->SetVisibility(!HeldShown.IsNone() && bFirstPerson && !IsHidden());
+	}
 	if (!IsPlayerControlled() || IsHidden())
 	{
 		Focus = FPeregonFocus();

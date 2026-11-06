@@ -1,4 +1,5 @@
 #include "World/PeregonServicePoint.h"
+#include "vsim/CarParts.h"
 
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -47,7 +48,8 @@ void APeregonServicePoint::BeginPlay()
 	switch (Kind)
 	{
 	case EPeregonService::Fuel: BuildFuel(); break;
-	case EPeregonService::Shop: BuildShop(); break;
+	case EPeregonService::Shop:
+	case EPeregonService::Parts: BuildShop(); break;
 	default: BuildCafe(); break;
 	}
 }
@@ -267,6 +269,12 @@ void APeregonServicePoint::AddItemProp(FName Id, const FVector& OnSurface)
 		Size = FVector(0.11, 0.11, 0.32);
 		Mesh = CylinderMesh;
 	}
+	else if (Def->Kind != EPeregonItemKind::Misc)
+	{
+		// Детали, инструмент, банки — по своим габаритам (на полке чуть меньше, чтобы влезли).
+		Size = Def->SizeCm / 100.0 * 0.8;
+		Mesh = Def->Kind == EPeregonItemKind::Consumable && Def->SizeCm.X < 15.f ? CylinderMesh : CubeMesh;
+	}
 	FPeregonLook Look(Id == PeregonItems::CanisterFull || Id == PeregonItems::CanisterEmpty ? EPeregonTex::Paint : EPeregonTex::Plastic, Def->Color, 0.5f);
 	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
 	UStaticMeshComponent* Prop = AddShape(Mesh, OnSurface + FVector(0.0, 0.0, Size.Z * 0.5), Size, Art ? Art->MakeMaterial(this, Look) : nullptr, false);
@@ -448,16 +456,20 @@ void APeregonServicePoint::BuildShop()
 	AddRoom(FVector(-2.0, 0.0, 0.0), FVector(6.0, 8.0, 3.0), 1.8f, {FVector2D(-3.0, -0.6)}, Walls, Floor, Inner);
 	AddBox(FVector(-2.0, 0.0, 3.15), FVector(6.6, 8.6, 0.3), Roof, false);
 	AddBox(FVector(1.1, 0.0, 2.6), FVector(0.1, 5.6, 0.6), Board, false);
-	AddLabel(FVector(1.16, 0.0, 2.6), TEXT("ПРОДУКТЫ"), 22.f, FColor::White, FLinearColor(0.12f, 0.25f, 0.5f));
-	AddLabel(FVector(1.1, -1.8, 0.65), TEXT("КАРТЫ · ЧАЙ · КАНИСТРЫ"), 5.f, FColor(30, 30, 30), FLinearColor(0.75f, 0.78f, 0.62f));
+	const bool bParts = Kind == EPeregonService::Parts;
+	AddLabel(FVector(1.16, 0.0, 2.6), bParts ? TEXT("АВТОЗАПЧАСТИ «ВАЗ»") : TEXT("ПРОДУКТЫ"), bParts ? 14.f : 22.f, FColor::White,
+		bParts ? FLinearColor(0.55f, 0.1f, 0.08f) : FLinearColor(0.12f, 0.25f, 0.5f));
+	AddLabel(FVector(1.1, -1.8, 0.65), bParts ? TEXT("УЗЛЫ · ИНСТРУМЕНТ · КРАСКА · МАСЛО") : TEXT("КАРТЫ · ЧАЙ · КАНИСТРЫ"), 5.f, FColor(30, 30, 30),
+		FLinearColor(0.75f, 0.78f, 0.62f));
 	AddBox(FVector(-2.6, -0.6, 0.5), FVector(0.7, 5.6, 1.0), Counter, true, PeregonService::ShopTag);
 	AddPerson(FVector(-3.6, -0.6, 0.1), FLinearColor(0.7f, 0.2f, 0.3f));
 	int32 Cursor = 0;
 	const TArray<FName> NoItems;
-	AddShelf(FVector(-4.6, -0.6, 0.1), 5.6, 4, NoItems, Cursor);
-	// Товар в дорогу — на прилавке, бери и плати.
 	const TArray<FName> Catalog = GetShopCatalog();
-	for (int32 K = 0; K < Catalog.Num(); ++K)
+	// В магазине запчастей узлы стоят на стеллаже — бери любой и плати на месте.
+	AddShelf(FVector(-4.6, -0.6, 0.1), 5.6, 4, bParts ? Catalog : NoItems, Cursor);
+	// Товар в дорогу — на прилавке, бери и плати.
+	for (int32 K = 0; K < (bParts ? 0 : Catalog.Num()); ++K)
 	{
 		AddItemProp(Catalog[K], FVector(-2.5, -2.8 + K * 0.8, 1.0));
 	}
@@ -480,12 +492,29 @@ TArray<FName> APeregonServicePoint::GetShopCatalog() const
 		AddIf(PeregonItems::CanisterFull);
 		AddIf(PeregonItems::CanisterEmpty);
 		AddIf(PeregonItems::Thermos);
+		// Расходка на АЗС: масло, антифриз, свечи, фильтры.
+		AddIf(PeregonItems::Oil);
+		AddIf(PeregonItems::Coolant);
+		AddIf(PeregonItems::PartItem(static_cast<int32>(vsim::parts::Slot::SparkPlugs)));
+		AddIf(PeregonItems::PartItem(static_cast<int32>(vsim::parts::Slot::AirFilter)));
+		AddIf(PeregonItems::PartItem(static_cast<int32>(vsim::parts::Slot::OilFilter)));
+		AddIf(PeregonItems::PartItem(static_cast<int32>(vsim::parts::Slot::FuelFilter)));
 		break;
 	case EPeregonService::Shop:
 		AddIf(PeregonItems::MapForRegion(Region));
 		AddIf(PeregonItems::MapForRegion(Region + 1));
 		AddIf(PeregonItems::Thermos);
 		AddIf(PeregonItems::CanisterEmpty);
+		AddIf(PeregonItems::Oil);
+		AddIf(PeregonItems::ConsumableItem(static_cast<int32>(vsim::parts::Consumable::Putty)));
+		AddIf(PeregonItems::ConsumableItem(static_cast<int32>(vsim::parts::Consumable::FlapDisc)));
+		break;
+	case EPeregonService::Parts:
+		for (const FName& Id : PeregonItems::PartsShopStock())
+		{
+			AddIf(Id);
+		}
+		AddIf(PeregonItems::MapForRegion(Region + 1));
 		break;
 	default:
 		AddIf(PeregonItems::Thermos);

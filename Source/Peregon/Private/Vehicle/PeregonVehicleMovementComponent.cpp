@@ -440,3 +440,22 @@ void UPeregonVehicleMovementComponent::ApplyCarState(const FPeregonCarState& Sta
 		if (State.Shock.IsValidIndex(I)) { C.Wheels[static_cast<size_t>(I)].Shock = State.Shock[I]; }
 	}
 }
+
+void UPeregonVehicleMovementComponent::ApplyPartEffects(const vsim::parts::Effects& Effects)
+{
+	if (!Sim)
+	{
+		return;
+	}
+	vsim::VehicleCondition& C = Sim->Condition();
+	C.PowerFactor = Effects.PowerFactor;
+	C.StarterFactor = Effects.StarterFactor;
+	C.bSpark = Effects.bSpark;
+	C.bFuelSupply = Effects.bFuel;
+	C.Misfire = Effects.Misfire;
+	C.CoolingFactor = Effects.CoolingFactor;
+	C.BrakeFactor = Effects.BrakeFactor;
+	C.ShockFactor = Effects.ShockFactor;
+	C.FuelFactor = Effects.FuelFactor;
+	C.EngineWearFactor = Effects.EngineWearFactor;
+}

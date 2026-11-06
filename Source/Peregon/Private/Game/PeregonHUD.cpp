@@ -10,6 +10,7 @@
 #include "Engine/Font.h"
 #include "Game/PeregonGameInstance.h"
 #include "Game/PeregonGameMode.h"
+#include "Game/PeregonPlayerController.h"
 #include "Interaction/PeregonInteractable.h"
 #include "World/PeregonRoadWorld.h"
 #include "Player/PeregonCharacter.h"
@@ -174,6 +175,21 @@ void APeregonHUD::DrawHUD()
 	{
 		DrawCrosshair(&Walker->GetFocus(), true, TEXT("E"));
 	}
+	DrawHeld();
+}
+
+void APeregonHUD::DrawHeld()
+{
+	// Что в руках — внизу по центру, мелко.
+	const APeregonPlayerController* PC = Cast<APeregonPlayerController>(PlayerOwner);
+	const FPeregonItemStack* Held = PC ? PC->GetHeld() : nullptr;
+	const FString Text = Held ? FString::Printf(TEXT("В руках [%d]: %s · G — положить"), (PC->GetHeldIndex() + 1) % 10, *PeregonItems::StackLabel(*Held))
+							  : FString(TEXT("Руки свободны · 1–0 — взять вещь из карманов"));
+	const FVector2f Size = Measure(Text, EUiFont::Small);
+	const float X = (Canvas->ClipX - Size.X) * 0.5f;
+	const float Y = Canvas->ClipY - Px(PeregonUi::Margin) - Size.Y;
+	Panel(X - Px(8.f), Y - Px(4.f), Size.X + Px(16.f), Size.Y + Px(8.f), Held ? 0.55f : 0.3f);
+	Label(Text, EUiFont::Small, Held ? PeregonUi::Text : PeregonUi::Dim, X, Y, Held ? 1.f : 0.7f);
 }
 
 void APeregonHUD::DrawCrosshair(const FPeregonFocus* Focus, bool bFirstPerson, const TCHAR* InteractKey)
@@ -212,6 +228,13 @@ void APeregonHUD::DrawCluster(const APeregonCar* Car)
 	const UPeregonVehicleMovementComponent* Move = Car->GetVehicleMovement();
 	if (!Move)
 	{
+		return;
+	}
+	if (!Car->HasDashboard())
+	{
+		// Щитка нет — ни скорости, ни оборотов, ни топлива. Только на слух.
+		const FString Note = TEXT("Щиток приборов не стоит — скорость и обороты на слух");
+		Label(Note, EUiFont::Small, Amber, Canvas->ClipX - Px(Margin) - Measure(Note, EUiFont::Small).X, Canvas->ClipY - Px(Margin) * 2.f, 0.8f);
 		return;
 	}
 	const FPeregonTelemetry T = Move->GetTelemetry();

@@ -384,6 +384,24 @@ int main()
 			Check(L.InsideBuilding(B.X, B.Y, 0.0), "центр дома — внутри дома", 1.0);
 		}
 		Check(MaxRelief > 15.0 && MaxRelief < 120.0, "вдали холмы (перепад 15–120 м)", MaxRelief);
+		// Двор у старта свободен от домов города и ровный.
+		{
+			int Inside = 0;
+			double Spread = 0.0;
+			const double Z0 = R.GroundHeight(0.5 * (StartYardS0 + StartYardS1), 0.5 * (StartYardTMin + StartYardTMax));
+			for (double S = StartYardS0 + 5.0; S < StartYardS1 - 5.0; S += 5.0)
+			{
+				for (double T = StartYardTMin + 3.0; T < StartYardTMax - 3.0; T += 5.0)
+				{
+					double X = 0.0, Y = 0.0;
+					R.ToWorld(S, T, X, Y);
+					Inside += L.InsideBuilding(X, Y, 1.0) ? 1 : 0;
+					Spread = std::max(Spread, std::abs(R.GroundHeight(S, T) - Z0));
+				}
+			}
+			Check(Inside == 0, "во дворе у старта нет домов города", Inside);
+			Check(Spread < 3.0, "двор у старта ровный (перепад < 3 м)", Spread);
+		}
 		const auto T1 = std::chrono::steady_clock::now();
 		double Sum = 0.0;
 		for (int K = 0; K < 20000; ++K)

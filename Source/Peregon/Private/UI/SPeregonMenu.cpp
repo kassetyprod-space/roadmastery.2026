@@ -415,6 +415,7 @@ TSharedRef<SWidget> SPeregonMenu::BuildNewGamePage()
 		})
 	];
 	Box->AddSlot().AutoHeight()[MakeRow(INVTEXT("Цвет машины"), MakeChoice(&ColorIndex, PaintNames))];
+	Box->AddSlot().AutoHeight()[MakeRow(INVTEXT("Начало"), MakeChoice(&StartIndex, {INVTEXT("Гараж: собрать «Сокол» из хлама"), INVTEXT("Сразу на трассу")}))];
 	Box->AddSlot().AutoHeight().Padding(0.f, 18.f, 0.f, 0.f)[MakeButton(INVTEXT("В путь"), [this]() { StartNewGame(false); })];
 	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Назад"), [this]() { GoBack(); }, true, false)];
 	return Box;
@@ -555,6 +556,7 @@ void SPeregonMenu::StartNewGame(bool bProvingGround)
 	Config.Assists = static_cast<EPeregonAssists>(FMath::Clamp(AssistIndex, 0, 2));
 	Config.CarColor = Paints[FMath::Clamp(ColorIndex, 0, static_cast<int32>(UE_ARRAY_COUNT(Paints)) - 1)].Color;
 	Config.bProvingGround = bProvingGround;
+	Config.bGarageStart = !bProvingGround && StartIndex == 0;
 	if (Owner.IsValid())
 	{
 		Owner->UiNewGame(Config);

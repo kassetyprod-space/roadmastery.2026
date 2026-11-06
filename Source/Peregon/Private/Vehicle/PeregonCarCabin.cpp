@@ -265,6 +265,14 @@ void APeregonCar::OnRadioPower(const FInputActionValue&)
 	{
 		return;
 	}
+	if (!Radio->IsPowered() && (!PartsEffects.bRadio || PartsState.BatteryCharge < 0.03))
+	{
+		if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+		{
+			GM->Toast(!PartsEffects.bRadio ? TEXT("Магнитолы нет — на её месте торчат провода") : TEXT("Магнитола молчит: сел аккумулятор"), 2.f);
+		}
+		return;
+	}
 	Radio->SetPower(!Radio->IsPowered());
 	PeregonAudio::PlayEvent(this, TEXT("lights.switch"), GetActorTransform().TransformPosition(PeregonCabin::RadioLocation), 0.4f, 1.1f);
 	if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
@@ -404,7 +412,7 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 	const UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
 	const float Wet = Art ? Art->GetWetness() : 0.f;
 	DirtLevel = FMath::Clamp(DirtLevel + DeltaSeconds * (FMath::Min(Speed, 30.f) / 25.f * (0.0015f + 0.02f * Rough + 0.008f * Wet) - Rain * 0.003f), 0.f, 1.f);
-	if (FMath::Abs(DirtLevel - AppliedDirt) > 0.03f)
+	if (FMath::Abs(DirtLevel - AppliedDirt) > 0.03f || bBodyDirty)
 	{
 		ApplyDirt();
 	}
@@ -421,7 +429,35 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 void APeregonCar::ApplyDirt()
 {
 	AppliedDirt = DirtLevel;
+	bBodyDirty = false;
 	const FLinearColor Mud(0.42f, 0.34f, 0.25f);
+	const FLinearColor Rust(0.32f, 0.13f, 0.05f);
+	const FLinearColor Hole(0.025f, 0.02f, 0.018f);
+	const FLinearColor Metal(0.42f, 0.42f, 0.44f);
+	const FLinearColor Primer(0.36f, 0.37f, 0.38f);
+	const FLinearColor Putty(0.62f, 0.58f, 0.42f);
+	const UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	const bool bVertexPaint = Art && Art->HasWeatherMaterials();
+	// Цвет панели: краска → (выгорание) → голый металл / грунт / шпаклёвка → ржавчина пятнами → дыры.
+	auto PanelColor = [&](int32 Index, float Noise) -> FLinearColor {
+		const vsim::parts::PanelState& P = PartsState.Panels[static_cast<size_t>(Index)];
+		const FLinearColor Paint(P.Color[0], P.Color[1], P.Color[2]);
+		FLinearColor C = bVertexPaint ? Paint : FLinearColor::White;
+		const FLinearColor Under = P.bPrimed ? Primer : Metal;
+		// Уставшая краска: тусклая и местами до грунта.
+		const float PaintLeft = static_cast<float>(P.Paint);
+		const float Faded = FMath::Clamp((1.f - PaintLeft) * 1.6f - (1.f - Noise) * 0.6f, 0.f, 1.f);
+		C = FMath::Lerp(C, bVertexPaint ? Under : FLinearColor(0.8f, 0.8f, 0.8f), Faded);
+		C = FMath::Lerp(C, C * 0.75f + FLinearColor(0.08f, 0.08f, 0.08f), (1.f - PaintLeft) * 0.4f);
+		if (P.Putty > 0.01)
+		{
+			C = FMath::Lerp(C, Putty, FMath::Clamp(static_cast<float>(P.Putty) * 1.5f - (1.f - Noise) * 0.5f, 0.f, 1.f));
+		}
+		const float RustSpot = FMath::Clamp(static_cast<float>(P.Rust) * 1.8f - (1.f - Noise) * 1.1f, 0.f, 1.f);
+		C = FMath::Lerp(C, Rust, RustSpot);
+		const float HoleSpot = FMath::Clamp((static_cast<float>(P.Holes) - (1.f - Noise) * 0.9f) * 6.f, 0.f, 1.f);
+		return FMath::Lerp(C, Hole, HoleSpot);
+	};
 	for (const FDirtSection& Dirty : DirtSections)
 	{
 		UProceduralMeshComponent* Mesh = Dirty.Mesh.Get();
@@ -431,10 +467,16 @@ void APeregonCar::ApplyDirt()
 		}
 		TArray<FColor> Colors;
 		Colors.SetNumUninitialized(Dirty.Vertices.Num());
+		const bool bPanels = Dirty.PanelIndex.Num() == Colors.Num() && Dirty.Noise.Num() == Colors.Num();
 		for (int32 K = 0; K < Colors.Num(); ++K)
 		{
 			const float A = FMath::Clamp(DirtLevel * Dirty.Mask[K] * 1.3f, 0.f, 0.85f);
-			Colors[K] = FMath::Lerp(FLinearColor::White, Mud, A).ToFColor(false);
+			FLinearColor Base = FLinearColor::White;
+			if (bPanels && Dirty.PanelIndex[K] < vsim::parts::PanelCount)
+			{
+				Base = PanelColor(Dirty.PanelIndex[K], Dirty.Noise[K]);
+			}
+			Colors[K] = FMath::Lerp(Base, Mud, A).ToFColor(false);
 		}
 		Mesh->UpdateMeshSection(Dirty.Section, Dirty.Vertices, Dirty.Normals, Dirty.UVs, Colors, TArray<FProcMeshTangent>());
 	}

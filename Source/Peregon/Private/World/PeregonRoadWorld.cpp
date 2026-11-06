@@ -770,6 +770,7 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		case rgen::PoiType::Fuel:
 		case rgen::PoiType::Cafe:
 		case rgen::PoiType::Shop:
+		case rgen::PoiType::Parts:
 		{
 			if (Poi.S < S0 || Poi.S >= S1)
 			{
@@ -814,7 +815,8 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 			if (Service)
 			{
 				Service->Kind = Poi.Type == rgen::PoiType::Fuel ? EPeregonService::Fuel
-					: (Poi.Type == rgen::PoiType::Shop ? EPeregonService::Shop : EPeregonService::Cafe);
+					: (Poi.Type == rgen::PoiType::Shop ? EPeregonService::Shop
+					: (Poi.Type == rgen::PoiType::Parts ? EPeregonService::Parts : EPeregonService::Cafe));
 				Service->Region = Poi.Region;
 				Service->DisplayName = Name;
 				Service->FinishSpawning(FTransform(FRotator(0.0, Yaw, 0.0), Location));
