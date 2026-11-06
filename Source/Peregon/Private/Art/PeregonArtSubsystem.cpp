@@ -400,63 +400,14 @@ UTexture2D* UPeregonArtSubsystem::Generate(EPeregonTex Type)
 	}
 	Tex->Filter = TF_Nearest;   // пиксели без размытия — PSX
 	Tex->SRGB = true;
-	// Не Pixels2D: та группа запрещает мипы, а без мипов мелкие пиксели вдали «рябят» (муар).
-	Tex->LODGroup = TEXTUREGROUP_World;
-	Tex->NeverStream = true;
-	FTexturePlatformData* Platform = Tex->GetPlatformData();
+	// Один мип-уровень: собирать мипы вручную у транзиентной текстуры в UE 5.8 небезопасно (падение
+	// с огромным выделением памяти). Рябь вдали гасим крупнее плиткой мира и TSR.
+	Tex->LODGroup = TEXTUREGROUP_Pixels2D;
 	{
-		FTexture2DMipMap& Mip = Platform->Mips[0];
+		FTexture2DMipMap& Mip = Tex->GetPlatformData()->Mips[0];
 		void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
 		FMemory::Memcpy(Data, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
 		Mip.BulkData.Unlock();
-	}
-	// Цепочка мипов усреднением 2×2 (в линейном цвете), до 1×1.
-	TArray<FLinearColor> Level;
-	Level.Reserve(Pixels.Num());
-	for (const FColor& C : Pixels)
-	{
-		Level.Add(FLinearColor::FromSRGBColor(C));
-	}
-	int32 MipW = W;
-	int32 MipH = H;
-	while (MipW > 1 || MipH > 1)
-	{
-		const int32 NextW = FMath::Max(1, MipW / 2);
-		const int32 NextH = FMath::Max(1, MipH / 2);
-		TArray<FLinearColor> Next;
-		Next.SetNumZeroed(NextW * NextH);
-		TArray<FColor> Packed;
-		Packed.SetNumUninitialized(NextW * NextH);
-		for (int32 Y = 0; Y < NextH; ++Y)
-		{
-			for (int32 X = 0; X < NextW; ++X)
-			{
-				FLinearColor Box2x2(0.f, 0.f, 0.f, 0.f);
-				for (int32 DY = 0; DY < 2; ++DY)
-				{
-					for (int32 DX = 0; DX < 2; ++DX)
-					{
-						const int32 SX = FMath::Min(MipW - 1, X * 2 + DX);
-						const int32 SY = FMath::Min(MipH - 1, Y * 2 + DY);
-						Box2x2 += Level[SY * MipW + SX];
-					}
-				}
-				Next[Y * NextW + X] = Box2x2 * 0.25f;
-				Packed[Y * NextW + X] = Next[Y * NextW + X].ToFColor(true);
-			}
-		}
-		FTexture2DMipMap* Mip = new FTexture2DMipMap();
-		Mip->SizeX = NextW;
-		Mip->SizeY = NextH;
-		Mip->SizeZ = 1;
-		Platform->Mips.Add(Mip);
-		Mip->BulkData.Lock(LOCK_READ_WRITE);
-		void* Dest = Mip->BulkData.Realloc(static_cast<int64>(Packed.Num()) * sizeof(FColor));
-		FMemory::Memcpy(Dest, Packed.GetData(), Packed.Num() * sizeof(FColor));
-		Mip->BulkData.Unlock();
-		Level = MoveTemp(Next);
-		MipW = NextW;
-		MipH = NextH;
 	}
 	Tex->UpdateResource();
 	return Tex;

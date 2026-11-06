@@ -589,8 +589,8 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		AddSurface(Chunk, Road, EPeregonWorldMat::Road, AsphaltPhys);
 
 		FMeshBuffers Shoulders;
-		BuildGrid(Shoulders, Ss, {-Shoulder, -(Half + Shoulder) * 0.5, -Half}, 0.0, 2.5, false);
-		BuildGrid(Shoulders, Ss, {Half, (Half + Shoulder) * 0.5, Shoulder}, 0.0, 2.5, false);
+		BuildGrid(Shoulders, Ss, {-Shoulder, -(Half + Shoulder) * 0.5, -Half}, 0.0, 3.5, false);
+		BuildGrid(Shoulders, Ss, {Half, (Half + Shoulder) * 0.5, Shoulder}, 0.0, 3.5, false);
 		AddSurface(Chunk, Shoulders, EPeregonWorldMat::Shoulder, GravelPhys);
 
 		TArray<double> Right;
@@ -601,8 +601,8 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 			Left.Insert(-T, 0);
 		}
 		FMeshBuffers Terrain;
-		BuildGrid(Terrain, Ss, Left, 0.0, 4.0, false);
-		BuildGrid(Terrain, Ss, Right, 0.0, 4.0, false);
+		BuildGrid(Terrain, Ss, Left, 0.0, 8.0, false);
+		BuildGrid(Terrain, Ss, Right, 0.0, 8.0, false);
 		AddSurface(Chunk, Terrain, EPeregonWorldMat::Grass, GrassPhys);
 	}
 
