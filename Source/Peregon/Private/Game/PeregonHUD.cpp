@@ -314,6 +314,14 @@ void APeregonHUD::DrawWarnings(const APeregonCar* Car)
 	{
 		Lines.Emplace(FString(TEXT("Поднят ручник  ·  P")), Amber);
 	}
+	if (Car->GetChill() > 0.15f)
+	{
+		Lines.Emplace(FString::Printf(TEXT("Холодно: в салоне %+.0f °C  ·  U — печка"), Car->GetCabinTemp()), Car->GetChill() > 0.6f ? Red : Amber);
+	}
+	if (Car->GetFogLevel() > 0.35f && !Car->IsVented())
+	{
+		Lines.Emplace(FString(TEXT("Стёкла запотевают — приоткройте окно (колесо мыши на ручке)")), Amber);
+	}
 	if (T.EngineTempC > 105.f)
 	{
 		Lines.Emplace(FString(TEXT("Перегрев двигателя")), Red);

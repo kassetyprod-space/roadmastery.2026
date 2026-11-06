@@ -78,5 +78,17 @@ private:
 	float RenderScale = 100.f;
 	bool bVSync = false;
 	int32 FpsIndex = 0;
+	int32 TextureIndex = 1;
+	float NightDark = 80.f;
+	bool bVolFog = true;
+	bool bGrain = true;
+	float PaintAmount = 70.f;
+	int32 LampIndex = 2;
+	int32 CloudIndex = 2;
+	float VolMaster = 100.f;
+	float VolEngine = 100.f;
+	float VolEffects = 100.f;
+	float VolAmbience = 100.f;
+	float VolRadio = 100.f;
 	TArray<FIntPoint> Resolutions;
 };

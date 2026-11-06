@@ -1,6 +1,8 @@
 #include "Game/PeregonGameUserSettings.h"
 
+#include "Audio/PeregonAudio.h"
 #include "Engine/Engine.h"
+#include "HAL/IConsoleManager.h"
 
 UPeregonGameUserSettings* UPeregonGameUserSettings::Get()
 {
@@ -23,4 +25,21 @@ void UPeregonGameUserSettings::SetToDefaults()
 	HeadMotion = 1.f;
 	bStartFirstPerson = true;
 	TimeScale = 0.5f;
+	TextureDetail = 1;
+	NightDarkness = 0.8f;
+	bVolumetricFog = true;
+	bFilmGrain = true;
+	PaintStrength = 0.7f;
+	MaxLampLights = 24;
+	CloudQuality = 2;
+	MasterVolume = EngineVolume = EffectsVolume = AmbienceVolume = RadioVolume = 1.f;
+}
+
+void UPeregonGameUserSettings::ApplyRuntime() const
+{
+	PeregonAudio::SetVolumes(MasterVolume, EngineVolume, EffectsVolume, AmbienceVolume, RadioVolume);
+	if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VolumetricFog")))
+	{
+		Var->Set(bVolumetricFog ? 1 : 0, ECVF_SetByGameSetting);
+	}
 }

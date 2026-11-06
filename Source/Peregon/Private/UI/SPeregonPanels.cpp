@@ -12,6 +12,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
@@ -707,6 +708,78 @@ void SPeregonMapPanel::Construct(const FArguments& InArgs)
 }
 
 FReply SPeregonMapPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (APeregonPlayerController* PC = Owner.Get())
+	{
+		if (PeregonPanelStyle::IsCloseKey(InKeyEvent.GetKey()))
+		{
+			PC->ClosePanel();
+			return FReply::Handled();
+		}
+	}
+	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Техничка
+// ---------------------------------------------------------------------------------------------
+void SPeregonManualPanel::Construct(const FArguments& InArgs)
+{
+	using namespace PeregonPanelStyle;
+	Owner = InArgs._Owner;
+	// Пожелтевшая бумага, чернила, пометки карандашом.
+	const FLinearColor Paper(0.86f, 0.81f, 0.68f, 0.98f);
+	const FLinearColor Ink(0.14f, 0.12f, 0.1f, 1.f);
+	const FLinearColor Red(0.62f, 0.1f, 0.06f, 1.f);
+	const FLinearColor Amber(0.55f, 0.36f, 0.05f, 1.f);
+	const FLinearColor Green(0.12f, 0.38f, 0.14f, 1.f);
+	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
+	for (const FPeregonManualLine& Line : InArgs._Lines)
+	{
+		const bool bHead = Line.Style == 1;
+		const FLinearColor C = Line.Style == 2 ? Red : (Line.Style == 3 ? Amber : (Line.Style == 4 ? Green : Ink));
+		const FString Mark = Line.Style == 2 ? TEXT("×  ") : (Line.Style == 3 ? TEXT("!  ") : (Line.Style == 4 ? TEXT("•  ") : TEXT("")));
+		List->AddSlot().AutoHeight().Padding(FMargin(0.f, bHead ? 14.f : 2.f, 0.f, bHead ? 4.f : 2.f))
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(Mark + Line.Text))
+			.Font(Font(bHead ? 15 : 12, bHead))
+			.ColorAndOpacity(C)
+			.AutoWrapText(true)
+		];
+	}
+	ChildSlot
+	.HAlign(HAlign_Center)
+	.VAlign(VAlign_Center)
+	[
+		SNew(SBox)
+		.WidthOverride(760.f)
+		.HeightOverride(820.f)
+		[
+			SNew(SBorder)
+			.BorderImage(White())
+			.BorderBackgroundColor(Paper)
+			.Padding(FMargin(34.f, 26.f))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock).Text(FText::FromString(InArgs._Title)).Font(Font(22, true)).ColorAndOpacity(Ink)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 2.f, 0.f, 8.f))
+				[
+					SNew(STextBlock).Text(INVTEXT("Руководство по эксплуатации и ремонту · Esc — закрыть")).Font(Font(10)).ColorAndOpacity(Ink * 0.7f)
+				]
+				+ SVerticalBox::Slot().FillHeight(1.f)
+				[
+					SNew(SScrollBox) + SScrollBox::Slot()[List]
+				]
+			]
+		]
+	];
+}
+
+FReply SPeregonManualPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
 	if (APeregonPlayerController* PC = Owner.Get())
 	{

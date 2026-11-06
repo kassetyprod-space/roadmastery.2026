@@ -12,6 +12,7 @@
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonGarageYard.h"
+#include "World/PeregonNightLights.h"
 #include "World/PeregonPickup.h"
 #include "World/PeregonProvingGround.h"
 #include "World/PeregonRoadWorld.h"
@@ -62,6 +63,10 @@ void APeregonGameMode::EnsureSky()
 	if (!Sky)
 	{
 		Sky = GetWorld()->SpawnActor<APeregonSky>();
+	}
+	if (!NightLights)
+	{
+		NightLights = GetWorld()->SpawnActor<APeregonNightLights>();
 	}
 }
 

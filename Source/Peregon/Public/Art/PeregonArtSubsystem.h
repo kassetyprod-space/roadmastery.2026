@@ -135,6 +135,7 @@ public:
 	void SetWorldParams(float Wetness, float Snow, const FVector& WindCm, float Night);
 	float GetWetness() const { return CurWetness; }
 	float GetSnow() const { return CurSnow; }
+	float GetNight() const { return CurNight; }
 
 private:
 	void EnsureBaseMaterial();

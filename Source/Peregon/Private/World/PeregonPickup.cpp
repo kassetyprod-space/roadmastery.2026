@@ -8,6 +8,8 @@
 #include "Game/PeregonGameInstance.h"
 #include "Game/PeregonPlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "ProceduralMeshComponent.h"
+#include "Vehicle/PeregonPartMeshes.h"
 #include "World/PeregonKit.h"
 
 APeregonPickup::APeregonPickup()
@@ -48,6 +50,25 @@ void APeregonPickup::BuildLook()
 	const FPeregonItemDef* Def = PeregonItems::Find(Stack.Id);
 	const FVector Size = Def ? Def->SizeCm : FVector(20.f, 15.f, 10.f);
 	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	if (PeregonPartMeshes::Has(Stack.Id) && Art && Art->HasWeatherMaterials())
+	{
+		// Подробная модель вместо коробки. Мишень для взгляда — невидимая коробка по габариту.
+		FPeregonMeshBuffers Buf;
+		PeregonPartMeshes::Build(Stack.Id, Buf, FTransform::Identity, Stack.Condition);
+		Model = NewObject<UProceduralMeshComponent>(this, TEXT("Model"));
+		Model->SetupAttachment(Root);
+		Model->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Model->RegisterComponent();
+		Model->CreateMeshSection(0, Buf.Vertices, Buf.Triangles, Buf.Normals, Buf.UVs, Buf.Colors, TArray<FProcMeshTangent>(), false);
+		Model->SetMaterial(0, Art->MakeMaterial(this, FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.55f, 0.25f)));
+		Mesh->SetStaticMesh(FPeregonKit::Cube());
+		Mesh->SetRelativeLocation(FVector(0.f, 0.f, Size.Z * 0.5f));
+		Mesh->SetRelativeScale3D((Size + FVector(4.f)) / 100.f);
+		Mesh->SetVisibility(false);
+		PeregonInteraction::MakeInteractable(Mesh, FName(TEXT("Pickup")));
+		Detail->SetVisibility(false);
+		return;
+	}
 	FLinearColor Color = Def ? Def->Color : FLinearColor::Gray;
 	if (Def && Def->Kind == EPeregonItemKind::Part)
 	{

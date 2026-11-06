@@ -35,6 +35,19 @@ PEREGON_API TArray<FString> FindEvents(const FString& Prefix);
 PEREGON_API void PlayEvent(const UObject* WorldContext, const FString& Event, const FVector& Location, float Volume = 1.f, float Pitch = 1.f);
 // Шаг: поверхность определяется лучом вниз (физматериал).
 PEREGON_API void PlayFootstep(const AActor* Walker, const FVector& FootLocation, float Loudness);
+
+// Группы громкости (Настройки → Звук). Читаются из звукового потока.
+enum class EGroup : uint8
+{
+	Engine,   // мотор
+	Effects,  // двери, шины, шаги, клаксон
+	Ambience, // ветер, дождь, птицы, окружение
+	Radio,
+	Count
+};
+// Общая громкость × громкость группы.
+PEREGON_API float GroupGain(EGroup Group);
+PEREGON_API void SetVolumes(float Master, float Engine, float Effects, float Ambience, float Radio);
 } // namespace PeregonAudio
 
 // Процедурные «голоса» на случай, когда файлов нет.
@@ -89,6 +102,8 @@ public:
 	}
 	// Звук «из салона»: приглушаем верха.
 	void SetMuffled(bool bMuffled) { ParamMuffled.store(bMuffled); }
+	// Группа громкости (по умолчанию: мотор — Engine, остальное — Effects).
+	void SetGroup(PeregonAudio::EGroup InGroup) { Group.store(static_cast<uint8>(InGroup)); }
 	bool IsFinished() const { return bFinished.load(); }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -144,6 +159,7 @@ private:
 	std::atomic<bool> ParamRunning{false};
 	std::atomic<bool> ParamCranking{false};
 	std::atomic<float> ParamVolume{1.f};
+	std::atomic<uint8> Group{static_cast<uint8>(PeregonAudio::EGroup::Effects)};
 	std::atomic<float> ParamIntensity{0.f};
 	std::atomic<bool> ParamMuffled{false};
 	std::atomic<bool> bFinished{false};

@@ -36,4 +36,6 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Peregon") TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere, Category = "Peregon") TObjectPtr<UStaticMeshComponent> Mesh;
 	UPROPERTY(VisibleAnywhere, Category = "Peregon") TObjectPtr<UStaticMeshComponent> Detail;
+	// Подробная модель (детали, инструмент, банки) — PeregonPartMeshes.
+	UPROPERTY(Transient) TObjectPtr<class UProceduralMeshComponent> Model;
 };

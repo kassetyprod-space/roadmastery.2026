@@ -86,6 +86,7 @@ private:
 	APeregonCar* SpawnCar(const FTransform& Where, const FLinearColor& Color, const vsim::parts::CarState* Parts);
 	UPROPERTY(Transient) TObjectPtr<APeregonCharacter> Walker;
 	UPROPERTY(Transient) TObjectPtr<APeregonSky> Sky;
+	UPROPERTY(Transient) TObjectPtr<AActor> NightLights;
 	UPROPERTY(Transient) TObjectPtr<ACameraActor> MenuCamera;
 
 	EPeregonMode Mode = EPeregonMode::Menu;

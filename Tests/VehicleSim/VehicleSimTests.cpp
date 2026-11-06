@@ -373,6 +373,17 @@ int main()
 			const PartItem Old = Remove(Bat, Slot::Battery);
 			Install(Bat, Old);
 			Check(Bat.BatteryCharge > 0.99 && Overall(MakeFactoryNew(nullptr)) > Overall(Wreck) + 0.3, "аккумулятор уносит заряд с собой", Bat.BatteryCharge);
+			int Blocking = 0;
+			for (const Finding& F : Diagnose(Wreck, 6.0))
+			{
+				Blocking += F.Severity == 2 ? 1 : 0;
+			}
+			int NewBlocking = 0;
+			for (const Finding& F : Diagnose(MakeFactoryNew(nullptr), 30.0))
+			{
+				NewBlocking += F.Severity >= 1 ? 1 : 0;
+			}
+			Check(Blocking >= 3 && NewBlocking == 0, "техничка: у гаражной находки 3+ причины не завестись, у новой — ни одной", Blocking);
 		}
 		Check(!E.bSpark && !E.bFuel && E.StarterFactor < 0.01, "гаражная находка: нет искры, топлива, аккумулятора", E.StarterFactor);
 		// Собираем: аккумулятор, свечи, карбюратор, фильтр, радиатор, антифриз.

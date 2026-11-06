@@ -285,8 +285,20 @@ void FPeregonKit::Label(const FTransform& Transform, const FString& Text, float 
 // ---------------------------------------------------------------------------------------------
 // Город
 // ---------------------------------------------------------------------------------------------
+TArray<FPeregonLightSpot>& PeregonLights::Spots()
+{
+	static TArray<FPeregonLightSpot> List;
+	return List;
+}
+
+void PeregonLights::Prune()
+{
+	Spots().RemoveAllSwap([](const FPeregonLightSpot& S) { return !S.Anchor.IsValid(); });
+}
+
 void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 {
+	TArray<FPeregonLightSpot> WindowSpots;
 	using namespace PeregonKitDetail;
 	constexpr double M = 100.0;
 	FPeregonMeshBuffers PanelWalls;
@@ -378,6 +390,13 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 						const float Z0 = H - Floor * 280.f - (bBrick ? 206.f : 184.f);
 						Windows.AddQuad(Corner + Along * U0 + FVector(0, 0, Z0), Corner + Along * U1 + FVector(0, 0, Z0), Corner + Along * U1 + FVector(0, 0, Z1),
 							Corner + Along * U0 + FVector(0, 0, Z1), Outward, FVector2D(0, 1), FVector2D(1, 0), FColor::White, 0);
+						FPeregonLightSpot Spot;
+						Spot.Location = Corner + Along * (0.5f * (U0 + U1)) + FVector(0, 0, 0.5f * (Z0 + Z1)) + Outward * 6.0;
+						Spot.Direction = Outward;
+						Spot.SizeCm = FVector2D(U1 - U0, Z1 - Z0);
+						Spot.bWindow = true;
+						Spot.Seed = B.Seed * 131u + static_cast<uint32>(Bay * 17 + Floor * 3 + Face);
+						WindowSpots.Add(Spot);
 					}
 				}
 			}
@@ -519,7 +538,14 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 	AddProc(PanelWalls, Mats.Panel, true);
 	AddProc(BrickWalls, Mats.Brick, true);
 	AddProc(Roofs, Mats.Roof, false);
-	AddProc(Windows, Mats.LitWindow, false, false);
+	if (UProceduralMeshComponent* Lit = AddProc(Windows, Mats.LitWindow, false, false))
+	{
+		for (FPeregonLightSpot& Spot : WindowSpots)
+		{
+			Spot.Anchor = Lit;
+		}
+		PeregonLights::Spots().Append(WindowSpots);
+	}
 	AddProc(Plant, Mats.Concrete, true);
 	AddProc(PlantRoof, Mats.MetalRoof, false);
 	AddProc(GarageBlocks, Mats.Concrete, true);
@@ -695,6 +721,11 @@ void FPeregonKit::StreetLamp(const FVector& Foot, const FVector& Toward)
 	if (UStaticMeshComponent* Shade = AddMesh(Cube(), FTransform(Dir.Rotation(), Foot + FVector(0, 0, 880) + Dir * 175.0, FVector(0.6, 0.3, 0.12)), Mats.Lamp, false))
 	{
 		Shade->SetCastShadow(false);
+		FPeregonLightSpot Spot;
+		Spot.Location = Foot + FVector(0, 0, 868) + Dir * 175.0;
+		Spot.Direction = FVector::DownVector;
+		Spot.Anchor = Shade;
+		PeregonLights::Spots().Add(Spot);
 	}
 }
 

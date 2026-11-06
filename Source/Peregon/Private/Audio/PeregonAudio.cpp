@@ -13,6 +13,27 @@
 // ---------------------------------------------------------------------------------------------
 // Банк звуков: sounds.txt + загрузка WAV
 // ---------------------------------------------------------------------------------------------
+namespace PeregonAudioVolume
+{
+std::atomic<float> Master{1.f};
+std::atomic<float> Groups[static_cast<int32>(PeregonAudio::EGroup::Count)] = {{1.f}, {1.f}, {1.f}, {1.f}};
+} // namespace PeregonAudioVolume
+
+float PeregonAudio::GroupGain(EGroup InGroup)
+{
+	const int32 I = FMath::Clamp(static_cast<int32>(InGroup), 0, static_cast<int32>(EGroup::Count) - 1);
+	return PeregonAudioVolume::Master.load() * PeregonAudioVolume::Groups[I].load();
+}
+
+void PeregonAudio::SetVolumes(float InMaster, float InEngine, float InEffects, float InAmbience, float InRadio)
+{
+	PeregonAudioVolume::Master.store(FMath::Clamp(InMaster, 0.f, 1.5f));
+	PeregonAudioVolume::Groups[0].store(FMath::Clamp(InEngine, 0.f, 1.5f));
+	PeregonAudioVolume::Groups[1].store(FMath::Clamp(InEffects, 0.f, 1.5f));
+	PeregonAudioVolume::Groups[2].store(FMath::Clamp(InAmbience, 0.f, 1.5f));
+	PeregonAudioVolume::Groups[3].store(FMath::Clamp(InRadio, 0.f, 1.5f));
+}
+
 namespace PeregonAudioBank
 {
 struct FBank
@@ -371,6 +392,7 @@ UPeregonSynth::UPeregonSynth(const FObjectInitializer& ObjectInitializer) : Supe
 
 void UPeregonSynth::SetupEngine()
 {
+	SetGroup(PeregonAudio::EGroup::Engine);
 	Mode = EMode::Engine;
 	Procedural = EPeregonProcedural::Engine;
 	Layers.Reset();
@@ -738,7 +760,7 @@ float UPeregonSynth::ProceduralSample()
 
 int32 UPeregonSynth::OnGenerateAudio(float* OutAudio, int32 NumSamples)
 {
-	const float TargetGain = FMath::Clamp(ParamVolume.load(), 0.f, 2.f);
+	const float TargetGain = FMath::Clamp(ParamVolume.load(), 0.f, 2.f) * PeregonAudio::GroupGain(static_cast<PeregonAudio::EGroup>(Group.load()));
 	const float TargetIntensity = ParamIntensity.load();
 	const bool bMuffled = ParamMuffled.load();
 	if (!bStarted)

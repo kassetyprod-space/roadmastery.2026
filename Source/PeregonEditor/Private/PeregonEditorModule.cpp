@@ -12,6 +12,8 @@
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionSceneTexture.h"
 #include "Materials/MaterialExpressionPixelDepth.h"
 #include "Materials/MaterialExpressionSaturate.h"
 #include "Materials/MaterialExpressionSine.h"
@@ -350,6 +352,107 @@ void CreatePsx3Material(const TCHAR* MaterialName, bool bGlass)
 	UE_LOG(LogPeregonEditor, Display, TEXT("[Peregon] Материал %s %s. Закоммитьте Content/Peregon/Materials/%s.uasset."),
 		*PackagePath, bSaved ? TEXT("создан и сохранён") : TEXT("создан, но НЕ сохранён"), MaterialName);
 }
+
+// Живописный пост-эффект M_PeregonPainted (стиль «Зари»): фильтр Кувахары (мазки кистью: внутри пятна цвет
+// ровный, края резкие), зерно бумаги и тонкий тёмный контур по скачкам глубины. Параметры: Strength 0..1,
+// Radius (px), Paper, Ink. Игра включает его в APeregonSky, если стиль — «живопись».
+void CreatePaintedPostMaterial()
+{
+	const TCHAR* MaterialName = TEXT("M_PeregonPainted");
+	const FString PackagePath = FString(MaterialDir) / MaterialName;
+	if (FPackageName::DoesPackageExist(PackagePath))
+	{
+		UE_LOG(LogPeregonEditor, Log, TEXT("[Peregon] %s уже есть"), *PackagePath);
+		return;
+	}
+	UE_LOG(LogPeregonEditor, Display, TEXT("[Peregon] Создаю %s"), *PackagePath);
+	IAssetTools& Tools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
+	UMaterialFactoryNew* Factory = NewObject<UMaterialFactoryNew>();
+	UMaterial* Material = Cast<UMaterial>(Tools.CreateAsset(MaterialName, MaterialDir, UMaterial::StaticClass(), Factory));
+	if (!Material)
+	{
+		UE_LOG(LogPeregonEditor, Error, TEXT("[Peregon] Не удалось создать %s"), MaterialName);
+		return;
+	}
+	Material->MaterialDomain = MD_PostProcess;
+	Material->BlendableLocation = BL_SceneColorBeforeBloom;
+
+	// Узел сцены нужен, чтобы шейдер подключил чтение PostProcessInput0 (его берёт код ниже).
+	UMaterialExpressionSceneTexture* Scene = AddNode<UMaterialExpressionSceneTexture>(Material, -900, 400);
+	Scene->SceneTextureId = PPI_PostProcessInput0;
+	UMaterialExpressionSceneTexture* Depth = AddNode<UMaterialExpressionSceneTexture>(Material, -900, 550);
+	Depth->SceneTextureId = PPI_SceneDepth;
+
+	UMaterialExpressionCustom* Custom = AddNode<UMaterialExpressionCustom>(Material, -400, 0);
+	Custom->OutputType = CMOT_Float3;
+	Custom->Description = TEXT("PeregonPainted");
+	Custom->Inputs.Reset();
+	const TCHAR* Names[] = {TEXT("Strength"), TEXT("Radius"), TEXT("Paper"), TEXT("Ink"), TEXT("SceneIn"), TEXT("DepthIn")};
+	const float Defaults[] = {0.7f, 3.f, 0.06f, 0.3f};
+	for (int32 I = 0; I < 6; ++I)
+	{
+		FCustomInput& In = Custom->Inputs.AddDefaulted_GetRef();
+		In.InputName = FName(Names[I]);
+		if (I < 4)
+		{
+			In.Input.Expression = AddScalar(Material, Names[I], Defaults[I], -900, -300 + I * 150);
+		}
+		else
+		{
+			In.Input.Expression = I == 4 ? static_cast<UMaterialExpression*>(Scene) : static_cast<UMaterialExpression*>(Depth);
+		}
+	}
+	Custom->Code = UTF8_TO_TCHAR(R"HLSL(
+float2 UV = GetDefaultSceneTextureUV(Parameters, 14);
+float2 Texel = View.BufferSizeAndInvSize.zw;
+float3 Orig = SceneTextureLookup(UV, 14, false).rgb;
+if (Strength <= 0.001) { return Orig; }
+// Kuwahara: mean colour of the quadrant with the lowest variance.
+float3 M0 = 0, M1 = 0, M2 = 0, M3 = 0, S0 = 0, S1 = 0, S2 = 0, S3 = 0;
+const int R = 3;
+float2 Step = Texel * max(Radius, 1.0) / R;
+for (int J = -R; J <= R; ++J)
+{
+	for (int I = -R; I <= R; ++I)
+	{
+		float3 C = SceneTextureLookup(UV + float2(I, J) * Step, 14, false).rgb;
+		float3 C2 = C * C;
+		if (I <= 0 && J <= 0) { M0 += C; S0 += C2; }
+		if (I >= 0 && J <= 0) { M1 += C; S1 += C2; }
+		if (I <= 0 && J >= 0) { M2 += C; S2 += C2; }
+		if (I >= 0 && J >= 0) { M3 += C; S3 += C2; }
+	}
+}
+float N = (R + 1) * (R + 1);
+M0 /= N; M1 /= N; M2 /= N; M3 /= N;
+float V0 = dot(abs(S0 / N - M0 * M0), 1);
+float V1 = dot(abs(S1 / N - M1 * M1), 1);
+float V2 = dot(abs(S2 / N - M2 * M2), 1);
+float V3 = dot(abs(S3 / N - M3 * M3), 1);
+float3 Paint = M0; float Best = V0;
+if (V1 < Best) { Best = V1; Paint = M1; }
+if (V2 < Best) { Best = V2; Paint = M2; }
+if (V3 < Best) { Best = V3; Paint = M3; }
+float3 Col = lerp(Orig, Paint, saturate(Strength));
+// Depth outline.
+float D = SceneTextureLookup(UV, 1, false).r;
+float2 E = Texel * 1.5;
+float Dx = abs(SceneTextureLookup(UV + float2(E.x, 0), 1, false).r - D) + abs(SceneTextureLookup(UV - float2(E.x, 0), 1, false).r - D);
+float Dy = abs(SceneTextureLookup(UV + float2(0, E.y), 1, false).r - D) + abs(SceneTextureLookup(UV - float2(0, E.y), 1, false).r - D);
+float Edge = saturate((Dx + Dy) / max(D * 0.04, 2.0) - 0.35);
+Edge *= saturate(1.0 - D / 400000.0); // no outline at the horizon
+Col *= 1.0 - Edge * Ink;
+// Paper grain, 2x2 px cells.
+float2 Cell = floor(UV * View.BufferSizeAndInvSize.xy * 0.5);
+float G = frac(sin(dot(Cell, float2(12.9898, 78.233))) * 43758.5453);
+Col *= 1.0 + (G - 0.5) * Paper;
+return Col;
+)HLSL");
+	UMaterialEditingLibrary::ConnectMaterialProperty(Custom, TEXT(""), MP_EmissiveColor);
+	UMaterialEditingLibrary::RecompileMaterial(Material);
+	const bool bSaved = UEditorAssetLibrary::SaveAsset(Material->GetPathName(), false);
+	UE_LOG(LogPeregonEditor, Display, TEXT("[Peregon] Материал %s %s."), *PackagePath, bSaved ? TEXT("создан и сохранён") : TEXT("создан, но НЕ сохранён"));
+}
 } // namespace PeregonEditorContent
 
 class FPeregonEditorModule : public IModuleInterface
@@ -363,6 +466,7 @@ public:
 			PeregonEditorContent::CreatePsxMaterial(TEXT("M_PSX2_Glass"), true);
 			PeregonEditorContent::CreatePsx3Material(TEXT("M_PSX3"), false);
 			PeregonEditorContent::CreatePsx3Material(TEXT("M_PSX3_Glass"), true);
+			PeregonEditorContent::CreatePaintedPostMaterial();
 			return false;
 		}), 1.f);
 	}

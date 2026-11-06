@@ -1,4 +1,7 @@
 #include "World/PeregonServicePoint.h"
+#include "World/PeregonKit.h"
+#include "Vehicle/PeregonPartMeshes.h"
+#include "ProceduralMeshComponent.h"
 #include "vsim/CarParts.h"
 
 #include "Components/PointLightComponent.h"
@@ -280,6 +283,22 @@ void APeregonServicePoint::AddItemProp(FName Id, const FVector& OnSurface)
 	UStaticMeshComponent* Prop = AddShape(Mesh, OnSurface + FVector(0.0, 0.0, Size.Z * 0.5), Size, Art ? Art->MakeMaterial(this, Look) : nullptr, false);
 	PeregonInteraction::MakeInteractable(Prop, PeregonService::ItemTag);
 	Prop->ComponentTags.Add(Id);
+	if (PeregonPartMeshes::Has(Id) && Art && Art->HasWeatherMaterials())
+	{
+		// Деталь на полке — настоящей моделью (в 0.8 размера); коробка остаётся невидимой мишенью для взгляда.
+		FPeregonMeshBuffers Buf;
+		PeregonPartMeshes::Build(Id, Buf, FTransform(FRotator(0.f, 90.f, 0.f), FVector::ZeroVector, FVector(0.8f)));
+		UProceduralMeshComponent* Model = NewObject<UProceduralMeshComponent>(this);
+		Model->SetupAttachment(RootComponent);
+		Model->SetRelativeLocation(OnSurface * 100.0);
+		Model->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Model->RegisterComponent();
+		Model->CreateMeshSection(0, Buf.Vertices, Buf.Triangles, Buf.Normals, Buf.UVs, Buf.Colors, TArray<FProcMeshTangent>(), false);
+		Model->SetMaterial(0, Art->MakeMaterial(this, FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.55f, 0.25f)));
+		Prop->SetVisibility(false);
+		// Когда товар взяли, мишень прячут — модель исчезает вместе с ней.
+		PropModels.Add(Prop, Model);
+	}
 }
 
 float APeregonServicePoint::ItemPrice(FName Id) const
@@ -619,6 +638,13 @@ void APeregonServicePoint::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		{
 			Part->SetVisibility(false);
 			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			if (const TWeakObjectPtr<UPrimitiveComponent>* Model = PropModels.Find(Part))
+			{
+				if (Model->IsValid())
+				{
+					Model->Get()->SetVisibility(false);
+				}
+			}
 			PeregonAudio::PlayEvent(this, TEXT("item.pickup"), Part->GetComponentLocation(), 0.8f);
 		}
 		return;

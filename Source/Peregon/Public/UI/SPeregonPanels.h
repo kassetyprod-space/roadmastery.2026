@@ -47,6 +47,30 @@ private:
 	TSharedPtr<STextBlock> MoneyText;
 };
 
+// Техничка: книжица с тем, чего не хватает машине, состоянием узлов и кузова и короткой инструкцией.
+struct FPeregonManualLine
+{
+	FString Text;
+	int32 Style = 0; // 0 — текст, 1 — заголовок, 2 — «не заведётся», 3 — «плохо», 4 — «в порядке»
+};
+
+class PEREGON_API SPeregonManualPanel : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SPeregonManualPanel) {}
+		SLATE_ARGUMENT(TWeakObjectPtr<APeregonPlayerController>, Owner)
+		SLATE_ARGUMENT(FString, Title)
+		SLATE_ARGUMENT(TArray<FPeregonManualLine>, Lines)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+
+private:
+	TWeakObjectPtr<APeregonPlayerController> Owner;
+};
+
 // Бумажная дорожная карта области: трасса, сёла, АЗС, реки, пройденный путь карандашом.
 class PEREGON_API SPeregonPaperMap : public SLeafWidget
 {

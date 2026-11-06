@@ -81,4 +81,6 @@ private:
 	TObjectPtr<UStaticMesh> CylinderMesh;
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> SphereMesh;
+	// Подробная модель товара на полке ↔ его невидимая мишень.
+	TMap<TWeakObjectPtr<UPrimitiveComponent>, TWeakObjectPtr<UPrimitiveComponent>> PropModels;
 };

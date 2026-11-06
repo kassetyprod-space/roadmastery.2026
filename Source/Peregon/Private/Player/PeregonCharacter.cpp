@@ -21,6 +21,8 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Audio/PeregonAudio.h"
 #include "Game/PeregonPlayerController.h"
+#include "ProceduralMeshComponent.h"
+#include "Vehicle/PeregonPartMeshes.h"
 #include "World/PeregonKit.h"
 
 namespace PeregonWalker
@@ -128,9 +130,37 @@ void APeregonCharacter::UpdateHeld()
 	}
 	HeldShown = Id;
 	const FPeregonItemDef* Def = PeregonItems::Find(Id);
+	if (HeldModel)
+	{
+		HeldModel->ClearAllMeshSections();
+	}
 	if (!Def)
 	{
 		HeldMesh->SetVisibility(false);
+		return;
+	}
+	UPeregonArtSubsystem* ArtSub = UPeregonArtSubsystem::Get(this);
+	if (PeregonPartMeshes::Has(Id) && ArtSub && ArtSub->HasWeatherMaterials())
+	{
+		// Подробная модель в руке; крупное уменьшаем, чтобы не закрывало обзор.
+		if (!HeldModel)
+		{
+			HeldModel = NewObject<UProceduralMeshComponent>(this, TEXT("HeldModel"));
+			HeldModel->SetupAttachment(FirstPersonCamera);
+			HeldModel->SetRelativeLocation(FVector(42.f, 20.f, -20.f));
+			HeldModel->SetRelativeRotation(FRotator(0.f, 25.f, 0.f));
+			HeldModel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			HeldModel->SetCastShadow(false);
+			HeldModel->RegisterComponent();
+		}
+		const FVector ModelSize = PeregonPartMeshes::Size(Id);
+		const float ModelFit = FMath::Min(1.f, 24.f / FMath::Max(1.f, static_cast<float>(ModelSize.GetMax())));
+		FPeregonMeshBuffers Buf;
+		PeregonPartMeshes::Build(Id, Buf, FTransform(FRotator::ZeroRotator, FVector(0.f, 0.f, -ModelSize.Z * ModelFit * 0.5f), FVector(ModelFit)),
+			Held ? Held->Condition : 1.f);
+		HeldModel->CreateMeshSection(0, Buf.Vertices, Buf.Triangles, Buf.Normals, Buf.UVs, Buf.Colors, TArray<FProcMeshTangent>(), false);
+		HeldModel->SetMaterial(0, ArtSub->MakeMaterial(this, FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.55f, 0.25f)));
+		HeldMesh->SetStaticMesh(nullptr);
 		return;
 	}
 	// Крупное (радиатор, глушитель) держим «у пояса» — уменьшаем, чтобы не закрывало обзор.
@@ -152,7 +182,12 @@ void APeregonCharacter::Tick(float DeltaSeconds)
 	if (HeldMesh)
 	{
 		UpdateHeld();
-		HeldMesh->SetVisibility(!HeldShown.IsNone() && bFirstPerson && !IsHidden());
+		const bool bShow = !HeldShown.IsNone() && bFirstPerson && !IsHidden();
+		HeldMesh->SetVisibility(bShow && HeldMesh->GetStaticMesh() != nullptr);
+		if (HeldModel)
+		{
+			HeldModel->SetVisibility(bShow);
+		}
 	}
 	if (!IsPlayerControlled() || IsHidden())
 	{

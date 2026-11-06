@@ -70,6 +70,10 @@ private:
 
 	// PSX-облака: слои-«потолки» с текстурой облаков, плывут по ветру; сплошная пелена — в пасмурно.
 	UPROPERTY(Transient) TArray<TObjectPtr<UProceduralMeshComponent>> CloudLayers;
+	// Живописный пост-эффект (создаёт модуль PeregonEditor); нет материала — без него.
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> PaintedPost;
+	bool bPaintedTried = false;
+	UMaterialInstanceDynamic* GetPaintedPost();
 	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> CloudLayerMids;
 	UPROPERTY(Transient) TObjectPtr<UProceduralMeshComponent> Stars;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> StarsMid;
@@ -78,7 +82,7 @@ private:
 
 	FName CloudWindParam;
 	TArray<TPair<FName, float>> CloudCoverParams; // имя → значение по умолчанию
-	FVector2D CloudDrift[3] = {FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector};
+	FVector2D CloudDrift[5] = {FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector};
 
 	rgen::WeatherMix Mix;
 	rgen::SeasonLook Season;

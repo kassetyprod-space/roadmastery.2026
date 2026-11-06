@@ -18,6 +18,25 @@ class UStaticMesh;
 class UStaticMeshComponent;
 
 // Геометрия для процедурного меша (вершины, треугольники, нормали, UV, цвет вершин).
+// Источник настоящего света ночью: фонарь (светит вниз) или горящее окно (светит из фасада наружу).
+// Набор построек регистрирует их здесь; APeregonNightLights ставит на ближайшие настоящие прожекторы.
+struct FPeregonLightSpot
+{
+	FVector Location = FVector::ZeroVector;
+	FVector Direction = FVector::DownVector;
+	FVector2D SizeCm = FVector2D(100.f, 100.f);
+	bool bWindow = false;
+	uint32 Seed = 0;
+	TWeakObjectPtr<UActorComponent> Anchor; // компонент, с которым свет живёт и исчезает (чанк выгрузился — света нет)
+};
+
+namespace PeregonLights
+{
+PEREGON_API TArray<FPeregonLightSpot>& Spots();
+// Убрать источники, чьи компоненты уже уничтожены.
+PEREGON_API void Prune();
+} // namespace PeregonLights
+
 struct PEREGON_API FPeregonMeshBuffers
 {
 	TArray<FVector> Vertices;

@@ -60,6 +60,7 @@ extern PEREGON_API const FName Documents;
 extern PEREGON_API const FName Thermos;
 
 extern PEREGON_API const FName Oil;
+extern PEREGON_API const FName Manual;
 extern PEREGON_API const FName Coolant;
 
 constexpr float CanisterLiters = 20.f;

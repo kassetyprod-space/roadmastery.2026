@@ -36,4 +36,28 @@ public:
 
 	// Стиль картинки: 0 — «живопись» (мягкие текстуры, тёплый свет, как в «Заре»), 1 — пиксели PSX.
 	UPROPERTY(Config) int32 VisualStyle = 0;
+
+	// --- Графика ---
+	// Детализация процедурных текстур (только «живопись»): 0 — как есть, 1 — высокая (×4), 2 — ультра (×8). После перезапуска.
+	UPROPERTY(Config) int32 TextureDetail = 1;
+	// Насколько тёмная ночь: 0 — светлая «игровая», 1 — настоящая (без фар и фонарей почти ничего не видно).
+	UPROPERTY(Config) float NightDarkness = 0.8f;
+	UPROPERTY(Config) bool bVolumetricFog = true;
+	UPROPERTY(Config) bool bFilmGrain = true;
+	// Сила живописного фильтра (мазки и контур), 0 — выключен.
+	UPROPERTY(Config) float PaintStrength = 0.7f;
+	// Настоящий свет фонарей и окон (прожекторы на землю и фасады) — для ближайших; дальние — только свечение.
+	UPROPERTY(Config) int32 MaxLampLights = 24;
+	// Облака: 0 — один слой, 1 — три слоя, 2 — пять слоёв (перистые, кучевые, разорванные).
+	UPROPERTY(Config) int32 CloudQuality = 2;
+
+	// --- Звук (0..1.5) ---
+	UPROPERTY(Config) float MasterVolume = 1.f;
+	UPROPERTY(Config) float EngineVolume = 1.f;
+	UPROPERTY(Config) float EffectsVolume = 1.f;
+	UPROPERTY(Config) float AmbienceVolume = 1.f;
+	UPROPERTY(Config) float RadioVolume = 1.f;
+
+	// Применить то, что не требует перезапуска: громкость, туман. Вызывается меню и при старте игры.
+	void ApplyRuntime() const;
 };

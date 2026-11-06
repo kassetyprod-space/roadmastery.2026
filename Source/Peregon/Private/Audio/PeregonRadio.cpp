@@ -1,4 +1,5 @@
 #include "Audio/PeregonRadio.h"
+#include "Audio/PeregonAudio.h"
 
 #include "Async/Async.h"
 #include "HAL/FileManager.h"
@@ -285,7 +286,7 @@ int32 UPeregonRadio::OnGenerateAudio(float* OutAudio, int32 NumSamples)
 	const bool bOn = ParamPower.load();
 	const float Static = FMath::Clamp(ParamStatic.load(), 0.f, 1.f);
 	const float Outside = FMath::Clamp(ParamOutside.load(), 0.f, 1.f);
-	const float Loudness = FMath::Clamp(ParamVolume.load(), 0.f, 1.f);
+	const float Loudness = FMath::Clamp(ParamVolume.load(), 0.f, 1.f) * PeregonAudio::GroupGain(PeregonAudio::EGroup::Radio);
 	// Полоса маленького динамика: срез низа ~220 Гц, верха — 3.6 кГц в салоне, ~1.2 кГц снаружи.
 	const float Cutoff = FMath::Lerp(3600.f, 1200.f, Outside);
 	const float LpA = 1.f - FMath::Exp(-2.f * PI * Cutoff / Rate);

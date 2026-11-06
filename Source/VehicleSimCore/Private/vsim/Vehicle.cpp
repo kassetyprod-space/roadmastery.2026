@@ -127,8 +127,19 @@ void Vehicle::UpdateSteering(double Dt, double ForwardSpeed)
 	{
 		Target *= Lerp(1.0, S.HighSpeedFraction, SmoothStep(5.0, 35.0, std::abs(ForwardSpeed)));
 	}
+	// Руль крутят руками: скорость вращения растёт и падает плавно (ограничено ускорение), у цели — притормаживает.
+	// На скорости руль «тяжелее» — крутится медленнее.
 	const bool bReturning = std::abs(Target) < std::abs(SteerState) || Target * SteerState < 0.0;
-	SteerState = MoveTowards(SteerState, Target, (bReturning ? S.ReturnRate : S.InputRate) * Dt);
+	const double Rate = (bReturning ? S.ReturnRate : S.InputRate) * Lerp(1.0, 0.6, SmoothStep(8.0, 30.0, std::abs(ForwardSpeed)));
+	const double Error = Target - SteerState;
+	const double WantVel = Clamp(Error * S.Stiffness, -Rate, Rate);
+	SteerVel = MoveTowards(SteerVel, WantVel, Rate * S.Accel * Dt);
+	SteerState = Clamp(SteerState + SteerVel * Dt, -1.0, 1.0);
+	if (std::abs(Error) < 1e-4 && std::abs(SteerVel) < 1e-3)
+	{
+		SteerState = Target;
+		SteerVel = 0.0;
+	}
 
 	const double Delta = SteerState * S.MaxAngleDeg * kPi / 180.0;
 	double SteeredXSum = 0.0;

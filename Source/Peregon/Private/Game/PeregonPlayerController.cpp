@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Game/PeregonGameMode.h"
+#include "Game/PeregonGameUserSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "UI/SPeregonMenu.h"
@@ -25,6 +26,7 @@ APeregonPlayerController::APeregonPlayerController()
 void APeregonPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	UPeregonGameUserSettings::Get()->ApplyRuntime();
 	// Подстраховка: если режим вошёл в меню раньше, чем появился вьюпорт, — показываем меню сейчас.
 	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
 	if (IsLocalController() && GM && GM->GetMode() == EPeregonMode::Menu && !IsMenuOpen())
@@ -795,6 +797,12 @@ void APeregonPlayerController::UseItem(FName Id, EPeregonStorage From)
 		Toast(FString::Printf(TEXT("Залито из канистры %.0f л"), Liters));
 		return;
 	}
+	if (Id == PeregonItems::Manual)
+	{
+		ClosePanel();
+		OpenManual();
+		return;
+	}
 	if (Id == PeregonItems::Thermos)
 	{
 		C->Remove(Id, 1);
@@ -802,4 +810,82 @@ void APeregonPlayerController::UseItem(FName Id, EPeregonStorage From)
 		return;
 	}
 	Toast(Def->Description);
+}
+
+void APeregonPlayerController::OpenManual()
+{
+	APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	APeregonCar* Car = Cast<APeregonCar>(GetPawn());
+	if (!Car && GM && GetPawn())
+	{
+		Car = GM->NearestCar(GetPawn()->GetActorLocation(), 800.f);
+	}
+	TArray<FPeregonManualLine> Lines;
+	auto Line = [&Lines](const FString& Text, int32 Style) { Lines.Add({Text, Style}); };
+	if (!Car)
+	{
+		Line(TEXT("Машины рядом нет — подойдите к «Соколу» и откройте техничку ещё раз."), 3);
+	}
+	else
+	{
+		const vsim::parts::CarState& State = Car->GetParts();
+		const float Fuel = Car->GetVehicleMovement() ? Car->GetVehicleMovement()->GetTelemetry().FuelL : 0.f;
+		const std::vector<vsim::parts::Finding> Found = vsim::parts::Diagnose(State, Fuel);
+		Line(TEXT("Чего не хватает, чтобы завестись и ехать"), 1);
+		bool bAny = false;
+		for (int32 Pass = 2; Pass >= 1; --Pass)
+		{
+			for (const vsim::parts::Finding& F : Found)
+			{
+				if (F.Severity == Pass)
+				{
+					Line(UTF8_TO_TCHAR(F.Text.c_str()), Pass == 2 ? 2 : 3);
+					bAny = true;
+				}
+			}
+		}
+		if (!bAny)
+		{
+			Line(TEXT("Всё на месте — заводите: ключ (держать ЛКМ) или R. Не забудьте опустить ручник."), 4);
+		}
+		Line(TEXT("Узлы"), 1);
+		for (int32 I = 0; I < vsim::parts::SlotCount; ++I)
+		{
+			const vsim::parts::Slot S = static_cast<vsim::parts::Slot>(I);
+			const vsim::parts::SlotInfo& Info = vsim::parts::Info(S);
+			const vsim::parts::PartItem* P = State.Get(S);
+			const FString Name = UTF8_TO_TCHAR(Info.Name);
+			if (!P)
+			{
+				Line(FString::Printf(TEXT("%s — нет"), *Name), Info.bOptional ? 0 : 3);
+				continue;
+			}
+			const int32 Pct = FMath::RoundToInt(static_cast<float>(P->Condition) * 100.f);
+			Line(FString::Printf(TEXT("%s — %d%%"), *Name, Pct), Pct < 25 ? 3 : (Pct > 70 ? 4 : 0));
+		}
+		Line(FString::Printf(TEXT("Масло %.1f / 3,75 л · антифриз %.1f / 7,8 л · заряд аккумулятора %d%%"), State.OilL, State.CoolantL,
+				 FMath::RoundToInt(static_cast<float>(State.BatteryCharge) * 100.f)),
+			0);
+		Line(TEXT("Кузов"), 1);
+		for (int32 I = 0; I < vsim::parts::PanelCount; ++I)
+		{
+			const vsim::parts::PanelState& P = State.Panels[static_cast<size_t>(I)];
+			const int32 Score = FMath::RoundToInt(static_cast<float>(vsim::parts::PanelScore(P)) * 100.f);
+			FString Note = FString::Printf(TEXT("%s — %d%%"), UTF8_TO_TCHAR(vsim::parts::PanelName(static_cast<vsim::parts::Panel>(I))), Score);
+			if (Score < 95)
+			{
+				Note += FString::Printf(TEXT(" · дальше: %s"), *FString(UTF8_TO_TCHAR(vsim::parts::OpName(vsim::parts::NextStep(P)))).ToLower());
+			}
+			Line(Note, P.Holes > 0.3 ? 2 : (Score < 50 ? 3 : 0));
+		}
+	}
+	Line(TEXT("Как работать"), 1);
+	Line(TEXT("Вещь из карманов — в руки клавишами 1–0 (номер ячейки в окне Tab), G — положить на землю."), 0);
+	Line(TEXT("Капот: E по капоту. Наведите на узел: «снять» — нужен его инструмент в карманах, «поставить» — деталь в руках. Держите E, пока идёт работа."), 0);
+	Line(TEXT("Масло и антифриз: канистру — в руки, наведите на горловину под капотом и держите E."), 0);
+	Line(TEXT("Кузов: болгарка + отрезной диск — вырезать гниль; лепестковый — зачистить и ошкурить; затем шпаклёвка, грунт, краска."), 0);
+	Line(TEXT("Голый металл под дождём ржавеет за часы — грунтуйте сразу после зачистки."), 0);
+	Line(TEXT("Печка (U) греет только с прогретым мотором. Чтобы стёкла не потели — приоткройте окно (колесо мыши на ручке)."), 0);
+	TSharedRef<SPeregonManualPanel> Panel = SNew(SPeregonManualPanel).Owner(this).Title(TEXT("Техничка «Сокол-1500»")).Lines(Lines);
+	ShowPanel(Panel, Panel);
 }

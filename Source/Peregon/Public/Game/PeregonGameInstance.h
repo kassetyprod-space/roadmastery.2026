@@ -23,7 +23,7 @@ struct FPeregonRunConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") int32 Seed = 2026;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") EPeregonAssists Assists = EPeregonAssists::Casual;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") FLinearColor CarColor = FLinearColor(0.32f, 0.04f, 0.04f);
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartMoney = 3000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartMoney = 1000000.f; // стартовый баланс, ₽
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") float StartHour = 9.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") bool bProvingGround = false;
 	// Сюжетное начало: пятиэтажка, гаражный кооператив, «Сокол» без половины деталей, помойка и разборка рядом.
@@ -137,6 +137,7 @@ public:
 		Glovebox = FPeregonContainer();
 		Glovebox.Capacity = 4;
 		Glovebox.Add(PeregonItems::Documents);
+		Glovebox.Add(PeregonItems::Manual);
 		Trunk = FPeregonContainer();
 		Trunk.Capacity = 10;
 		Trunk.Add(PeregonItems::CanisterEmpty);

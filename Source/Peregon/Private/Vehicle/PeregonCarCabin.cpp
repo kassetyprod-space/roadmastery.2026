@@ -81,6 +81,8 @@ void APeregonCar::BuildCabinExtras()
 	Case.WetMask = 0.f;
 	Case.SnowMask = 0.f;
 	AddPlate(TEXT("RadioCase"), PeregonCabin::RadioLocation, FVector(4.f, 18.f, 6.f), Case);
+	// Ручка печки на консоли под магнитолой.
+	AddPlate(TEXT("HeaterKnob"), FVector(74.5f, 12.f, 14.f), FVector(1.5f, 3.f, 3.f), Case);
 	FPeregonLook Dial(EPeregonTex::White, FLinearColor(0.95f, 0.6f, 0.2f), 0.4f);
 	Dial.WetMask = 0.f;
 	Dial.SnowMask = 0.f;
@@ -398,13 +400,33 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 		Temperature = It->GetTemperature();
 		break;
 	}
-	// Запотевание: в холод и сырость, когда в машине кто-то есть и окна закрыты; печка и открытые окна сушат.
+	OutsideTempC = Temperature;
+	if (!bClimateInit)
+	{
+		CabinTempC = Temperature; // машина простояла на улице
+		bClimateInit = true;
+	}
+	// Печка: греет, только когда мотор прогрет; открытые окна выстуживают салон.
 	const float Open = (WindowOpen[0] + WindowOpen[1] + WindowOpen[2] + WindowOpen[3]) * 0.25f;
-	const float Cold = FMath::SmoothStep(14.f, 2.f, Temperature);
-	const float Humid = Rain > 0.05f ? 1.f : 0.45f;
+	const float OpenMax = FMath::Max(FMath::Max(WindowOpen[0], WindowOpen[1]), FMath::Max(WindowOpen[2], WindowOpen[3]));
+	const float Heat = HeaterMode * 0.5f * EngineWarm * (PartsEffects.CoolingFactor > 0.05 ? 1.f : 0.3f);
+	const float CabinTarget = FMath::Lerp(Temperature, FMath::Max(Temperature, 24.f + 4.f * (HeaterMode - 1)), Heat) + (Controller ? 1.5f : 0.f);
+	const float CabinRate = 0.004f + 0.01f * Heat + 0.05f * Open;
+	CabinTempC = FMath::Lerp(CabinTempC, CabinTarget, FMath::Clamp(DeltaSeconds * CabinRate, 0.f, 1.f));
+	// Холод: сидеть в салоне ниже +10 °C тяжело, ниже нуля — замерзаешь.
+	const float Freeze = Controller ? FMath::SmoothStep(10.f, -10.f, CabinTempC) : 0.f;
+	Chill = FMath::Clamp(Chill + DeltaSeconds * (Freeze * 0.01f - (1.f - Freeze) * 0.02f), 0.f, 1.f);
+
+	// Запотевание: дыхание в холодной машине с закрытыми окнами; тёплый салон и холодное стекло потеют сильнее
+	// (печка без проветривания только хуже). Чуть приоткрытое окно (от 8%) — и стёкла сохнут, печка тогда помогает.
+	const float Cold = FMath::SmoothStep(16.f, 0.f, Temperature);
+	const float Humid = Rain > 0.05f ? 1.f : 0.5f;
 	const float Breath = Controller ? 1.f : 0.f;
-	FogLevel = FMath::Clamp(FogLevel + DeltaSeconds * (Breath * Cold * Humid * (1.f - FMath::Min(1.f, Open * 3.f)) * 0.01f
-		- EngineWarm * 0.012f - Open * 0.06f - 0.0015f), 0.f, 1.f);
+	const float Contrast = FMath::Clamp((CabinTempC - Temperature) / 20.f, 0.f, 1.5f);
+	const bool bVented = OpenMax > 0.08f;
+	const float Gain = Breath * Humid * (0.4f * Cold + 0.6f * Contrast) * (bVented ? 0.f : 1.f) * 0.012f * (1.f + 0.6f * HeaterMode);
+	const float Dry = (bVented ? 0.01f + 0.08f * Open + 0.012f * HeaterMode * EngineWarm : 0.f) + 0.0012f;
+	FogLevel = FMath::Clamp(FogLevel + DeltaSeconds * (Gain - Dry), 0.f, 1.f);
 
 	// Грязь: пыль с гравия, брызги с мокрой и грунтовой дороги; дождь понемногу смывает.
 	const float Speed = FMath::Abs(Movement->GetForwardSpeed());
@@ -416,15 +438,45 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 	{
 		ApplyDirt();
 	}
-	if (GlassMaterial)
+	// Стёкла потеют от рамки к центру; в мороз по углам — белые ледяные узоры.
+	const float Frost = FMath::SmoothStep(0.f, -8.f, Temperature);
+	for (int32 B = 0; B < GlassBands.Num(); ++B)
 	{
+		UMaterialInstanceDynamic* Band = GlassBands[B];
+		if (!Band)
+		{
+			continue;
+		}
+		static const float Lead[3] = {1.9f, 1.25f, 0.85f};
+		static const float Lag[3] = {0.f, 0.15f, 0.35f};
+		const float F = FMath::Clamp(FogLevel * Lead[B] - Lag[B], 0.f, 1.f);
+		const float Ice = FMath::Clamp(Frost * (B == 0 ? 0.9f : (B == 1 ? 0.45f : 0.1f)) * (1.f - EngineWarm * HeaterMode * 0.5f), 0.f, 1.f);
 		const FLinearColor Clean(0.42f, 0.5f, 0.52f);
-		FLinearColor Tint = FMath::Lerp(Clean, FLinearColor(0.85f, 0.87f, 0.88f), FogLevel);
+		FLinearColor Tint = FMath::Lerp(Clean, FLinearColor(0.85f, 0.87f, 0.88f), F);
+		Tint = FMath::Lerp(Tint, FLinearColor(0.93f, 0.96f, 1.f), Ice);
 		Tint = FMath::Lerp(Tint, FLinearColor(0.45f, 0.38f, 0.3f), DirtLevel * 0.35f);
-		GlassMaterial->SetVectorParameterValue(TEXT("Color"), Tint);
-		GlassMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.3f + 0.5f * FogLevel + 0.15f * DirtLevel);
+		Band->SetVectorParameterValue(TEXT("Color"), Tint);
+		Band->SetScalarParameterValue(TEXT("Opacity"), FMath::Min(0.95f, 0.3f + 0.55f * F + 0.5f * Ice + 0.15f * DirtLevel));
 	}
 }
+
+void APeregonCar::SetHeater(int32 Mode)
+{
+	HeaterMode = FMath::Clamp(Mode, 0, 2);
+	PeregonAudio::PlayEvent(this, TEXT("lights.switch"), GetActorTransform().TransformPosition(FVector(74.f, 12.f, 14.f)), 0.4f, 0.9f);
+	if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+	{
+		static const TCHAR* Names[] = {TEXT("Печка выключена"), TEXT("Печка: слабо"), TEXT("Печка: сильно")};
+		FString Note = Names[HeaterMode];
+		if (HeaterMode > 0 && EngineWarm < 0.3f)
+		{
+			Note += TEXT(" — мотор ещё холодный, тепло пойдёт позже");
+		}
+		GM->Toast(Note, 2.f);
+	}
+}
+
+void APeregonCar::OnHeater(const FInputActionValue&) { SetHeater((HeaterMode + 1) % 3); }
 
 void APeregonCar::ApplyDirt()
 {

@@ -68,8 +68,10 @@ struct WheelConfig
 struct SteeringParams
 {
 	double MaxAngleDeg = 34.0;
-	double InputRate = 4.0;          // 1/с — скорость поворота руля к цели (клавиатура)
-	double ReturnRate = 6.0;         // 1/с — возврат к центру
+	double InputRate = 2.2;          // 1/с — наибольшая скорость поворота руля к цели (клавиатура)
+	double ReturnRate = 2.8;         // 1/с — возврат к центру
+	double Stiffness = 7.0;          // 1/с — насколько резко руль догоняет цель (у цели замедляется)
+	double Accel = 7.0;              // во сколько раз за секунду набирается/сбрасывается скорость вращения
 	double HighSpeedFraction = 0.35; // доля угла на высокой скорости (если включён ассист)
 	double SteeringRatio = 16.0;     // поворот руля / поворот колёс (~1.5 оборота от центра до упора)
 };
@@ -271,6 +273,7 @@ private:
 
 	int Gear = 0;
 	double SteerState = 0.0;
+	double SteerVel = 0.0;   // скорость вращения руля, 1/с
 	double ClutchEngagement = 0.0;
 	double ShiftTimer = 0.0;
 	double ShiftCooldown = 0.0;

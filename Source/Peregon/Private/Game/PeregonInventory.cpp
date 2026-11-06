@@ -11,6 +11,7 @@ const FName CanisterEmpty(TEXT("canister_empty"));
 const FName Documents(TEXT("documents"));
 const FName Thermos(TEXT("thermos"));
 const FName Oil(TEXT("oil"));
+const FName Manual(TEXT("manual"));
 const FName Coolant(TEXT("coolant"));
 
 const TArray<FPeregonItemDef>& All()
@@ -41,6 +42,8 @@ const TArray<FPeregonItemDef>& All()
 			FLinearColor(0.45f, 0.18f, 0.12f));
 		Add(Documents, TEXT("Документы на перегон"), TEXT("Сокол-1500, перегон Новосибирск — Владивосток. Без них не сдать машину."), 0.f, 1, -1,
 			true, true, FLinearColor(0.8f, 0.8f, 0.75f));
+		Add(Manual, TEXT("Техничка «Сокол-1500»"), TEXT("Руководство по эксплуатации с пометками карандашом. Откройте рядом с машиной — подскажет, чего не хватает."),
+			0.f, 1, -1, true, false, FLinearColor(0.75f, 0.6f, 0.3f));
 		Add(Thermos, TEXT("Термос с чаем"), TEXT("Горячий чай с чабрецом. Согревает и бодрит в дороге."), 120.f, 2, -1, true, false,
 			FLinearColor(0.3f, 0.35f, 0.4f));
 		auto Last = [&Out]() -> FPeregonItemDef& { return Out.Last(); };

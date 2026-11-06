@@ -59,6 +59,7 @@ protected:
 	// Вещь в руках (ячейка карманов, выбранная клавишами 1–0).
 	UPROPERTY(VisibleAnywhere, Category = "Peregon|Visual")
 	TObjectPtr<UStaticMeshComponent> HeldMesh;
+	UPROPERTY(Transient) TObjectPtr<class UProceduralMeshComponent> HeldModel;
 	FName HeldShown;
 	void UpdateHeld();
 

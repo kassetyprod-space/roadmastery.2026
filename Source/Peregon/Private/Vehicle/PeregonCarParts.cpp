@@ -13,6 +13,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Player/PeregonCharacter.h"
 #include "ProceduralMeshComponent.h"
+#include "Vehicle/PeregonPartMeshes.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonKit.h"
 #include "World/PeregonSky.h"
@@ -239,27 +240,8 @@ void APeregonCar::RebuildPartsMesh()
 		{
 			continue;
 		}
-		const FPeregonItemDef* Def = PeregonItems::Find(PeregonItems::PartItem(I));
-		FLinearColor C = Def ? Def->Color : FLinearColor::Gray;
-		// Старая деталь — тусклая и рыжая.
-		const float Worn = 1.f - static_cast<float>(R.Part.Condition);
-		C = FMath::Lerp(C, FLinearColor(0.3f, 0.17f, 0.08f), Worn * 0.55f) * (1.f - 0.35f * Worn);
-		const FVector& Size = Places[I].Size;
-		Buf.AddBox(Places[I].Base, 0.f, Size, FVector2D(20.f, 20.f), C.ToFColor(false), true, true);
-		// Немного «деталировки»: клеммы аккумулятора, крышка трамблёра, горловина фильтра.
-		if (static_cast<Slot>(I) == Slot::Battery)
-		{
-			for (float Y : {-5.f, 5.f})
-			{
-				Buf.AddBox(Places[I].Base + FVector(-8.f, Y, Size.Z), 0.f, FVector(3.f, 3.f, 2.5f), FVector2D(10.f, 10.f),
-					(Y < 0.f ? FLinearColor(0.6f, 0.1f, 0.08f) : FLinearColor(0.1f, 0.1f, 0.12f)).ToFColor(false), true, false);
-			}
-		}
-		else if (static_cast<Slot>(I) == Slot::Turbo)
-		{
-			Buf.AddBox(Places[I].Base + FVector(0.f, 9.f, Size.Z * 0.3f), 0.f, FVector(8.f, 12.f, 8.f), FVector2D(10.f, 10.f),
-				FLinearColor(0.35f, 0.33f, 0.3f).ToFColor(false), true, true);
-		}
+		// Настоящая модель узла (PeregonPartMeshes): клеммы, рёбра, шкивы, провода — цвет тускнеет с износом.
+		PeregonPartMeshes::BuildInstalled(I, Buf, FTransform(Places[I].Base), static_cast<float>(R.Part.Condition));
 	}
 	PartsMesh->ClearAllMeshSections();
 	if (Buf.Vertices.Num() > 0)

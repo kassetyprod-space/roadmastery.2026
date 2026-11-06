@@ -72,6 +72,13 @@ public:
 	bool AreHeadlightsOn() const { return bHeadlights; }
 	// Дворники: 0 — выключены, 1 — медленно, 2 — быстро.
 	int32 GetWiperMode() const { return WiperMode; }
+	// Печка и климат в салоне.
+	int32 GetHeaterMode() const { return HeaterMode; }
+	float GetCabinTemp() const { return CabinTempC; }
+	float GetOutsideTemp() const { return OutsideTempC; }
+	float GetChill() const { return Chill; }
+	float GetFogLevel() const { return FogLevel; }
+	bool IsVented() const { return FMath::Max(FMath::Max(WindowOpen[0], WindowOpen[1]), FMath::Max(WindowOpen[2], WindowOpen[3])) > 0.08f; }
 	bool HasDriver() const { return Driver != nullptr; }
 
 	void EnterCar(APeregonCharacter* Character, int32 InSeat = 0);
@@ -215,6 +222,14 @@ private:
 	void OnHazard(const FInputActionValue& Value);
 	void OnNextSeat(const FInputActionValue& Value);
 	void OnWheel(const FInputActionValue& Value);
+	void OnHeater(const FInputActionValue& Value);
+	void SetHeater(int32 Mode);
+	int32 HeaterMode = 0;      // 0 — выкл, 1 — слабо, 2 — сильно
+	float CabinTempC = 12.f;
+	float OutsideTempC = 12.f;
+	float Chill = 0.f;         // 0..1 насколько замёрзли люди в салоне
+	bool bClimateInit = false;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> HeaterAction;
 	// Стёкла (опускание, запотевание) и грязь на кузове.
 	void UpdateGlassAndDirt(float DeltaSeconds);
 	void ApplyDirt();
@@ -330,6 +345,12 @@ private:
 	UPROPERTY() TObjectPtr<USceneComponent> WiperL;
 	UPROPERTY() TObjectPtr<USceneComponent> WiperR;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> WaterMaterial;
+	// Капли там, куда щётки не достают; полосы запотевания стёкол (0 — у рамки, 2 — центр).
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> WaterEdgeMaterial;
+	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> GlassBands;
+	float WaterEdge = 0.f;
+	float SnowEdge = 0.f;
+	bool IsWiped(const FVector& BodyPoint) const;
 	int32 WiperMode = 0;
 	float WiperPhase = 0.f;   // 0..1 — один ход туда и обратно
 	float WaterLevel = 0.f;   // 0..1 — сколько воды на стекле

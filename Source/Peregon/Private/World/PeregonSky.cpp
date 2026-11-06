@@ -25,8 +25,14 @@ namespace PeregonSkyTuning
 // Освещённость (люксы в единицах проекта): солнце 10, полная луна 0.22.
 constexpr float SunLux = 10.f;
 constexpr float MoonLux = 0.22f;
-constexpr float CloudHeightCm[3] = {180000.f, 260000.f, 150000.f};
-constexpr float CloudTileCm[3] = {320000.f, 140000.f, 200000.f};
+// Слои облаков снизу вверх по смыслу: 0 — кучевые, 1 — разорванные нижние, 2 — сплошная пелена непогоды,
+// 3 — высококучевые «барашки», 4 — перистые полосы. Каждый плывёт со своей скоростью — небо живое и глубокое.
+constexpr int32 CloudLayerCount = 5;
+constexpr float CloudHeightCm[CloudLayerCount] = {180000.f, 120000.f, 150000.f, 320000.f, 600000.f};
+constexpr float CloudTileCm[CloudLayerCount] = {320000.f, 140000.f, 200000.f, 180000.f, 700000.f};
+constexpr float CloudSpeed[CloudLayerCount] = {3.5f, 4.5f, 2.f, 2.8f, 6.f};
+// Растяжение текстуры: перистые — длинные полосы.
+constexpr float CloudStretch[CloudLayerCount] = {1.f, 1.f, 1.f, 1.3f, 5.f};
 constexpr float CloudHalfSizeCm = 3000000.f;
 
 float Smooth(float A, float B, float X)
@@ -244,19 +250,23 @@ void APeregonSky::BuildSkyMeshes()
 	// Облачные слои: один большой квадрат с повтором текстуры; плывут по ветру (UpdateSkyMeshes).
 	if (Art && Art->HasWeatherMaterials())
 	{
-		for (int32 Layer = 0; Layer < 3; ++Layer)
+		for (int32 Layer = 0; Layer < PeregonSkyTuning::CloudLayerCount; ++Layer)
 		{
 			UProceduralMeshComponent* Mesh = NewMesh(*FString::Printf(TEXT("CloudLayer%d"), Layer));
 			const float H = PeregonSkyTuning::CloudHalfSizeCm;
 			const float Repeat = 2.f * H / PeregonSkyTuning::CloudTileCm[Layer];
+			const float Rx = Repeat / PeregonSkyTuning::CloudStretch[Layer];
+			const float Ry = Repeat * FMath::Sqrt(PeregonSkyTuning::CloudStretch[Layer]);
 			const TArray<FVector> V = {FVector(-H, -H, 0.f), FVector(H, -H, 0.f), FVector(H, H, 0.f), FVector(-H, H, 0.f)};
-			const TArray<FVector2D> Uv = {FVector2D(0.f, 0.f), FVector2D(Repeat, 0.f), FVector2D(Repeat, Repeat), FVector2D(0.f, Repeat)};
+			const TArray<FVector2D> Uv = {FVector2D(0.f, 0.f), FVector2D(Rx, 0.f), FVector2D(Rx, Ry), FVector2D(0.f, Ry)};
 			const TArray<int32> Tri = {0, 2, 1, 0, 3, 2};
 			const TArray<FVector> N = {FVector::DownVector, FVector::DownVector, FVector::DownVector, FVector::DownVector};
 			Mesh->CreateMeshSection(0, V, Tri, N, Uv, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
 			UMaterialInstanceDynamic* Mid = Art->MakeTranslucent(this, Layer == 2 ? EPeregonTex::White : EPeregonTex::Clouds, FLinearColor::White, 0.f, 1.f);
 			Mesh->SetMaterial(0, Mid);
-			Mesh->SetTranslucentSortPriority(-20 + Layer);
+			// Дальние (высокие) слои рисуются первыми.
+			static const int32 Sort[PeregonSkyTuning::CloudLayerCount] = {-18, -16, -14, -20, -22};
+			Mesh->SetTranslucentSortPriority(Sort[Layer]);
 			CloudLayers.Add(Mesh);
 			CloudLayerMids.Add(Mid);
 		}
@@ -505,7 +515,9 @@ void APeregonSky::ApplyTime(float Hours)
 		if (UDirectionalLightComponent* Comp = Cast<UDirectionalLightComponent>(Moon->GetLightComponent()))
 		{
 			Comp->SetVisibility(!bSunUp);
-			Comp->SetIntensity((0.025f + MoonLux * Brightness) * (1.f - 0.75f * Cover));
+			// Без луны — почти ничего (настройка «Темнота ночи»): звёзды и засветка от городов.
+			const float Dark = UPeregonGameUserSettings::Get()->NightDarkness;
+			Comp->SetIntensity((0.025f * (1.f - 0.85f * Dark) + MoonLux * Brightness * (1.f - 0.4f * Dark)) * (1.f - 0.75f * Cover));
 			Comp->SetCastShadows(Brightness > 0.2f && Cover < 0.7f);
 		}
 	}
@@ -514,7 +526,8 @@ void APeregonSky::ApplyTime(float Hours)
 		if (USkyLightComponent* SkyComp = SkyLight->GetLightComponent())
 		{
 			// Ночью небо тёмное — небесный свет усиливаем, чтобы в тенях оставались очертания.
-			SkyComp->SetIntensity(1.f + 1.6f * Night + 0.35f * Cover);
+			const float Dark = UPeregonGameUserSettings::Get()->NightDarkness;
+			SkyComp->SetIntensity(FMath::Lerp(1.f + 1.6f * Night, 1.f - 0.75f * Night, Dark) + 0.35f * Cover * Day);
 		}
 	}
 	if (Spawned.Num() > 0)
@@ -556,9 +569,11 @@ void APeregonSky::ApplyTime(float Hours)
 	if (Post)
 	{
 		FPostProcessSettings& P = Post->Settings;
-		P.AutoExposureMinBrightness = FMath::Lerp(-0.9f, 1.4f - 0.9f * Cover, Day);
-		P.AutoExposureMaxBrightness = FMath::Lerp(0.7f, 4.6f, Day);
-		P.LumenSkylightLeaking = 0.1f + 0.12f * Night;
+		// Тёмная ночь: глаз (автоэкспозиция) не может «вытянуть» темноту — без фар и фонарей почти ничего не видно.
+		const float Dark = UPeregonGameUserSettings::Get()->NightDarkness;
+		P.AutoExposureMinBrightness = FMath::Lerp(FMath::Lerp(-0.9f, 0.9f, Dark), 1.4f - 0.9f * Cover, Day);
+		P.AutoExposureMaxBrightness = FMath::Lerp(FMath::Lerp(0.7f, 1.8f, Dark), 4.6f, Day);
+		P.LumenSkylightLeaking = 0.04f + (0.06f + 0.12f * Night) * (1.f - Dark);
 
 		// Стиль «живопись» (как «Заря»): тёплые света, прохладные синие тени, мягкий контраст, плёночное зерно.
 		const bool bPainted = UPeregonGameUserSettings::Get()->VisualStyle == 0;
@@ -571,10 +586,35 @@ void APeregonSky::ApplyTime(float Hours)
 		P.ColorGainShadows = FVector4(1.f - 0.08f * Warm, 1.f - 0.03f * Warm, 1.f + 0.08f * Warm, 1.f);
 		P.bOverride_ColorGainHighlights = true;
 		P.ColorGainHighlights = FVector4(1.f + 0.05f * Warm, 1.f, 1.f - 0.07f * Warm, 1.f);
+		const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
 		P.bOverride_FilmGrainIntensity = true;
-		P.FilmGrainIntensity = 0.12f * Warm;
+		P.FilmGrainIntensity = Settings->bFilmGrain ? 0.12f * Warm + 0.05f : 0.f;
 		P.BloomIntensity = bPainted ? 0.5f : 0.3f;
 		P.VignetteIntensity = bPainted ? 0.38f : 0.25f;
+		// Мягкий «плёночный» тон: пологий носок и плечо, тени не проваливаются в чёрное днём.
+		P.bOverride_FilmToe = true;
+		P.FilmToe = bPainted ? 0.62f : 0.55f;
+		P.bOverride_FilmShoulder = true;
+		P.FilmShoulder = bPainted ? 0.3f : 0.26f;
+		P.bOverride_AmbientOcclusionIntensity = true;
+		P.AmbientOcclusionIntensity = bPainted ? 0.7f : 0.5f;
+		P.bOverride_AmbientOcclusionRadius = true;
+		P.AmbientOcclusionRadius = 120.f;
+		P.bOverride_SceneFringeIntensity = true;
+		P.SceneFringeIntensity = bPainted ? 0.35f : 0.f;
+		// Сумерки и ночь — синеватые, как на картинах; днём — тёплые.
+		P.bOverride_WhiteTemp = true;
+		P.WhiteTemp = FMath::Lerp(bPainted ? 7600.f : 6500.f, bPainted ? 5900.f : 6500.f, Day);
+		// Живописный фильтр (M_PeregonPainted): мазки, бумага, контур по глубине.
+		if (UMaterialInstanceDynamic* Paint = GetPaintedPost())
+		{
+			Paint->SetScalarParameterValue(TEXT("Strength"), bPainted ? Settings->PaintStrength : 0.f);
+			Paint->SetScalarParameterValue(TEXT("Radius"), 2.f + 1.5f * Settings->PaintStrength);
+			Paint->SetScalarParameterValue(TEXT("Paper"), bPainted ? 0.06f : 0.f);
+			Paint->SetScalarParameterValue(TEXT("Ink"), bPainted ? 0.35f * Settings->PaintStrength : 0.f);
+			P.WeightedBlendables.Array.SetNum(1);
+			P.WeightedBlendables.Array[0] = FWeightedBlendable(bPainted && Settings->PaintStrength > 0.01f ? 1.f : 0.f, Paint);
+		}
 	}
 
 	// Объёмные облака движка (если двигаются): ветер и плотность.
@@ -605,8 +645,8 @@ void APeregonSky::UpdateSkyMeshes(const FVector& Camera, float DeltaSeconds)
 		{
 			continue;
 		}
-		// Верхний ветер сильнее приземного: облака заметно плывут.
-		const float Speed = Layer == 1 ? 2.2f : 3.5f;
+		// Верхний ветер сильнее приземного: облака заметно плывут, слои — с разной скоростью.
+		const float Speed = CloudSpeed[Layer];
 		CloudDrift[Layer] += FVector2D(Wind.X, Wind.Y) * 100.f * Speed * DeltaSeconds;
 		const float Tile = CloudTileCm[Layer];
 		const FVector2D Drift(FMath::Fmod(CloudDrift[Layer].X, Tile), FMath::Fmod(CloudDrift[Layer].Y, Tile));
@@ -615,18 +655,31 @@ void APeregonSky::UpdateSkyMeshes(const FVector& Camera, float DeltaSeconds)
 		Mesh->SetWorldLocation(Snapped);
 		float Opacity = 0.f;
 		FLinearColor Tint;
+		const int32 Quality = UPeregonGameUserSettings::Get()->CloudQuality;
+		// Какие слои включены: 0 — только пелена; 1 — кучевые, нижние и пелена; 2 — все пять.
+		const bool bEnabled = Layer == 2 || (Quality >= 1 && Layer <= 1) || (Quality >= 2 && Layer >= 3);
 		if (Layer == 2)
 		{
 			// Сплошная пелена — только в пасмурно и дождь.
 			Opacity = 0.97f * Smooth(0.7f, 0.98f, Cover);
 			Tint = FLinearColor(0.62f, 0.64f, 0.67f) * FMath::Lerp(1.f, 0.65f, static_cast<float>(Mix.Rain + Mix.Snow) * 0.5f);
 		}
+		else if (Layer >= 3)
+		{
+			// Высокие слои: видны и в ясную погоду (перистые — особенно перед сменой погоды), в пелене тонут.
+			Opacity = (Layer == 4 ? 0.45f : 0.5f) * Smooth(0.0f, 0.35f, Cover + 0.15f) * (1.f - Smooth(0.75f, 0.95f, Cover));
+			Tint = FMath::Lerp(FLinearColor(1.f, 1.f, 1.f), FLinearColor(0.85f, 0.86f, 0.9f), Cover);
+		}
 		else
 		{
 			Opacity = (Layer == 0 ? 1.f : 0.6f) * Smooth(0.03f, 0.55f, Cover);
 			Tint = FMath::Lerp(FLinearColor(1.f, 1.f, 1.f), FLinearColor(0.55f, 0.57f, 0.6f), Smooth(0.5f, 1.f, Cover));
+			// Нижние облака темнее снизу — в непогоду почти свинцовые.
+			Tint *= Layer == 1 ? 0.88f : 1.f;
 		}
-		Mesh->SetVisibility(Opacity > 0.01f && !CloudMid);
+		// Объёмные облака движка заменяют кучевые слои; высокие и пелена остаются.
+		const bool bReplaced = CloudMid && Layer <= 1;
+		Mesh->SetVisibility(bEnabled && !bReplaced && Opacity > 0.01f);
 		Mid->SetScalarParameterValue(TEXT("Opacity"), Opacity);
 		Mid->SetVectorParameterValue(TEXT("Color"), Tint * Lit);
 		// Своё свечение облаков ≈ яркость неба: днём белые, в сумерках розовые, ночью почти не видны.
@@ -662,4 +715,17 @@ void APeregonSky::UpdateSkyMeshes(const FVector& Camera, float DeltaSeconds)
 		MoonDisc->SetVisibility(Shown > 0.02f && MoonPhase > 0.06f && MoonPhase < 0.94f);
 		MoonMid->SetScalarParameterValue(TEXT("Emissive"), (0.6f + 5.f * Night) * Shown * (0.3f + 0.7f * static_cast<float>(rgen::Climate::MoonBrightness(MoonPhase))));
 	}
+}
+
+UMaterialInstanceDynamic* APeregonSky::GetPaintedPost()
+{
+	if (!PaintedPost && !bPaintedTried)
+	{
+		bPaintedTried = true;
+		if (UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PeregonPainted.M_PeregonPainted")))
+		{
+			PaintedPost = UMaterialInstanceDynamic::Create(Base, this);
+		}
+	}
+	return PaintedPost;
 }

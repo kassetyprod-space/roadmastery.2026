@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace vsim
@@ -217,6 +218,14 @@ VSIM_API CarState MakeFactoryNew(const float* Color);
 VSIM_API std::vector<double> Pack(const CarState& Car);
 // false — список пуст или не той версии (тогда Car не меняется).
 VSIM_API bool Unpack(const std::vector<double>& Data, CarState& Car);
+// «Техничка»: что мешает завести и ехать. Severity 2 — не заведётся/не поедет, 1 — поедет, но плохо или недолго.
+struct Finding
+{
+	int Severity = 0;
+	std::string Text; // UTF-8, по-русски: что, где и чем
+};
+VSIM_API std::vector<Finding> Diagnose(const CarState& Car, double FuelL);
+
 // Общая оценка машины 0..1 (детали + кузов) — для подсказок и цен.
 VSIM_API double Overall(const CarState& Car);
 } // namespace parts

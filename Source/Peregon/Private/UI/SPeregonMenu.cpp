@@ -451,6 +451,21 @@ TSharedRef<SWidget> SPeregonMenu::BuildSettingsPage()
 	Add(MakeRow(INVTEXT("Вертикальная синхронизация"), MakeToggle(&bVSync)));
 	Add(MakeRow(INVTEXT("Лимит кадров"), MakeChoice(&FpsIndex,
 		{INVTEXT("Без лимита"), INVTEXT("30"), INVTEXT("60"), INVTEXT("120"), INVTEXT("144"), INVTEXT("165"), INVTEXT("240")})));
+	Add(MakeRow(INVTEXT("Детализация текстур (после перезапуска)"), MakeChoice(&TextureIndex, {INVTEXT("Обычная"), INVTEXT("Высокая"), INVTEXT("Ультра")})));
+	Add(MakeRow(INVTEXT("Облака"), MakeChoice(&CloudIndex, {INVTEXT("Один слой"), INVTEXT("Три слоя"), INVTEXT("Пять слоёв")})));
+	Add(MakeRow(INVTEXT("Свет фонарей и окон"), MakeChoice(&LampIndex,
+		{INVTEXT("Только свечение"), INVTEXT("8 ближайших"), INVTEXT("24 ближайших"), INVTEXT("48 ближайших")})));
+	Add(MakeRow(INVTEXT("Темнота ночи"), MakeSlider(&NightDark, 0.f, 100.f, 0, TEXT("%"))));
+	Add(MakeRow(INVTEXT("Объёмный туман и лучи"), MakeToggle(&bVolFog)));
+	Add(MakeRow(INVTEXT("Плёночное зерно"), MakeToggle(&bGrain)));
+	Add(MakeRow(INVTEXT("Живописный фильтр (мазки, контур)"), MakeSlider(&PaintAmount, 0.f, 100.f, 0, TEXT("%"))));
+
+	Add(MakeHeader(INVTEXT("ЗВУК")));
+	Add(MakeRow(INVTEXT("Общая громкость"), MakeSlider(&VolMaster, 0.f, 150.f, 0, TEXT("%"))));
+	Add(MakeRow(INVTEXT("Мотор"), MakeSlider(&VolEngine, 0.f, 150.f, 0, TEXT("%"))));
+	Add(MakeRow(INVTEXT("Эффекты (двери, шины, шаги)"), MakeSlider(&VolEffects, 0.f, 150.f, 0, TEXT("%"))));
+	Add(MakeRow(INVTEXT("Окружение (ветер, дождь, птицы)"), MakeSlider(&VolAmbience, 0.f, 150.f, 0, TEXT("%"))));
+	Add(MakeRow(INVTEXT("Радио"), MakeSlider(&VolRadio, 0.f, 150.f, 0, TEXT("%"))));
 
 	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
 	Box->AddSlot().FillHeight(1.f)[Scroll];
@@ -472,6 +487,18 @@ void SPeregonMenu::LoadSettings()
 	HeadMotion = S->HeadMotion;
 	StartViewIndex = S->bStartFirstPerson ? 0 : 1;
 	StyleIndex = FMath::Clamp(S->VisualStyle, 0, 1);
+	TextureIndex = FMath::Clamp(S->TextureDetail, 0, 2);
+	CloudIndex = FMath::Clamp(S->CloudQuality, 0, 2);
+	LampIndex = S->MaxLampLights <= 0 ? 0 : (S->MaxLampLights <= 8 ? 1 : (S->MaxLampLights <= 24 ? 2 : 3));
+	NightDark = S->NightDarkness * 100.f;
+	bVolFog = S->bVolumetricFog;
+	bGrain = S->bFilmGrain;
+	PaintAmount = S->PaintStrength * 100.f;
+	VolMaster = S->MasterVolume * 100.f;
+	VolEngine = S->EngineVolume * 100.f;
+	VolEffects = S->EffectsVolume * 100.f;
+	VolAmbience = S->AmbienceVolume * 100.f;
+	VolRadio = S->RadioVolume * 100.f;
 	TimeIndex = 1;
 	for (int32 I = 0; I < static_cast<int32>(UE_ARRAY_COUNT(TimeScales)); ++I)
 	{
@@ -531,6 +558,20 @@ void SPeregonMenu::ApplySettings()
 	S->HeadMotion = HeadMotion;
 	S->bStartFirstPerson = StartViewIndex == 0;
 	S->VisualStyle = StyleIndex;
+	S->TextureDetail = TextureIndex;
+	S->CloudQuality = CloudIndex;
+	static const int32 Lamps[] = {0, 8, 24, 48};
+	S->MaxLampLights = Lamps[FMath::Clamp(LampIndex, 0, 3)];
+	S->NightDarkness = NightDark / 100.f;
+	S->bVolumetricFog = bVolFog;
+	S->bFilmGrain = bGrain;
+	S->PaintStrength = PaintAmount / 100.f;
+	S->MasterVolume = VolMaster / 100.f;
+	S->EngineVolume = VolEngine / 100.f;
+	S->EffectsVolume = VolEffects / 100.f;
+	S->AmbienceVolume = VolAmbience / 100.f;
+	S->RadioVolume = VolRadio / 100.f;
+	S->ApplyRuntime();
 	S->TimeScale = TimeScales[FMath::Clamp(TimeIndex, 0, static_cast<int32>(UE_ARRAY_COUNT(TimeScales)) - 1)];
 
 	const EWindowMode::Type Modes[] = {EWindowMode::Fullscreen, EWindowMode::WindowedFullscreen, EWindowMode::Windowed};

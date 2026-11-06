@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace vsim
 {
@@ -559,6 +560,93 @@ double Overall(const CarState& Car)
 		Body += PanelScore(P);
 	}
 	return 0.7 * Sum / std::max(1, N) + 0.3 * Body / PanelCount;
+}
+
+
+std::vector<Finding> Diagnose(const CarState& Car, double FuelL)
+{
+	std::vector<Finding> Out;
+	auto Add = [&Out](int Severity, const std::string& Text) { Out.push_back({Severity, Text}); };
+	auto Where = [](Slot S) {
+		const SlotInfo& I = Info(S);
+		std::string W = I.bUnderHood ? " (под капотом" : " (";
+		W += I.bUnderHood ? ", нужен " : "нужен ";
+		W += ToolName(I.NeedTool);
+		W += ")";
+		return W;
+	};
+	auto Missing = [&](Slot S, int Severity, const char* Why) {
+		if (!Car.Has(S))
+		{
+			Add(Severity, std::string("Нет: ") + Info(S).Name + " — " + Why + Where(S));
+			return true;
+		}
+		return false;
+	};
+	auto Worn = [&](Slot S, double Below, int Severity, const char* Why) {
+		const PartItem* P = Car.Get(S);
+		if (P && P->Condition < Below)
+		{
+			Add(Severity, std::string(Info(S).Name) + " изношен(а) до " + std::to_string(static_cast<int>(P->Condition * 100.0 + 0.5)) + "% — " + Why + Where(S));
+		}
+	};
+	// Запуск.
+	if (!Missing(Slot::Battery, 2, "стартер не крутит"))
+	{
+		const double Charge = Clamp01(Car.BatteryCharge) * Cond(Car, Slot::Battery);
+		if (Charge < 0.12)
+		{
+			Add(2, "Аккумулятор сел — нужен другой (или заряженный) аккумулятор");
+		}
+		else if (Charge < 0.3)
+		{
+			Add(1, "Аккумулятор слабый — стартер крутит вяло, заводите с первой попытки");
+		}
+	}
+	Missing(Slot::Starter, 2, "нечем крутить мотор");
+	Missing(Slot::SparkPlugs, 2, "нет искры");
+	Worn(Slot::SparkPlugs, 0.2, 1, "троит, может не схватывать");
+	Missing(Slot::Distributor, 2, "нет искры");
+	Missing(Slot::Carburetor, 2, "бензин не попадает в мотор");
+	Worn(Slot::Carburetor, 0.25, 1, "мотор глохнет и плохо тянет");
+	Missing(Slot::FuelFilter, 2, "бензин не идёт к карбюратору");
+	Missing(Slot::AirFilter, 1, "мотор работает, но глотает пыль");
+	if (FuelL < 0.5)
+	{
+		Add(2, "Бак пуст — залейте из канистры или на АЗС");
+	}
+	else if (FuelL < 4.0)
+	{
+		Add(1, "Бензина мало — " + std::to_string(static_cast<int>(FuelL + 0.5)) + " л, хватит ненадолго");
+	}
+	// Охлаждение и смазка.
+	Missing(Slot::Radiator, 1, "мотор перегреется за пару минут");
+	Worn(Slot::Radiator, 0.35, 1, "течёт, антифриз уходит");
+	Missing(Slot::WaterPump, 1, "антифриз не гоняется — перегрев");
+	Missing(Slot::Hoses, 1, "антифриз вытечет");
+	Worn(Slot::Hoses, 0.3, 1, "подтекают");
+	if (Car.CoolantL < 5.0)
+	{
+		char Buf[32];
+		std::snprintf(Buf, sizeof(Buf), "%.1f", Car.CoolantL);
+		Add(1, std::string("Мало антифриза: ") + Buf + " из 7,8 л — долейте в бачок под капотом");
+	}
+	if (Car.OilL < 2.8)
+	{
+		Add(Car.OilL < 1.5 ? 2 : 1, "Мало масла — долейте в горловину на крышке клапанов (норма 3,75 л)");
+	}
+	Missing(Slot::OilFilter, 1, "мотор быстро износится");
+	// Дорога.
+	Missing(Slot::Alternator, 1, "аккумулятор сядет в дороге");
+	Missing(Slot::BrakePads, 1, "почти нет тормозов");
+	Worn(Slot::BrakePads, 0.2, 1, "тормоза слабые");
+	Missing(Slot::SuspensionFront, 1, "машину раскачивает");
+	Missing(Slot::SuspensionRear, 1, "машину раскачивает");
+	Missing(Slot::Exhaust, 1, "громко и жрёт бензин");
+	Missing(Slot::Headlights, 1, "ночью ехать нельзя");
+	Missing(Slot::Taillights, 1, "сзади не видно");
+	Missing(Slot::Dashboard, 1, "не видно скорости и топлива");
+	return Out;
 }
 
 } // namespace parts

@@ -80,6 +80,7 @@ void APeregonAmbience::BeginPlay()
 		UPeregonSynth* Voice = NewObject<UPeregonSynth>(this, Name);
 		Voice->SetupAttachment(RootComponent);
 		Voice->SetupLoop(Event, Fallback);
+		Voice->SetGroup(PeregonAudio::EGroup::Ambience);
 		Voice->SetLevel(0.f, 0.f);
 		Voice->bAllowSpatialization = false;
 		Voice->RegisterComponent();

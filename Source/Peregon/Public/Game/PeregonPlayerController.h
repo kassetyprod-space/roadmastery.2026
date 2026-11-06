@@ -45,6 +45,8 @@ public:
 	void OpenShop(const TArray<FName>& Items, const FString& Title, float FuelPrice);
 	void OpenMap();
 	void OpenMapRegion(int32 Region);
+	// Техничка: что не так с машиной рядом (или той, в которой сидим).
+	void OpenManual();
 	void ClosePanel();
 	bool IsPanelOpen() const { return PanelContainer.IsValid(); }
 	void ToggleInventory();

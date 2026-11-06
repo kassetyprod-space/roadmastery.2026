@@ -438,6 +438,74 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 		}
 	}
 }
+
+// «Глубина и качество» (Настройки → Детализация текстур): исходный рисунок увеличивается в Factor раз
+// с мягкой интерполяцией, поверх — мелкая фактура (зерно бумаги/мазка) и рельеф: яркость считается высотой,
+// свет падает слева сверху — швы, щели и камни выглядят вдавленными, а не нарисованными.
+void Enhance(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px, int32 Factor)
+{
+	if (Factor <= 1 || Type == EPeregonTex::White || W * Factor > 1024 || H * Factor > 1024)
+	{
+		return;
+	}
+	const bool bAlpha = Type == EPeregonTex::GrassTuft || Type == EPeregonTex::Bush || Type == EPeregonTex::Leaf || Type == EPeregonTex::Raindrops ||
+		Type == EPeregonTex::Clouds || Type == EPeregonTex::GlassDirt || Type == EPeregonTex::Glass;
+	const bool bSoft = Type == EPeregonTex::Clouds || Type == EPeregonTex::GlassDirt || Type == EPeregonTex::Raindrops;
+	const int32 Nw = W * Factor;
+	const int32 Nh = H * Factor;
+	TArray<FLinearColor> Src;
+	Src.SetNumUninitialized(W * H);
+	for (int32 I = 0; I < W * H; ++I)
+	{
+		Src[I] = FLinearColor(Px[I].R, Px[I].G, Px[I].B, Px[I].A);
+	}
+	auto At = [&](int32 X, int32 Y) -> const FLinearColor& { return Src[((Y % H + H) % H) * W + ((X % W + W) % W)]; };
+	TArray<FLinearColor> Big;
+	Big.SetNumUninitialized(Nw * Nh);
+	for (int32 Y = 0; Y < Nh; ++Y)
+	{
+		for (int32 X = 0; X < Nw; ++X)
+		{
+			// Билинейно, но с «плечом» smoothstep: края пятен мягкие, но не мыльные.
+			const float Fx = (X + 0.5f) / Factor - 0.5f;
+			const float Fy = (Y + 0.5f) / Factor - 0.5f;
+			const int32 X0 = FMath::FloorToInt(Fx);
+			const int32 Y0 = FMath::FloorToInt(Fy);
+			const float Tx = FMath::SmoothStep(0.f, 1.f, Fx - X0);
+			const float Ty = FMath::SmoothStep(0.f, 1.f, Fy - Y0);
+			const FLinearColor A = FMath::Lerp(At(X0, Y0), At(X0 + 1, Y0), Tx);
+			const FLinearColor B = FMath::Lerp(At(X0, Y0 + 1), At(X0 + 1, Y0 + 1), Tx);
+			Big[Y * Nw + X] = FMath::Lerp(A, B, Ty);
+		}
+	}
+	const uint32 Seed = static_cast<uint32>(Type) * 7349u + 11u;
+	const float Relief = bSoft ? 0.f : (Type == EPeregonTex::Paint || Type == EPeregonTex::Glass || Type == EPeregonTex::Chrome ? 0.25f : 1.f);
+	auto Lum = [&](int32 X, int32 Y) {
+		const FLinearColor& C = Big[((Y % Nh + Nh) % Nh) * Nw + ((X % Nw + Nw) % Nw)];
+		return (C.R * 0.3f + C.G * 0.55f + C.B * 0.15f) * (bAlpha ? C.A / 255.f : 1.f);
+	};
+	Px.SetNumUninitialized(Nw * Nh);
+	for (int32 Y = 0; Y < Nh; ++Y)
+	{
+		for (int32 X = 0; X < Nw; ++X)
+		{
+			FLinearColor C = Big[Y * Nw + X];
+			// Рельеф: разность высот вдоль диагонали света.
+			const float Slope = (Lum(X - 1, Y - 1) - Lum(X + 1, Y + 1)) * 0.5f;
+			const float Shade = FMath::Clamp(Slope * 0.55f * Relief, -40.f, 40.f);
+			// Фактура: два слоя бесшовного шума (крупный мазок и мелкое зерно).
+			const float Stroke = (TileNoise(X, Y, FMath::Max(2, Factor * 3), Nw, Nh, Seed) - 0.5f) * 10.f;
+			const float Grain = (Rand(X, Y, Seed + 1u) - 0.5f) * 7.f;
+			const float D = bSoft ? Grain * 0.3f : Shade + Stroke + Grain;
+			C.R = FMath::Clamp(C.R + D, 0.f, 255.f);
+			C.G = FMath::Clamp(C.G + D, 0.f, 255.f);
+			C.B = FMath::Clamp(C.B + D * 0.92f, 0.f, 255.f);
+			Px[Y * Nw + X] = FColor(static_cast<uint8>(C.R), static_cast<uint8>(C.G), static_cast<uint8>(C.B), static_cast<uint8>(FMath::Clamp(C.A, 0.f, 255.f)));
+		}
+	}
+	W = Nw;
+	H = Nh;
+}
 } // namespace PeregonTexGen
 
 UPeregonArtSubsystem* UPeregonArtSubsystem::Get(const UObject* WorldContext)
@@ -617,6 +685,14 @@ UTexture2D* UPeregonArtSubsystem::Generate(EPeregonTex Type)
 	int32 H = 0;
 	TArray<FColor> Pixels;
 	PeregonTexGen::Draw(Type, W, H, Pixels);
+	{
+		const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
+		static const int32 Factors[] = {1, 4, 8};
+		if (Settings->VisualStyle == 0)
+		{
+			PeregonTexGen::Enhance(Type, W, H, Pixels, Factors[FMath::Clamp(Settings->TextureDetail, 0, 2)]);
+		}
+	}
 
 	FLinearColor Sum(0.f, 0.f, 0.f, 0.f);
 	for (const FColor& C : Pixels)

@@ -70,6 +70,150 @@ const TCHAR* PartNoun(FName Tag)
 constexpr float MaxExitSpeed = 3.f; // м/с
 } // namespace PeregonCarLook
 
+namespace PeregonGlassSplit
+{
+// Треугольники без общих вершин (так проще дробить и раскладывать по секциям).
+struct FSoup
+{
+	TArray<FVector> V;
+	TArray<FVector> N;
+	TArray<FVector2D> UV;
+	int32 Num() const { return V.Num() / 3; }
+	FVector Center(int32 T) const { return (V[T * 3] + V[T * 3 + 1] + V[T * 3 + 2]) / 3.0; }
+};
+
+void Split(FSoup& Out, const FVector (&P)[3], const FVector (&Nn)[3], const FVector2D (&U)[3], float MaxEdge, int32 Depth)
+{
+	const float L = FMath::Max3(FVector::Dist(P[0], P[1]), FVector::Dist(P[1], P[2]), FVector::Dist(P[2], P[0]));
+	if (L <= MaxEdge || Depth >= 6)
+	{
+		for (int32 K = 0; K < 3; ++K)
+		{
+			Out.V.Add(P[K]);
+			Out.N.Add(Nn[K]);
+			Out.UV.Add(U[K]);
+		}
+		return;
+	}
+	// Середины рёбер: четыре треугольника вместо одного.
+	const FVector M[3] = {(P[0] + P[1]) * 0.5, (P[1] + P[2]) * 0.5, (P[2] + P[0]) * 0.5};
+	const FVector Mn[3] = {(Nn[0] + Nn[1]).GetSafeNormal(), (Nn[1] + Nn[2]).GetSafeNormal(), (Nn[2] + Nn[0]).GetSafeNormal()};
+	const FVector2D Mu[3] = {(U[0] + U[1]) * 0.5, (U[1] + U[2]) * 0.5, (U[2] + U[0]) * 0.5};
+	const FVector A[3] = {P[0], M[0], M[2]};
+	const FVector An[3] = {Nn[0], Mn[0], Mn[2]};
+	const FVector2D Au[3] = {U[0], Mu[0], Mu[2]};
+	const FVector B[3] = {M[0], P[1], M[1]};
+	const FVector Bn[3] = {Mn[0], Nn[1], Mn[1]};
+	const FVector2D Bu[3] = {Mu[0], U[1], Mu[1]};
+	const FVector C[3] = {M[2], M[1], P[2]};
+	const FVector Cn[3] = {Mn[2], Mn[1], Nn[2]};
+	const FVector2D Cu[3] = {Mu[2], Mu[1], U[2]};
+	Split(Out, A, An, Au, MaxEdge, Depth + 1);
+	Split(Out, B, Bn, Bu, MaxEdge, Depth + 1);
+	Split(Out, C, Cn, Cu, MaxEdge, Depth + 1);
+	Split(Out, M, Mn, Mu, MaxEdge, Depth + 1);
+}
+
+FSoup Subdivide(const TArray<FVector>& V, const TArray<FVector>& N, const TArray<FVector2D>& UV, const TArray<int32>& Tris, float MaxEdge)
+{
+	FSoup Out;
+	for (int32 T = 0; T + 2 < Tris.Num(); T += 3)
+	{
+		const FVector P[3] = {V[Tris[T]], V[Tris[T + 1]], V[Tris[T + 2]]};
+		const FVector Nn[3] = {N[Tris[T]], N[Tris[T + 1]], N[Tris[T + 2]]};
+		const FVector2D U[3] = {UV[Tris[T]], UV[Tris[T + 1]], UV[Tris[T + 2]]};
+		Split(Out, P, Nn, U, MaxEdge, 0);
+	}
+	return Out;
+}
+
+// Края стекла: рёбра, у которых только один треугольник (вершины сравниваются по положению).
+TArray<TPair<FVector, FVector>> BoundaryEdges(const TArray<FVector>& V, const TArray<int32>& Tris)
+{
+	auto Key = [](const FVector& P) { return FIntVector(FMath::RoundToInt(P.X * 10.0), FMath::RoundToInt(P.Y * 10.0), FMath::RoundToInt(P.Z * 10.0)); };
+	TMap<TPair<FIntVector, FIntVector>, int32> Count;
+	TMap<TPair<FIntVector, FIntVector>, TPair<FVector, FVector>> Ends;
+	for (int32 T = 0; T + 2 < Tris.Num(); T += 3)
+	{
+		for (int32 E = 0; E < 3; ++E)
+		{
+			const FVector& A = V[Tris[T + E]];
+			const FVector& B = V[Tris[T + (E + 1) % 3]];
+			FIntVector Ka = Key(A);
+			FIntVector Kb = Key(B);
+			if (Kb.X < Ka.X || (Kb.X == Ka.X && (Kb.Y < Ka.Y || (Kb.Y == Ka.Y && Kb.Z < Ka.Z))))
+			{
+				Swap(Ka, Kb);
+			}
+			const TPair<FIntVector, FIntVector> K(Ka, Kb);
+			Count.FindOrAdd(K)++;
+			Ends.Add(K, TPair<FVector, FVector>(A, B));
+		}
+	}
+	TArray<TPair<FVector, FVector>> Out;
+	for (const TPair<TPair<FIntVector, FIntVector>, int32>& It : Count)
+	{
+		if (It.Value == 1)
+		{
+			Out.Add(Ends[It.Key]);
+		}
+	}
+	return Out;
+}
+
+// Разложить треугольники по полосам (Band(T) → 0..Bands-1) и создать по секции на полосу.
+void MakeBandSections(UProceduralMeshComponent* Mesh, int32& SectionIndex, const FSoup& Soup, TFunctionRef<int32(int32)> Band, int32 Bands,
+	TFunctionRef<UMaterialInterface*(int32)> MaterialFor)
+{
+	for (int32 B = 0; B < Bands; ++B)
+	{
+		TArray<FVector> V;
+		TArray<FVector> N;
+		TArray<FVector2D> UV;
+		TArray<int32> Tris;
+		for (int32 T = 0; T < Soup.Num(); ++T)
+		{
+			if (Band(T) != B)
+			{
+				continue;
+			}
+			for (int32 K = 0; K < 3; ++K)
+			{
+				Tris.Add(V.Num());
+				V.Add(Soup.V[T * 3 + K]);
+				N.Add(Soup.N[T * 3 + K]);
+				UV.Add(Soup.UV[T * 3 + K]);
+			}
+		}
+		if (Tris.Num() == 0)
+		{
+			continue;
+		}
+		Mesh->CreateMeshSection(SectionIndex, V, Tris, N, UV, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+		if (UMaterialInterface* M = MaterialFor(B))
+		{
+			Mesh->SetMaterial(SectionIndex, M);
+		}
+		else
+		{
+			Mesh->SetMeshSectionVisible(SectionIndex, false);
+		}
+		++SectionIndex;
+	}
+}
+
+// Полоса запотевания по расстоянию до края стекла: 0 — у рамки (потеет первым), 1 — середина края, 2 — центр.
+int32 FogBand(const FVector& P, const TArray<TPair<FVector, FVector>>& Edges)
+{
+	float Best = 1e9f;
+	for (const TPair<FVector, FVector>& E : Edges)
+	{
+		Best = FMath::Min(Best, static_cast<float>(FMath::PointDistToSegment(P, E.Key, E.Value)));
+	}
+	return Best < 7.f ? 0 : (Best < 16.f ? 1 : 2);
+}
+} // namespace PeregonGlassSplit
+
 // ---------------------------------------------------------------------------------------------
 // Конструктор: физика, узлы подвижных частей, камеры. Начало координат — центр кузова (≈ центр масс, 52 см над землёй).
 // X — вперёд, Y — вправо, Z — вверх. Размеры в сантиметрах.
@@ -168,6 +312,7 @@ APeregonCar::APeregonCar()
 		FVector Half;
 	};
 	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 85.5f), FVector(7.f, 5.f, 2.5f)},
+		{TEXT("Heater"), Body.Get(), FVector(74.f, 12.f, 14.f), FVector(2.5f, 3.5f, 3.5f)},
 		{TEXT("RadioVol"), Body.Get(), FVector(73.f, -5.f, 30.f), FVector(3.f, 5.f, 4.f)},
 		{TEXT("RadioTune"), Body.Get(), FVector(73.f, 5.f, 30.f), FVector(3.f, 5.f, 4.f)},
 		{TEXT("Horn"), SteeringPivot.Get(), FVector::ZeroVector, FVector(4.f, 7.f, 7.f)}};
@@ -283,6 +428,7 @@ void APeregonCar::BuildSounds()
 	TireSound->SetupLoop(TEXT("tires.roll"), EPeregonProcedural::TireRoll);
 	WindSound = MakeVoice(TEXT("WindSound"), FVector(40.f, 0.f, 60.f));
 	WindSound->SetupLoop(TEXT("wind"), EPeregonProcedural::Wind);
+	WindSound->SetGroup(PeregonAudio::EGroup::Ambience);
 	SkidSound = MakeVoice(TEXT("SkidSound"), FVector(0.f, 0.f, -40.f));
 	SkidSound->SetupLoop(TEXT("tires.skid"), EPeregonProcedural::Skid);
 	for (UPeregonSynth* Voice : {EngineSound.Get(), TireSound.Get(), WindSound.Get(), SkidSound.Get()})
@@ -404,17 +550,28 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	if (M == vmodel::Mat::Glass)
 	{
 		// Пыль и разводы на стекле (альфа текстуры): стекло видно и изнутри; запотевание и грязь — UpdateGlassAndDirt.
-		GlassMaterial = Art->MakeGlassMaterial(this, FLinearColor(0.42f, 0.5f, 0.52f), 0.3f);
-		if (GlassMaterial && Art->HasWeatherMaterials())
+		// Три материала: у рамки, ближе к центру и в центре — запотевают по-разному (UpdateGlassAndDirt).
+		GlassBands.Reset();
+		for (int32 B = 0; B < 3; ++B)
 		{
-			GlassMaterial->SetTextureParameterValue(TEXT("Tex"), Art->GetTexture(EPeregonTex::GlassDirt));
+			UMaterialInstanceDynamic* Band = Art->MakeGlassMaterial(this, FLinearColor(0.42f, 0.5f, 0.52f), 0.3f);
+			if (Band && Art->HasWeatherMaterials())
+			{
+				Band->SetTextureParameterValue(TEXT("Tex"), Art->GetTexture(EPeregonTex::GlassDirt));
+			}
+			if (Band)
+			{
+				GlassBands.Add(Band);
+			}
 		}
+		GlassMaterial = GlassBands.Num() == 3 ? GlassBands[2].Get() : nullptr;
 		return GlassMaterial;
 	}
 	if (M == vmodel::Mat::Water)
 	{
 		// Капли на лобовом: прозрачность растёт под дождём, дворники её сбрасывают. Без M_PSX3_Glass — нет капель.
 		WaterMaterial = Art->MakeTranslucent(this, EPeregonTex::Raindrops, FLinearColor(0.85f, 0.9f, 0.95f), 0.f, 0.03f);
+		WaterEdgeMaterial = Art->MakeTranslucent(this, EPeregonTex::Raindrops, FLinearColor(0.85f, 0.9f, 0.95f), 0.f, 0.03f);
 		return WaterMaterial;
 	}
 	FPeregonLook Look;
@@ -539,16 +696,35 @@ void APeregonCar::BuildModelMeshes()
 				Win->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 				Win->SetCanEverAffectNavigation(false);
 				Win->RegisterComponent();
-				Win->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
-				if (UMaterialInterface* GlassMat = SlotMaterials[static_cast<int32>(S.Material)])
 				{
-					Win->SetMaterial(0, GlassMat);
-				}
-				else
-				{
-					Win->SetMeshSectionVisible(0, false);
+					// Запотевает от рамки к центру: три полосы со своими материалами.
+					using namespace PeregonGlassSplit;
+					const TArray<TPair<FVector, FVector>> Edges = BoundaryEdges(Vertices, Triangles);
+					const FSoup Soup = Subdivide(Vertices, Normals, UVs, Triangles, 8.f);
+					int32 WinSection = 0;
+					MakeBandSections(Win, WinSection, Soup, [&](int32 T) { return FogBand(Soup.Center(T), Edges); }, 3,
+						[&](int32 B) -> UMaterialInterface* { return GlassBands.IsValidIndex(B) ? GlassBands[B].Get() : nullptr; });
 				}
 				WindowGlass[Door] = Win;
+				continue;
+			}
+			if (S.Material == vmodel::Mat::Glass && GlassBands.Num() == 3)
+			{
+				using namespace PeregonGlassSplit;
+				const TArray<TPair<FVector, FVector>> Edges = BoundaryEdges(Vertices, Triangles);
+				const FSoup Soup = Subdivide(Vertices, Normals, UVs, Triangles, 10.f);
+				MakeBandSections(Mesh, SectionIndex, Soup, [&](int32 T) { return FogBand(Soup.Center(T), Edges); }, 3,
+					[&](int32 B) -> UMaterialInterface* { return GlassBands[B].Get(); });
+				continue;
+			}
+			if (S.Material == vmodel::Mat::Water && WaterMaterial)
+			{
+				// Дворники вытирают только сектор под щёткой: остальное стекло остаётся в каплях.
+				using namespace PeregonGlassSplit;
+				const FSoup Soup = Subdivide(Vertices, Normals, UVs, Triangles, 6.f);
+				const FVector Origin = PeregonCarModel::ToVector(Part.Origin);
+				MakeBandSections(Mesh, SectionIndex, Soup, [&](int32 T) { return IsWiped(Soup.Center(T) + Origin) ? 0 : 1; }, 2,
+					[&](int32 B) -> UMaterialInterface* { return B == 0 ? WaterMaterial.Get() : WaterEdgeMaterial.Get(); });
 				continue;
 			}
 			Mesh->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
@@ -1025,6 +1201,11 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 		{
 			return TEXT("Сигнал (H)");
 		}
+		if (Part->ComponentHasTag(TEXT("Heater")))
+		{
+			static const TCHAR* Modes[] = {TEXT("выключена"), TEXT("слабо"), TEXT("сильно")};
+			return FString::Printf(TEXT("Печка: %s · в салоне %+.0f °C — переключить (U)"), Modes[FMath::Clamp(HeaterMode, 0, 2)], CabinTempC);
+		}
 	}
 	auto IsOpen = [this](FName Tag) {
 		const FPeregonMovingPart* Moving = FindMovingPart(Tag);
@@ -1134,6 +1315,10 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		else if (Part->ComponentHasTag(TEXT("Horn")))
 		{
 			bHorn = true;
+		}
+		else if (Part->ComponentHasTag(TEXT("Heater")))
+		{
+			SetHeater((HeaterMode + 1) % 3);
 		}
 		return;
 	}
@@ -1258,6 +1443,7 @@ void APeregonCar::BuildInput()
 	RadioAction = MakeAction(TEXT("IA_Car_Radio"), EInputActionValueType::Boolean);
 	RadioNextAction = MakeAction(TEXT("IA_Car_RadioNext"), EInputActionValueType::Boolean);
 	DomeAction = MakeAction(TEXT("IA_Car_Dome"), EInputActionValueType::Boolean);
+	HeaterAction = MakeAction(TEXT("IA_Car_Heater"), EInputActionValueType::Boolean);
 	HornAction = MakeAction(TEXT("IA_Car_Horn"), EInputActionValueType::Boolean);
 	BlinkLeftAction = MakeAction(TEXT("IA_Car_BlinkLeft"), EInputActionValueType::Boolean);
 	BlinkRightAction = MakeAction(TEXT("IA_Car_BlinkRight"), EInputActionValueType::Boolean);
@@ -1324,6 +1510,7 @@ void APeregonCar::BuildInput()
 	Map(RadioAction, EKeys::N);
 	Map(RadioNextAction, EKeys::J);
 	Map(DomeAction, EKeys::O);
+	Map(HeaterAction, EKeys::U);
 	Map(HornAction, EKeys::H);
 	Map(HornAction, EKeys::Gamepad_LeftThumbstick);
 	Map(BlinkLeftAction, EKeys::Z);
@@ -1375,6 +1562,7 @@ void APeregonCar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	EIC->BindAction(RadioAction, ETriggerEvent::Started, this, &APeregonCar::OnRadioPower);
 	EIC->BindAction(RadioNextAction, ETriggerEvent::Started, this, &APeregonCar::OnRadioNext);
 	EIC->BindAction(DomeAction, ETriggerEvent::Started, this, &APeregonCar::OnDome);
+	EIC->BindAction(HeaterAction, ETriggerEvent::Started, this, &APeregonCar::OnHeater);
 	EIC->BindAction(HornAction, ETriggerEvent::Started, this, &APeregonCar::OnHornPressed);
 	EIC->BindAction(HornAction, ETriggerEvent::Completed, this, &APeregonCar::OnHornReleased);
 	EIC->BindAction(BlinkLeftAction, ETriggerEvent::Started, this, &APeregonCar::OnBlinkLeft);
@@ -1511,6 +1699,9 @@ void APeregonCar::UpdateWipers(float DeltaSeconds)
 	const float Hit = 1.f + FMath::Clamp(Speed / 20.f, 0.f, 1.5f);
 	WaterLevel = FMath::Clamp(WaterLevel + DeltaSeconds * (Rain * 0.22f * Hit - (Rain < 0.02f ? 0.015f : 0.f)), 0.f, 1.f);
 	SnowOnGlass = FMath::Clamp(SnowOnGlass + DeltaSeconds * (Snowfall * 0.12f * Hit - (Snowfall < 0.02f ? 0.01f : 0.f)), 0.f, 1.f);
+	// Там, куда щётка не достаёт, вода и снег копятся и сходят только сами (ветер на скорости сдувает капли).
+	WaterEdge = FMath::Clamp(WaterEdge + DeltaSeconds * (Rain * 0.22f * Hit - (Rain < 0.02f ? 0.008f : 0.f) - Speed * 0.0006f), 0.f, 1.f);
+	SnowEdge = FMath::Clamp(SnowEdge + DeltaSeconds * (Snowfall * 0.14f * Hit - (Snowfall < 0.02f ? 0.004f : 0.f)), 0.f, 1.f);
 
 	// Ход щётки: медленно ~40 взмахов в минуту, быстро ~65. Выключили — щётки доходят до упора и встают.
 	const float Rate = WiperMode == 2 ? 1.1f : 0.68f;
@@ -1556,6 +1747,12 @@ void APeregonCar::UpdateWipers(float DeltaSeconds)
 		WaterMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.9f * Amount);
 		WaterMaterial->SetVectorParameterValue(TEXT("Color"), FMath::Lerp(FLinearColor(0.85f, 0.9f, 0.95f), FLinearColor(1.f, 1.f, 1.f),
 			SnowOnGlass > WaterLevel ? 1.f : 0.f));
+	}
+	if (WaterEdgeMaterial)
+	{
+		WaterEdgeMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.95f * FMath::Max(WaterEdge, SnowEdge));
+		WaterEdgeMaterial->SetVectorParameterValue(TEXT("Color"), FMath::Lerp(FLinearColor(0.85f, 0.9f, 0.95f), FLinearColor(1.f, 1.f, 1.f),
+			SnowEdge > WaterEdge ? 1.f : 0.f));
 	}
 }
 void APeregonCar::OnToggleParkingBrake(const FInputActionValue&)
@@ -1609,4 +1806,61 @@ void APeregonCar::OnResetCar(const FInputActionValue&)
 	FRotator Rotation = GetActorRotation();
 	Rotation.Pitch = 0.f;
 	PlaceOnGround(FTransform(Rotation, GetActorLocation() + FVector(0.f, 0.f, 150.f)));
+}
+
+bool APeregonCar::IsWiped(const FVector& BodyPoint) const
+{
+	// Сектор, который проходит щётка: от положения покоя на угол хода, по радиусу — от ближнего до дальнего конца щётки.
+	const vmodel::Model& Model = PeregonCarModel::Get();
+	const FVector Axis = PeregonCarModel::ToVector(Model.WiperAxis).GetSafeNormal();
+	const float Sweep = Model.WiperSweepDeg;
+	for (vmodel::Part Id : {vmodel::Part::WiperL, vmodel::Part::WiperR})
+	{
+		const vmodel::PartMesh* Blade = Model.Find(Id);
+		if (!Blade || Axis.IsNearlyZero())
+		{
+			continue;
+		}
+		float RMin = 1e9f;
+		float RMax = 0.f;
+		FVector Rest = FVector::ZeroVector;
+		for (const vmodel::Section& Sec : Blade->Sections)
+		{
+			for (const auto& Pos : Sec.Positions)
+			{
+				const FVector L = FVector::VectorPlaneProject(PeregonCarModel::ToVector(Pos), Axis);
+				const float R = static_cast<float>(L.Size());
+				if (R > 4.f)
+				{
+					RMin = FMath::Min(RMin, R);
+				}
+				if (R > RMax)
+				{
+					RMax = R;
+					Rest = L;
+				}
+			}
+		}
+		if (RMax < 5.f)
+		{
+			continue;
+		}
+		const FVector V = FVector::VectorPlaneProject(BodyPoint - PeregonCarModel::ToVector(Blade->Origin), Axis);
+		const float R = static_cast<float>(V.Size());
+		if (R < RMin * 0.8f || R > RMax + 2.f)
+		{
+			continue;
+		}
+		// Угол от положения покоя вокруг оси, со знаком хода.
+		const FVector A = Rest.GetSafeNormal();
+		const FVector B = V.GetSafeNormal();
+		const float Deg = FMath::RadiansToDegrees(FMath::Atan2(static_cast<float>(FVector::DotProduct(FVector::CrossProduct(A, B), Axis)),
+			static_cast<float>(FVector::DotProduct(A, B))));
+		const float Along = Sweep >= 0.f ? Deg : -Deg;
+		if (Along > -4.f && Along < FMath::Abs(Sweep) + 4.f)
+		{
+			return true;
+		}
+	}
+	return false;
 }
