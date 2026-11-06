@@ -772,8 +772,8 @@ float UPeregonSynth::ProceduralSample()
 		Brown = Brown * 0.997f + N * 0.03f;
 		Tone.Lowpass(160.f, 0.7f, Rate);
 		const float Roll = 0.55f + 0.45f * FMath::Sin(2.f * PI * 0.9f * Age + 1.3f * FMath::Sin(2.f * PI * 0.37f * Age));
-		const float Env = FMath::Min(1.f, Age / 0.25f) * FMath::Exp(-Age / 2.6f);
-		S = (Tone.Process(N) * 2.2f + Brown * 3.f) * Roll * Env;
+		const float Shape = FMath::Min(1.f, Age / 0.25f) * FMath::Exp(-Age / 2.6f);
+		S = (Tone.Process(N) * 2.2f + Brown * 3.f) * Roll * Shape;
 		Length = 8.f;
 		break;
 	}
@@ -809,9 +809,9 @@ float UPeregonSynth::ProceduralSample()
 		// Тифон тепловоза: два низких тона (~300 и ~370 Гц), долгий гудок.
 		Cycle = FMath::Frac(Cycle + 300.f / Rate);
 		FirePhase = FMath::Frac(FirePhase + 372.f / Rate);
-		const float Env = FMath::Min(1.f, Age / 0.15f) * (Age < 2.2f ? 1.f : FMath::Exp(-(Age - 2.2f) / 0.2f));
+		const float Shape = FMath::Min(1.f, Age / 0.15f) * (Age < 2.2f ? 1.f : FMath::Exp(-(Age - 2.2f) / 0.2f));
 		Tone.Lowpass(1600.f, 0.7f, Rate);
-		S = Tone.Process(std::tanh(3.f * FMath::Sin(2.f * PI * Cycle)) * 0.5f + std::tanh(3.f * FMath::Sin(2.f * PI * FirePhase)) * 0.45f) * Env * 0.7f;
+		S = Tone.Process(std::tanh(3.f * FMath::Sin(2.f * PI * Cycle)) * 0.5f + std::tanh(3.f * FMath::Sin(2.f * PI * FirePhase)) * 0.45f) * Shape * 0.7f;
 		Length = 3.f;
 		break;
 	}
@@ -821,9 +821,9 @@ float UPeregonSynth::ProceduralSample()
 		const float T = Age / 2.6f;
 		const float Doppler = T < 0.5f ? 1.12f : 0.88f;
 		Cycle = FMath::Frac(Cycle + 70.f * Doppler / Rate);
-		const float Env = FMath::Exp(-FMath::Square((T - 0.5f) * 4.f));
+		const float Shape = FMath::Exp(-FMath::Square((T - 0.5f) * 4.f));
 		Tone.Lowpass(500.f, 0.8f, Rate);
-		S = (FMath::Sin(2.f * PI * Cycle) * 0.5f + Tone.Process(N) * 1.3f) * Env;
+		S = (FMath::Sin(2.f * PI * Cycle) * 0.5f + Tone.Process(N) * 1.3f) * Shape;
 		Length = 2.6f;
 		break;
 	}

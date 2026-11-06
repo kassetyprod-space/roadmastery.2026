@@ -345,7 +345,7 @@ void APeregonAmbience::UpdateCritters(const FVector& Camera, float DeltaSeconds)
 		return;
 	}
 	const float Hours = Sky->GetTimeOfDay();
-	const float Rain = static_cast<float>(Sky->GetWeather().Rain);
+	const float Rainfall = static_cast<float>(Sky->GetWeather().Rain);
 	const double Urban = World->GetLandscape().UrbanMask(Camera.X / 100.0, Camera.Y / 100.0);
 	// Деревня рядом: по расстоянию до ближайшего села на маршруте.
 	double NearVillage = 1e9;
@@ -368,7 +368,7 @@ void APeregonAmbience::UpdateCritters(const FVector& Camera, float DeltaSeconds)
 	{
 		const bool bEvening = Hours > 18.f || Hours < 7.f;
 		DogTimer = FMath::FRandRange(6.f, 22.f) * (bEvening ? 0.6f : 1.f);
-		if (bSettled && Rain < 0.6f)
+		if (bSettled && Rainfall < 0.6f)
 		{
 			// Иногда подхватывает вторая собака с другого двора.
 			PeregonAudio::PlayEvent(this, TEXT("ambient.dog"), Around(40.f, 160.f), FMath::FRandRange(0.35f, 0.8f), FMath::FRandRange(0.85f, 1.2f));
@@ -391,7 +391,7 @@ void APeregonAmbience::UpdateCritters(const FVector& Camera, float DeltaSeconds)
 	{
 		CrowTimer = FMath::FRandRange(18.f, 55.f);
 		const bool bDay = Hours > 6.f && Hours < 20.f;
-		if (bDay && Rain < 0.4f && Urban < 0.5)
+		if (bDay && Rainfall < 0.4f && Urban < 0.5)
 		{
 			PeregonAudio::PlayEvent(this, TEXT("ambient.crow"), Around(50.f, 200.f) + FVector(0.f, 0.f, 1500.f), FMath::FRandRange(0.3f, 0.6f),
 				FMath::FRandRange(0.9f, 1.1f));
