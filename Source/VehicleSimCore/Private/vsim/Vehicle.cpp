@@ -218,7 +218,7 @@ void Vehicle::UpdateSuspension(const std::vector<WheelContact>& Contacts)
 		if (C.bInContact)
 		{
 			const double X = std::max(0.0, C.Compression);
-			const double ShockMul = 0.3 + 0.7 * Clamp01(Cond.Wheels[I].Shock);
+			const double ShockMul = (0.3 + 0.7 * Clamp01(Cond.Wheels[I].Shock)) * (0.4 + 0.6 * Clamp01(Cond.ShockFactor));
 			const double Vel = Clamp(C.CompressionVelocity, -S.MaxCompressionSpeed, S.MaxCompressionSpeed);
 			const double Damping = (Vel > 0.0 ? S.BumpDamping : S.ReboundDamping) * ShockMul;
 			F = S.Preload + S.SpringRate * X + Damping * Vel;
@@ -278,6 +278,8 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 	const EngineParams& EP = Cfg.Engine;
 	const double Rpm = EngineSt.Rpm();
 	const double EngCond = Cond.Engine;
+	// Угол коленвала для фазы троения (период — 4 оборота).
+	MisfireClock = std::fmod(MisfireClock + EngineSt.Omega * H, 8.0 * kPi);
 
 	// --- Двигатель: момент сгорания и трения ---
 	double Throttle = 0.0;
@@ -305,11 +307,13 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 		{
 			Throttle = 0.0;
 		}
-		CombustionTorque = EngineModel::NetTorque(EP, Rpm, Throttle, EngCond) + EngineModel::FrictionTorque(EP, Rpm, EngCond);
+		// Троение: каждые ~4 оборота провал момента, пропорционально Misfire.
+		const double Miss = Cond.Misfire > 0.0 ? Cond.Misfire * std::max(0.0, std::sin(MisfireClock * 0.25)) : 0.0;
+		CombustionTorque = EngineModel::NetTorque(EP, Rpm, Throttle, EngCond) * Cond.PowerFactor * (1.0 - 0.8 * Miss) + EngineModel::FrictionTorque(EP, Rpm, EngCond);
 	}
 	if (!EngineSt.bRunning && Input.bStarter && Input.bIgnition)
 	{
-		CombustionTorque += EP.StarterTorque * std::max(0.0, 1.0 - Rpm / EP.StarterMaxRpm);
+		CombustionTorque += EP.StarterTorque * Clamp01(Cond.StarterFactor) * std::max(0.0, 1.0 - Rpm / EP.StarterMaxRpm);
 	}
 	// Трение как диссипативный момент: у стоящего вала не крутит его назад.
 	const double FrictionTorque = EngineModel::FrictionTorque(EP, Rpm, EngCond) * Clamp01(EngineSt.Omega / 5.0);
@@ -477,7 +481,7 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 
 		const double PadFactor = Cond.Wheels[I].PadMm > 0.5 ? 1.0 : 0.35; // колодки стёрты — железо по железу
 		const double Fade = 1.0 - (1.0 - WC.Brake.FadeMinFactor) * SmoothStep(WC.Brake.FadeStartC, WC.Brake.FadeEndC, W.BrakeTempC);
-		double BrakeTorque = Clamp01(Input.Brake) * WC.Brake.MaxTorque * PadFactor * Fade;
+		double BrakeTorque = Clamp01(Input.Brake) * WC.Brake.MaxTorque * PadFactor * Fade * Cond.BrakeFactor;
 		if (Assist.bAbs && BrakeTorque > 0.0 && std::abs(C.Vx) > 3.0
 			&& W.TireSt.SlipLong * SignOf(C.Vx) < -1.2 * W.TireModel.PeakSlipLong())
 		{
@@ -513,7 +517,7 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 	if (EngineSt.bRunning)
 	{
 		const double Pind = EngineModel::IndicatedPower(EP, Rpm, Throttle, EngCond);
-		FuelKgPerS = std::max(Pind * EP.IndicatedSfc / 3.6e9, kIdleMinFuelKgPerS);
+		FuelKgPerS = std::max(Pind * EP.IndicatedSfc / 3.6e9, kIdleMinFuelKgPerS) * Cond.FuelFactor;
 		Cond.FuelL -= FuelKgPerS / kFuelDensityKgPerL * H;
 		if (Cond.FuelL <= 0.0)
 		{
@@ -524,11 +528,11 @@ void Vehicle::Substep(double H, const std::vector<WheelContact>& Contacts)
 	FuelFlowKgPerS += FuelKgPerS * H; // нормируется в Step
 
 	// --- Пуск и остановка ---
-	if (EngineSt.bRunning && (!Input.bIgnition || EngineSt.Rpm() < EP.StallRpm))
+	if (EngineSt.bRunning && (!Input.bIgnition || EngineSt.Rpm() < EP.StallRpm || !Cond.bSpark || !Cond.bFuelSupply))
 	{
 		EngineSt.bRunning = false;
 	}
-	if (!EngineSt.bRunning && Input.bStarter && Input.bIgnition && Cond.FuelL > 0.0 && Cond.Engine > 0.02
+	if (!EngineSt.bRunning && Input.bStarter && Input.bIgnition && Cond.FuelL > 0.0 && Cond.Engine > 0.02 && Cond.bSpark && Cond.bFuelSupply
 		&& EngineSt.Rpm() > EP.StartRpm)
 	{
 		EngineSt.bRunning = true;
@@ -552,7 +556,7 @@ void Vehicle::UpdateThermalAndWear(double Dt, double ForwardSpeed, double Ambien
 	const double HeatIn = EngineSt.bRunning ? EP.HeatToCoolantFraction * FuelFlowKgPerS * kFuelLowerHeatingValue : 0.0;
 	const double Airflow = 0.25 + std::abs(ForwardSpeed) / 15.0 + (EngineSt.bFanOn ? 1.0 : 0.0);
 	const double Thermostat = SmoothStep(EP.ThermostatOpenC, EP.ThermostatFullC, T);
-	const double Conductance = EP.RadiatorConductance * Clamp01(Cond.Radiator) * Airflow * (0.05 + 0.95 * Thermostat) + 25.0;
+	const double Conductance = EP.RadiatorConductance * Clamp01(Cond.Radiator) * Clamp01(Cond.CoolingFactor) * Airflow * (0.05 + 0.95 * Thermostat) + 25.0;
 	T += (HeatIn - Conductance * (T - AmbientC)) / EP.ThermalMass * Dt;
 
 	if (EngineSt.bRunning)
@@ -567,7 +571,7 @@ void Vehicle::UpdateThermalAndWear(double Dt, double ForwardSpeed, double Ambien
 		{
 			Wear += EP.OverheatWearPerSec * (T - EP.OverheatC) / 10.0 * Dt;
 		}
-		Cond.Engine = std::max(0.0, Cond.Engine - Wear);
+		Cond.Engine = std::max(0.0, Cond.Engine - Wear * Cond.EngineWearFactor);
 		if (Cond.Engine <= 0.02)
 		{
 			EngineSt.bRunning = false; // мотор заклинило

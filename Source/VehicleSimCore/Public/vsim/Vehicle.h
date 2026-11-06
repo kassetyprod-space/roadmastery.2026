@@ -161,6 +161,18 @@ struct VehicleCondition
 	double Radiator = 1.0;
 	double FuelL = 30.0;
 	std::vector<WheelCondition> Wheels;
+
+	// Узлы, которые ставит и снимает игрок (vsim/CarParts → Effects). По умолчанию всё исправно.
+	double PowerFactor = 1.0;    // множитель момента мотора
+	double StarterFactor = 1.0;  // 0 — стартер не крутит (нет аккумулятора)
+	bool bSpark = true;          // без искры мотор не заводится и глохнет
+	bool bFuelSupply = true;     // без карбюратора — тоже
+	double Misfire = 0.0;        // 0..1 троение: рывки момента
+	double CoolingFactor = 1.0;  // множитель к охлаждению
+	double BrakeFactor = 1.0;
+	double ShockFactor = 1.0;    // множитель к амортизаторам
+	double FuelFactor = 1.0;     // множитель расхода
+	double EngineWearFactor = 1.0;
 };
 
 struct Telemetry
@@ -268,6 +280,7 @@ private:
 	double OdometerM = 0.0;
 	double LastSpeed = 0.0;
 	double ThrottleState = 0.0;   // заслонка с инерцией впуска
+	double MisfireClock = 0.0;    // время для фазы троения
 	double ClutchTorqueLast = 0.0;
 	double AmbientLast = 20.0;
 	double FuelFlowKgPerS = 0.0;

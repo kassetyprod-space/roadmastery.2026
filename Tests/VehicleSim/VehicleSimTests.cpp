@@ -2,6 +2,7 @@
 // если после правки физики разгон до сотни стал 9 секунд, тест это поймает.
 #include "PlanarRig.h"
 #include "vsim/Presets.h"
+#include "vsim/CarParts.h"
 
 #include <cstdio>
 #include <fstream>
@@ -356,6 +357,91 @@ int main()
 		Check(R.Car.Condition().Engine < 0.95, "минута на отсечке изнашивает мотор (состояние)", R.Car.Condition().Engine);
 	}
 
+	// --- Детали и кузов ---
+	{
+		std::printf("\nДетали и кузов\n");
+		using namespace vsim::parts;
+		CarState Wreck = MakeGarageWreck(7u);
+		Effects E = Evaluate(Wreck);
+		Check(!E.bSpark && !E.bFuel && E.StarterFactor < 0.01, "гаражная находка: нет искры, топлива, аккумулятора", E.StarterFactor);
+		// Собираем: аккумулятор, свечи, карбюратор, фильтр, радиатор, антифриз.
+		Check(!CanInstall(Wreck, {Slot::SparkPlugs, 0.6, 0}, true, false).bOk, "под капотом — только с открытым капотом", 0.0);
+		Check(!CanInstall(Wreck, {Slot::SparkPlugs, 0.6, 0}, false, true).bOk, "без свечного ключа свечи не поставить", 0.0);
+		for (const PartItem& P : {PartItem{Slot::Battery, 0.4, 0}, PartItem{Slot::SparkPlugs, 0.5, 0}, PartItem{Slot::Carburetor, 0.55, 0}, PartItem{Slot::AirFilter, 0.5, 0}})
+		{
+			Check(CanInstall(Wreck, P, true, true).bOk, std::string("ставится: ") + Info(P.Kind).Name, P.Condition);
+			Install(Wreck, P);
+		}
+		Wreck.BatteryCharge = 0.8;
+		E = Evaluate(Wreck);
+		Check(E.bSpark && E.bFuel && E.StarterFactor > 0.2, "после сборки заводится", E.StarterFactor);
+		Check(E.PowerFactor > 0.4 && E.PowerFactor < 0.95, "изношенные детали — мощность меньше заводской", E.PowerFactor);
+		Check(E.CoolingFactor < 0.1, "течёт радиатор и нет антифриза — перегреется", E.CoolingFactor);
+		const PartItem Old = Remove(Wreck, Slot::Radiator);
+		Check(!Wreck.Has(Slot::Radiator) && Old.Condition < 0.3, "старый радиатор снят", Old.Condition);
+		Install(Wreck, {Slot::Radiator, 0.9, 0});
+		Wreck.CoolantL = 7.8;
+		Check(Evaluate(Wreck).CoolingFactor > 0.15, "новый радиатор и антифриз — охлаждение есть", Evaluate(Wreck).CoolingFactor);
+		CarState New = MakeFactoryNew(nullptr);
+		const Effects En = Evaluate(New);
+		CheckRange("новая машина — заводская мощность", En.PowerFactor, 0.97, 1.03);
+		Install(New, {Slot::Turbo, 1.0, 2});
+		Check(Evaluate(New).PowerFactor > 1.25, "турбина добавляет мощности", Evaluate(New).PowerFactor);
+
+		// Физика: без свечей не заводится, с ними — заводится.
+		{
+			Vehicle Car(Presets::Sokol1500());
+			PlanarRig Rig(Car);
+			Car.Condition().FuelL = 30.0;
+			Car.Condition().bSpark = false;
+			DriverInput In;
+			In.bStarter = true;
+			for (int I = 0; I < 180; ++I)
+			{
+				Car.SetInput(In);
+				Rig.Step(kDt);
+			}
+			Check(!Car.GetTelemetry().bEngineRunning, "без искры стартер крутит, но мотор не заводится", Car.GetTelemetry().Rpm);
+			Car.Condition().bSpark = true;
+			for (int I = 0; I < 180 && !Car.GetTelemetry().bEngineRunning; ++I)
+			{
+				Car.SetInput(In);
+				Rig.Step(kDt);
+			}
+			Check(Car.GetTelemetry().bEngineRunning, "со свечами заводится", Car.GetTelemetry().Rpm);
+			Car.Condition().StarterFactor = 0.0;
+		}
+
+		// Кузов: полный цикл ремонта гнилого крыла.
+		PanelState P = Wreck.PanelAt(Panel::SillL);
+		Check(NextStep(P) == BodyOp::CutRot, "гнилой порог — сначала вырезать гниль", P.Holes);
+		Check(!CanApply(P, BodyOp::PaintIt).bOk, "по ржавчине не красят", 0.0);
+		int Steps = 0;
+		const float White[3] = {0.9f, 0.9f, 0.88f};
+		while (PanelScore(P) < 0.95 && Steps < 20)
+		{
+			const BodyOp Op = NextStep(P);
+			if (!CanApply(P, Op).bOk)
+			{
+				Check(false, std::string("шаг доступен: ") + OpName(Op), static_cast<double>(Steps));
+				break;
+			}
+			Apply(P, Op, White);
+			++Steps;
+		}
+		std::printf("  порог отремонтирован за %d шагов\n", Steps);
+		Check(PanelScore(P) > 0.95 && P.Color[0] > 0.85f, "порог как новый и белый", PanelScore(P));
+		Check(Steps >= 5 && Steps <= 10, "цикл: срезать → зачистить → шпаклевать → ошкурить → грунт → краска", Steps);
+
+		// Износ: на голом металле под дождём растёт ржавчина, краска защищает.
+		CarState Car2 = MakeFactoryNew(nullptr);
+		Car2.PanelAt(Panel::Hood).Paint = 0.0;
+		Wear(Car2, 100.0, 48.0, 1.0, true, 90.0);
+		Check(Car2.PanelAt(Panel::Hood).Rust > Car2.PanelAt(Panel::Roof).Rust + 0.05, "голый металл ржавеет быстрее крашеного", Car2.PanelAt(Panel::Hood).Rust);
+		Check(Car2.BatteryCharge > 0.95, "генератор держит заряд", Car2.BatteryCharge);
+	}
+
 	std::printf("\n%d проверок, %d провалено\n", GChecks, GFailures);
+
 	return GFailures == 0 ? 0 : 1;
 }
