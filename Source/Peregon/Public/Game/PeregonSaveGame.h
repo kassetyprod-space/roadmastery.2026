@@ -15,7 +15,7 @@ class PEREGON_API UPeregonSaveGame : public USaveGame
 public:
 	static const FString SlotName;
 
-	UPROPERTY() int32 Version = 1;
+	UPROPERTY() int32 Version = 2;
 	UPROPERTY() FPeregonRunConfig Config;
 	UPROPERTY() FTransform CarTransform;
 	UPROPERTY() FPeregonCarState CarState;
@@ -25,4 +25,8 @@ public:
 	UPROPERTY() float RouteS = 0.f;
 	UPROPERTY() FDateTime SavedAt;
 	UPROPERTY() FString PlaceName;
+	UPROPERTY() FPeregonContainer Pockets;
+	UPROPERTY() FPeregonContainer Glovebox;
+	UPROPERTY() FPeregonContainer Trunk;
+	UPROPERTY() float TraveledMaxS = 0.f;
 };

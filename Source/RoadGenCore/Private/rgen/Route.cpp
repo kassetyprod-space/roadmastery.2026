@@ -27,9 +27,108 @@ void Route::Build(const RouteParams& InParams)
 	P.Step = std::max(0.5, P.Step);
 	P.MinRadius = std::max(50.0, P.MinRadius);
 	P.MaxRadius = std::max(P.MinRadius, P.MaxRadius);
-	BuildPlan();
-	BuildProfile();
-	BuildPois();
+	if (P.Anchors.size() >= 2)
+	{
+		BuildGuidedPlan();
+		BuildProfile();
+		BuildGuidedPois();
+	}
+	else
+	{
+		P.Anchors.clear();
+		BuildPlan();
+		BuildProfile();
+		BuildPois();
+	}
+}
+
+static double WrapAngle(double A)
+{
+	while (A > kPi)
+	{
+		A -= 2.0 * kPi;
+	}
+	while (A < -kPi)
+	{
+		A += 2.0 * kPi;
+	}
+	return A;
+}
+
+// Дорога «едет» от опорной точки к опорной, как водитель-проектировщик: кривизна меняется плавно
+// (переходные кривые), не круче MinRadius; между точками трасса неспешно гуляет, а у самих точек
+// (сёл, развязок) выходит точно на них.
+void Route::BuildGuidedPlan()
+{
+	const std::vector<Anchor>& A = P.Anchors;
+	Samples.clear();
+	AnchorS.assign(A.size(), 0.0);
+	double Budget = 2000.0;
+	for (size_t I = 1; I < A.size(); ++I)
+	{
+		Budget += 1.8 * std::hypot(A[I].X - A[I - 1].X, A[I].Y - A[I - 1].Y);
+	}
+	const double Kmax = 1.0 / P.MinRadius;
+	const double DK = Kmax / 110.0 * P.Step; // от прямой до предельной кривизны — за 110 м
+	const uint32_t SeedW = Hash(P.Seed, 0x3A11u);
+
+	double X = A[0].X;
+	double Y = A[0].Y;
+	double H = std::atan2(A[1].Y - A[0].Y, A[1].X - A[0].X);
+	double K = 0.0;
+	double S = 0.0;
+	size_t Target = 1;
+	while (Target < A.size() && S < Budget)
+	{
+		RouteSample Smp;
+		Smp.X = X;
+		Smp.Y = Y;
+		Smp.Heading = H;
+		Smp.Curvature = K;
+		Samples.push_back(Smp);
+
+		const double Dx = A[Target].X - X;
+		const double Dy = A[Target].Y - Y;
+		const double Dist = std::hypot(Dx, Dy);
+		const bool bBehind = Dx * std::cos(H) + Dy * std::sin(H) < 0.0;
+		if (Dist < 12.0 || (bBehind && Dist < 250.0))
+		{
+			AnchorS[Target] = S;
+			++Target;
+		}
+		const size_t Goal = std::min(Target, A.size() - 1);
+		const double Gx = A[Goal].X - X;
+		const double Gy = A[Goal].Y - Y;
+		const double GDist = std::hypot(Gx, Gy);
+		const double FromPrev = std::hypot(X - A[Goal - 1].X, Y - A[Goal - 1].Y);
+		const double Fade = SmoothStep(120.0, 1100.0, GDist) * SmoothStep(60.0, 700.0, FromPrev);
+		const double Wander = P.WanderAmplitude * Fade * (0.7 * Noise1D(S / 2600.0, SeedW) + 0.3 * Noise1D(S / 850.0, SeedW + 1));
+		const double Err = WrapAngle(std::atan2(Gy, Gx) + Wander - H);
+		// Курс выравнивается примерно за 300 м; почти по курсу — прямая.
+		double KWant = std::abs(Err) < 0.004 ? 0.0 : Clamp(Err / 300.0, -Kmax, Kmax);
+		// У самой точки дорога должна успеть выйти на неё: разрешаем чуть больше.
+		if (GDist < 400.0)
+		{
+			KWant = Clamp(Err / std::max(60.0, GDist * 0.8), -Kmax, Kmax);
+		}
+		K += Clamp(KWant - K, -DK, DK);
+		const double HMid = H + 0.5 * K * P.Step;
+		X += std::cos(HMid) * P.Step;
+		Y += std::sin(HMid) * P.Step;
+		H += K * P.Step;
+		S += P.Step;
+	}
+	RouteSample Last;
+	Last.X = X;
+	Last.Y = Y;
+	Last.Heading = H;
+	Samples.push_back(Last);
+	TotalLength = Dbl(Samples.size() - 1) * P.Step;
+	for (size_t I = Target; I < A.size(); ++I)
+	{
+		AnchorS[I] = TotalLength;
+	}
+	AnchorS[0] = 0.0;
 }
 
 void Route::BuildPlan()
@@ -120,6 +219,23 @@ void Route::BuildProfile()
 		const double S = Dbl(I) * P.Step;
 		Z[I] = P.HillAmplitude * (0.7 * Noise1D(S / 1400.0, SeedZ) + 0.3 * Noise1D(S / 480.0, SeedZ + 1));
 	}
+	// По опорным точкам: реальная высота местности (в масштабе) плавно между пунктами + холмы.
+	if (!P.Anchors.empty() && AnchorS.size() == P.Anchors.size())
+	{
+		size_t Seg = 0;
+		for (size_t I = 0; I < N; ++I)
+		{
+			const double S = Dbl(I) * P.Step;
+			while (Seg + 2 < AnchorS.size() && S > AnchorS[Seg + 1])
+			{
+				++Seg;
+			}
+			const double S0 = AnchorS[Seg];
+			const double S1 = std::max(S0 + 1.0, AnchorS[Seg + 1]);
+			const double T = SmoothStep(S0, S1, S);
+			Z[I] += Lerp(P.Anchors[Seg].Z, P.Anchors[Seg + 1].Z, T);
+		}
+	}
 	// Ограничение уклона: проход вперёд и назад (липшицева огибающая), затем сглаживание.
 	const double MaxDz = P.MaxGrade * 0.92 * P.Step;
 	for (size_t I = 1; I < N; ++I)
@@ -151,7 +267,7 @@ void Route::BuildProfile()
 		Z.swap(Out);
 	}
 	// Старт на нулевой высоте — удобнее отлаживать.
-	const double Z0 = Z[0];
+	const double Z0 = P.Anchors.empty() ? Z[0] : 0.0;
 	ZMin = 1e9;
 	ZMax = -1e9;
 	for (size_t I = 0; I < N; ++I)
@@ -174,6 +290,7 @@ void Route::BuildPois()
 {
 	PoiList.clear();
 	FlattenList.clear();
+	RegionList = {Region{P.StartRegion, 0.0, TotalLength}};
 	const double L = TotalLength;
 	auto Add = [this](PoiType Type, double S, int Side, const char* Name) {
 		Poi Item;
@@ -192,14 +309,126 @@ void Route::BuildPois()
 	Add(PoiType::Cafe, L * 0.8, 1, "Кафе «Привал»");
 	Add(PoiType::Finish, L - 450.0, 1, "Заречный");
 	std::sort(PoiList.begin(), PoiList.end(), [](const Poi& A, const Poi& B) { return A.S < B.S; });
+	for (Poi& Item : PoiList)
+	{
+		Item.RealKm = RealKmAt(Item.S);
+		AddFlatten(Item);
+	}
+}
 
-	for (const Poi& Item : PoiList)
+void Route::BuildGuidedPois()
+{
+	PoiList.clear();
+	FlattenList.clear();
+	RegionList.clear();
+	RegionList.push_back(Region{P.StartRegion, 0.0, TotalLength});
+	const std::vector<Anchor>& A = P.Anchors;
+	for (size_t I = 0; I < A.size(); ++I)
+	{
+		if (!A[I].Region.empty() && A[I].Region != RegionList.back().Name)
+		{
+			RegionList.back().S1 = AnchorS[I];
+			RegionList.push_back(Region{A[I].Region, AnchorS[I], TotalLength});
+		}
+		if (A[I].Type == PoiType::Waypoint || A[I].Name.empty())
+		{
+			continue;
+		}
+		Poi Item;
+		Item.Type = A[I].Type;
+		Item.S = I == 0 ? 0.0 : std::min(AnchorS[I], TotalLength - 1.0);
+		Item.Side = A[I].Side;
+		Item.Name = A[I].Name;
+		PoiList.push_back(Item);
+		// Города и райцентры (кроме начала и финиша) — с магазином у въезда.
+		if (Item.Type == PoiType::Town && I > 0)
+		{
+			Poi Shop;
+			Shop.Type = PoiType::Shop;
+			Shop.S = std::max(0.0, Item.S - 300.0);
+			Shop.Side = 1;
+			Shop.Name = "Магазин «Продукты»";
+			PoiList.push_back(Shop);
+		}
+	}
+	for (const ServiceSpec& Spec : P.Services)
+	{
+		Poi Item;
+		Item.Type = Spec.Type;
+		Item.S = Clamp(SAtRealKm(Spec.Km), 200.0, TotalLength - 300.0);
+		Item.Side = Spec.Side;
+		Item.Name = Spec.Name;
+		PoiList.push_back(Item);
+	}
+	std::sort(PoiList.begin(), PoiList.end(), [](const Poi& L, const Poi& R) { return L.S < R.S; });
+	for (Poi& Item : PoiList)
+	{
+		Item.RealKm = RealKmAt(Item.S);
+		Item.Region = RegionAt(Item.S);
+		AddFlatten(Item);
+	}
+}
+
+int Route::RegionAt(double S) const
+{
+	for (size_t I = 0; I < RegionList.size(); ++I)
+	{
+		if (S < RegionList[I].S1 || I + 1 == RegionList.size())
+		{
+			return static_cast<int>(I);
+		}
+	}
+	return 0;
+}
+
+double Route::RealKmAt(double S) const
+{
+	if (P.Anchors.size() < 2 || AnchorS.size() != P.Anchors.size())
+	{
+		return S * P.KmPerMeter;
+	}
+	if (S <= 0.0)
+	{
+		return P.Anchors.front().Km + S * P.KmPerMeter;
+	}
+	for (size_t I = 0; I + 1 < AnchorS.size(); ++I)
+	{
+		if (S <= AnchorS[I + 1] && AnchorS[I + 1] > AnchorS[I])
+		{
+			const double T = (S - AnchorS[I]) / (AnchorS[I + 1] - AnchorS[I]);
+			return Lerp(P.Anchors[I].Km, P.Anchors[I + 1].Km, T);
+		}
+	}
+	return P.Anchors.back().Km + (S - AnchorS.back()) * P.KmPerMeter;
+}
+
+double Route::SAtRealKm(double Km) const
+{
+	if (P.Anchors.size() < 2 || AnchorS.size() != P.Anchors.size())
+	{
+		return Km / P.KmPerMeter;
+	}
+	for (size_t I = 0; I + 1 < AnchorS.size(); ++I)
+	{
+		const double K0 = P.Anchors[I].Km;
+		const double K1 = P.Anchors[I + 1].Km;
+		if (Km <= K1 && K1 > K0)
+		{
+			return Lerp(AnchorS[I], AnchorS[I + 1], Clamp((Km - K0) / (K1 - K0), 0.0, 1.0));
+		}
+	}
+	return TotalLength;
+}
+
+void Route::AddFlatten(const Poi& Item)
+{
 	{
 		FlattenZone Z;
 		switch (Item.Type)
 		{
 		case PoiType::Fuel:
 		case PoiType::Cafe:
+		case PoiType::Shop:
 			Z.S0 = Item.S - 45.0;
 			Z.S1 = Item.S + 45.0;
 			Z.TMin = Item.Side > 0 ? 5.0 : -48.0;
@@ -207,6 +436,12 @@ void Route::BuildPois()
 			Z.Strength = 1.0;
 			FlattenList.push_back(Z);
 			break;
+		case PoiType::Town:
+			if (Item.S <= 0.0)
+			{
+				break;
+			}
+			[[fallthrough]];
 		case PoiType::Village:
 		case PoiType::Finish:
 			Z.S0 = Item.S - 220.0;
@@ -359,7 +594,7 @@ const Poi* Route::NextPoi(double S) const
 {
 	for (const Poi& Item : PoiList)
 	{
-		if (Item.S > S + 15.0)
+		if (Item.S > S + 15.0 && Item.Type != PoiType::Waypoint && Item.Type != PoiType::Border)
 		{
 			return &Item;
 		}

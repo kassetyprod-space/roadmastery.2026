@@ -213,7 +213,15 @@ void APeregonHUD::DrawCluster(const APeregonCar* Car)
 	}
 	const FPeregonTelemetry T = Move->GetTelemetry();
 
-	const float W = Px(232.f);
+	// Колонки подписей и значений — по реальной ширине текста этим шрифтом, чтобы ничего не налезало.
+	float LabelW = 0.f;
+	for (const TCHAR* Name : {TEXT("Обороты"), TEXT("Бензин"), TEXT("Темп.")})
+	{
+		LabelW = FMath::Max(LabelW, Measure(Name, EUiFont::Small).X);
+	}
+	LabelW += Px(10.f);
+	const float ValueW = Measure(TEXT("8888 л"), EUiFont::Small).X + Px(8.f);
+	const float W = FMath::Max(Px(232.f), LabelW + Px(96.f) + ValueW + 2.f * Px(Pad));
 	const float Inner = W - 2.f * Px(Pad);
 	const FString Speed = FString::FromInt(FMath::RoundToInt(FMath::Abs(T.SpeedKmh)));
 	const FString Gear = GearName(T.Gear);
@@ -242,8 +250,6 @@ void APeregonHUD::DrawCluster(const APeregonCar* Car)
 	Cy += SmallH + Px(Gap);
 
 	// Строки: подпись | полоса | значение.
-	const float LabelW = Px(58.f);
-	const float ValueW = Px(44.f);
 	auto Row = [&](const TCHAR* Name, float Fraction, const FLinearColor& Color, const FString& Value, float Redline) {
 		Label(Name, EUiFont::Small, Dim, L, Cy);
 		const float BarX = L + LabelW;
@@ -333,7 +339,7 @@ void APeregonHUD::DrawDetails(const APeregonCar* Car)
 			Names[I], T.WheelLoadN[I], T.SlipRatio[I], T.SlipAngleDeg[I], T.TreadMm[I], T.PadMm[I], T.BrakeTempC[I], T.ShockCondition[I] * 100.f), Dim);
 	}
 	Lines.Emplace(FString(TEXT("W/S газ-тормоз  A/D руль  E/Q передачи  Shift сцепление  Space ручник  P стояночный  L фары")), Dim);
-	Lines.Emplace(FString(TEXT("R стартер  I зажигание  G автомат/механика  C камера  F выйти  ЛКМ взаимодействие  Backspace на колёса")), Dim);
+	Lines.Emplace(FString(TEXT("R стартер  I зажигание  G автомат/механика  V камера  C приблизить  F выйти  ЛКМ взаимодействие  Backspace на колёса  Tab вещи  M карта")), Dim);
 
 	float W = 0.f;
 	float LineH = 0.f;

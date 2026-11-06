@@ -5,6 +5,7 @@
 #include "Components/SkyLightComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
+#include "Engine/PostProcessVolume.h"
 #include "Engine/SkyLight.h"
 #include "Engine/World.h"
 #include "Components/SkyAtmosphereComponent.h"
@@ -62,17 +63,51 @@ void APeregonSky::BeginPlay()
 		Spawned.Add(Sky);
 	}
 
-	// Объёмный туман: сибирская дымка, заодно прячет край генерируемого мира.
+	// Объёмный туман: сибирская дымка, заодно прячет край генерируемого мира. Плотность меняется со временем суток.
 	Fog = World->SpawnActor<AExponentialHeightFog>();
 	if (Fog)
 	{
 		if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
 		{
-			FogComp->SetFogDensity(0.035f);
-			FogComp->SetFogHeightFalloff(0.08f);
+			FogComp->SetFogDensity(0.012f);
+			FogComp->SetFogHeightFalloff(0.06f);
 			FogComp->SetVolumetricFog(true);
+			FogComp->SetVolumetricFogScatteringDistribution(0.6f);
 		}
 		Spawned.Add(Fog);
+	}
+
+	// Экспозиция. Из тёмного салона автоэкспозиция «вытягивала» всё и пересвечивала дорогу за стеклом.
+	// Теперь замер идёт по самой яркой трети кадра (то, что за окнами), а тени салона поднимает
+	// локальная экспозиция — как глаз водителя, который смотрит на дорогу.
+	if (APostProcessVolume* Post = World->SpawnActor<APostProcessVolume>())
+	{
+		Post->bUnbound = true;
+		Post->Priority = 10.f;
+		FPostProcessSettings& P = Post->Settings;
+		P.bOverride_AutoExposureMethod = true;
+		P.AutoExposureMethod = AEM_Histogram;
+		P.bOverride_AutoExposureLowPercent = true;
+		P.AutoExposureLowPercent = 65.f;
+		P.bOverride_AutoExposureHighPercent = true;
+		P.AutoExposureHighPercent = 97.f;
+		P.bOverride_AutoExposureSpeedUp = true;
+		P.AutoExposureSpeedUp = 1.6f;
+		P.bOverride_AutoExposureSpeedDown = true;
+		P.AutoExposureSpeedDown = 1.2f;
+		P.bOverride_LocalExposureHighlightContrastScale = true;
+		P.LocalExposureHighlightContrastScale = 0.75f;
+		P.bOverride_LocalExposureShadowContrastScale = true;
+		P.LocalExposureShadowContrastScale = 0.7f;
+		P.bOverride_BloomIntensity = true;
+		P.BloomIntensity = 0.3f;
+		P.bOverride_LensFlareIntensity = true;
+		P.LensFlareIntensity = 0.f;
+		P.bOverride_MotionBlurAmount = true;
+		P.MotionBlurAmount = 0.f;
+		P.bOverride_VignetteIntensity = true;
+		P.VignetteIntensity = 0.25f;
+		Spawned.Add(Post);
 	}
 	ApplyTime(GetTimeOfDay());
 }
@@ -131,5 +166,15 @@ void APeregonSky::ApplyTime(float Hours)
 	{
 		Moon->SetActorRotation(FRotator(-FMath::Max(15.f, -Elevation), Azimuth + 180.f, 0.f));
 		Moon->GetLightComponent()->SetVisibility(Elevation < 2.f);
+	}
+	// Утренняя дымка гуще, днём прозрачнее, ночью снова немного гуще.
+	if (Fog)
+	{
+		if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
+		{
+			const float Morning = FMath::Exp(-FMath::Square((Hours - 7.f) / 1.6f));
+			const float Night = 1.f - FMath::SmoothStep(-6.f, 8.f, Elevation);
+			FogComp->SetFogDensity(0.009f + 0.025f * Morning + 0.008f * Night);
+		}
 	}
 }

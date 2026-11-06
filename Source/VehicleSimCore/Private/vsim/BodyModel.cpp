@@ -1064,6 +1064,9 @@ Model BuildSokol()
 		BuildTrunkInside(M);
 		B.Add(Part::Body, M, V3(), false);
 		B.Out.HitBoxes.push_back({Part::Body, "Fuel", V3(-150.f, 80.5f, 18.f), V3(2.f, 6.f, 6.f)});
+		// Полости бардачка и багажника: видны лучу, только когда крышка открыта (закрытая — ближе и перекрывает).
+		B.Out.HitBoxes.push_back({Part::Body, "GloveInside", V3(79.f, 32.f, 29.f), V3(5.f, 15.f, 6.f)});
+		B.Out.HitBoxes.push_back({Part::Body, "TrunkInside", V3(-158.f, 0.f, 4.f), V3(36.f, 46.f, 16.f)});
 	}
 	BuildHoodTrunk(B);
 	for (Part Door : {Part::DoorFL, Part::DoorFR, Part::DoorRL, Part::DoorRR})

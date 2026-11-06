@@ -18,7 +18,9 @@ public class Peregon : ModuleRules
 			"RoadGenCore",
 			"ProceduralMeshComponent",
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"Json",
+			"AudioMixer"
 		});
 	}
 }

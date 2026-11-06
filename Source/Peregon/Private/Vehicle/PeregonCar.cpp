@@ -11,6 +11,8 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Game/PeregonHUD.h"
+#include "Game/PeregonGameInstance.h"
+#include "Game/PeregonPlayerController.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "InputAction.h"
@@ -21,6 +23,7 @@
 #include "Player/PeregonCharacter.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "vsim/BodyModel.h"
+#include "Audio/PeregonAudio.h"
 
 namespace PeregonCarModel
 {
@@ -47,6 +50,8 @@ const FName Key(TEXT("Key"));
 const FName Lights(TEXT("Lights"));
 const FName Handbrake(TEXT("Handbrake"));
 const FName Fuel(TEXT("Fuel"));
+const FName GloveInside(TEXT("GloveInside"));
+const FName TrunkInside(TEXT("TrunkInside"));
 
 const TCHAR* PartNoun(FName Tag)
 {
@@ -157,8 +162,10 @@ APeregonCar::APeregonCar()
 		Lamp->SetMobility(EComponentMobility::Movable);
 		Lamp->SetRelativeRotation(FRotator(-3.f, 0.f, 0.f));
 		Lamp->SetIntensityUnits(ELightUnits::Candelas);
-		Lamp->SetIntensity(9000.f);
-		Lamp->SetAttenuationRadius(6000.f);
+		Lamp->SetIntensity(6000.f);
+		Lamp->SetAttenuationRadius(5000.f);
+		// Свет фар в тумане — заметный, но не «стена»: днём рассеяние почти не видно.
+		Lamp->SetVolumetricScatteringIntensity(0.15f);
 		Lamp->SetInnerConeAngle(12.f);
 		Lamp->SetOuterConeAngle(30.f);
 		Lamp->SetLightColor(FLinearColor(1.f, 0.92f, 0.75f));
@@ -230,6 +237,97 @@ const FPeregonMovingPart* APeregonCar::FindMovingPart(FName Tag) const
 	return MovingParts.FindByPredicate([Tag](const FPeregonMovingPart& P) { return P.Tag == Tag; });
 }
 
+// ---------------------------------------------------------------------------------------------
+// Звук
+// ---------------------------------------------------------------------------------------------
+void APeregonCar::BuildSounds()
+{
+	auto MakeVoice = [this](const TCHAR* Name, const FVector& Local) {
+		UPeregonSynth* Voice = NewObject<UPeregonSynth>(this, Name);
+		Voice->SetupAttachment(Body);
+		Voice->SetRelativeLocation(Local);
+		return Voice;
+	};
+	EngineSound = MakeVoice(TEXT("EngineSound"), FVector(140.f, 0.f, 0.f));
+	EngineSound->SetupEngine();
+	TireSound = MakeVoice(TEXT("TireSound"), FVector(0.f, 0.f, -35.f));
+	TireSound->SetupLoop(TEXT("tires.roll"), EPeregonProcedural::TireRoll);
+	WindSound = MakeVoice(TEXT("WindSound"), FVector(40.f, 0.f, 60.f));
+	WindSound->SetupLoop(TEXT("wind"), EPeregonProcedural::Wind);
+	SkidSound = MakeVoice(TEXT("SkidSound"), FVector(0.f, 0.f, -40.f));
+	SkidSound->SetupLoop(TEXT("tires.skid"), EPeregonProcedural::Skid);
+	for (UPeregonSynth* Voice : {EngineSound.Get(), TireSound.Get(), WindSound.Get(), SkidSound.Get()})
+	{
+		Voice->SetLevel(0.f, 0.f);
+		Voice->RegisterComponent();
+		Voice->Start();
+	}
+}
+
+void APeregonCar::UpdateSounds(float DeltaSeconds, const FPeregonTelemetry& T)
+{
+	if (!EngineSound)
+	{
+		return;
+	}
+	const float Speed = FMath::Abs(Movement->GetForwardSpeed());
+	// В салоне с закрытыми дверями всё звучит глуше.
+	bool bDoorsClosed = true;
+	for (const FPeregonMovingPart& Part : MovingParts)
+	{
+		if (Part.Tag.ToString().StartsWith(TEXT("Door")) && Part.Alpha > 0.05f)
+		{
+			bDoorsClosed = false;
+		}
+	}
+	const bool bCabin = bFirstPerson && Controller && bDoorsClosed;
+	for (UPeregonSynth* Voice : {EngineSound.Get(), TireSound.Get(), WindSound.Get(), SkidSound.Get()})
+	{
+		Voice->SetMuffled(bCabin);
+	}
+
+	EngineSound->SetEngineState(T.Rpm, Movement->GetThrottleInput(), T.bEngineRunning, Movement->IsStarterOn());
+	EngineSound->SetLevel(bCabin ? 0.8f : 1.f, 0.f);
+
+	const bool bGrounded = Movement->GetWheelsInContact() > 0;
+	const float Rough = Movement->GetSurfaceRoughness();
+	TireSound->SetLevel(bGrounded ? FMath::Clamp(Speed / 20.f, 0.f, 1.f) * (0.35f + Rough * 1.6f) : 0.f, Speed);
+	WindSound->SetLevel(FMath::Clamp(Speed / 45.f, 0.f, 1.f) * (bCabin ? 0.6f : 1.f), Speed);
+
+	float Skid = 0.f;
+	for (int32 I = 0; I < T.SlipRatio.Num(); ++I)
+	{
+		const float Long = FMath::Abs(T.SlipRatio[I]) - 0.12f;
+		const float Lat = (FMath::Abs(T.SlipAngleDeg[I]) - 6.f) / 10.f;
+		if (T.WheelLoadN.IsValidIndex(I) && T.WheelLoadN[I] > 300.f)
+		{
+			Skid = FMath::Max(Skid, FMath::Max(Long * 2.5f, Lat));
+		}
+	}
+	// По гравию и траве колёса не визжат, а шуршат.
+	Skid *= FMath::Clamp(1.f - Rough * 2.f, 0.f, 1.f) * FMath::Clamp(Speed / 3.f, 0.f, 1.f);
+	SkidSound->SetLevel(bGrounded ? FMath::Clamp(Skid, 0.f, 1.f) * 0.8f : 0.f, FMath::Clamp(Skid, 0.f, 1.f));
+
+	if (T.Gear != LastGear)
+	{
+		PeregonAudio::PlayEvent(this, TEXT("gear.shift"), GearLever ? GearLever->GetComponentLocation() : GetActorLocation(), 0.5f);
+		LastGear = T.Gear;
+	}
+	if (T.bGearGrind && !bLastGrind)
+	{
+		PeregonAudio::PlayEvent(this, TEXT("gear.grind"), GetActorLocation(), 0.7f);
+	}
+	bLastGrind = T.bGearGrind;
+}
+
+void APeregonCar::PlayPartSound(const FPeregonMovingPart& Part, bool bOpen) const
+{
+	const FString Name = Part.Tag.ToString();
+	const TCHAR* Kind = Name.StartsWith(TEXT("Door")) ? TEXT("door") : (Name == TEXT("Hood") ? TEXT("hood") : (Name == TEXT("Trunk") ? TEXT("trunk") : TEXT("glovebox")));
+	const FVector Where = Part.Pivot ? Part.Pivot->GetComponentLocation() : GetActorLocation();
+	PeregonAudio::PlayEvent(this, FString::Printf(TEXT("%s.%s"), Kind, bOpen ? TEXT("open") : TEXT("close")), Where, bOpen ? 0.6f : 0.9f);
+}
+
 void APeregonCar::ToggleMovingPart(FName Tag)
 {
 	if (FPeregonMovingPart* Part = FindMovingPart(Tag))
@@ -246,6 +344,7 @@ void APeregonCar::BeginPlay()
 {
 	Super::BeginPlay();
 	BuildModelMeshes();
+	BuildSounds();
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
 	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
 	PlaceOnGround(GetActorTransform());
@@ -434,6 +533,7 @@ void APeregonCar::Tick(float DeltaSeconds)
 	const FPeregonTelemetry T = Movement->GetTelemetry();
 	UpdateMovingParts(DeltaSeconds);
 	UpdateCockpit(DeltaSeconds, T);
+	UpdateSounds(DeltaSeconds, T);
 	if (IsPlayerControlled())
 	{
 		UpdateCameras(DeltaSeconds, T);
@@ -499,7 +599,16 @@ void APeregonCar::UpdateMovingParts(float DeltaSeconds)
 		{
 			continue;
 		}
+		const float PrevAlpha = Part.Alpha;
+		if (PrevAlpha <= 0.f && Part.Target > 0.f)
+		{
+			PlayPartSound(Part, true);
+		}
 		Part.Alpha = FMath::FInterpConstantTo(Part.Alpha, Part.Target, DeltaSeconds, Part.Speed);
+		if (PrevAlpha > 0.f && Part.Alpha <= 0.f)
+		{
+			PlayPartSound(Part, false);
+		}
 		const float Eased = FMath::SmoothStep(0.f, 1.f, Part.Alpha);
 		Part.Pivot->SetRelativeRotation(FQuat::Slerp(Part.Closed.Quaternion(), Part.Open.Quaternion(), Eased));
 	}
@@ -558,7 +667,10 @@ void APeregonCar::UpdateCameras(float DeltaSeconds, const FPeregonTelemetry& T)
 	{
 		// Голова водителя по инерции: на торможении — вперёд, в повороте — наружу, на кочках — вверх-вниз.
 		const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
-		FirstPersonCamera->SetFieldOfView(Settings->FieldOfView);
+		// C — приблизить взгляд (посмотреть на знак, приборы, дорогу вдали).
+		const float TargetFov = Settings->FieldOfView * (bZoom ? 0.45f : 1.f);
+		ZoomFov = ZoomFov <= 0.f ? TargetFov : FMath::FInterpTo(ZoomFov, TargetFov, Dt, 9.f);
+		FirstPersonCamera->SetFieldOfView(ZoomFov);
 		const FVector A = GetActorTransform().InverseTransformVectorNoScale(SmoothedAccel);
 		FVector Target = FVector(-A.X * 0.6f, -A.Y * 0.5f, -A.Z * 0.25f) * Settings->HeadMotion;
 		Target = Target.BoundToBox(FVector(-6.f, -6.f, -4.f), FVector(6.f, 6.f, 4.f));
@@ -575,7 +687,9 @@ void APeregonCar::UpdateCameras(float DeltaSeconds, const FPeregonTelemetry& T)
 	}
 	else
 	{
-		ChaseCamera->SetFieldOfView(UPeregonGameUserSettings::Get()->FieldOfView);
+		const float TargetFov = UPeregonGameUserSettings::Get()->FieldOfView * (bZoom ? 0.5f : 1.f);
+		ZoomFov = ZoomFov <= 0.f ? TargetFov : FMath::FInterpTo(ZoomFov, TargetFov, Dt, 9.f);
+		ChaseCamera->SetFieldOfView(ZoomFov);
 		// Камера сама возвращается за машину, если игрок не крутит мышью.
 		TimeSinceLook += Dt;
 		if (Controller && TimeSinceLook > 2.f && FMath::Abs(Movement->GetForwardSpeed()) > 1.f)
@@ -602,6 +716,10 @@ void APeregonCar::SetFirstPerson(bool bEnable)
 
 void APeregonCar::SetHeadlights(bool bOn)
 {
+	if (bOn != bHeadlights && HasActorBegunPlay())
+	{
+		PeregonAudio::PlayEvent(this, TEXT("lights.switch"), LightKnobPivot ? LightKnobPivot->GetComponentLocation() : GetActorLocation(), 0.5f);
+	}
 	bHeadlights = bOn;
 	HeadlightL->SetVisibility(bOn);
 	HeadlightR->SetVisibility(bOn);
@@ -677,10 +795,27 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 			return Movement->IsParkingBrake() ? FString(TEXT("Опустить ручник")) : FString(TEXT("Поднять ручник"));
 		}
 	}
+	auto IsOpen = [this](FName Tag) {
+		const FPeregonMovingPart* Moving = FindMovingPart(Tag);
+		return Moving && Moving->Alpha > 0.7f;
+	};
+	if (bInside && Part->ComponentHasTag(GloveInside))
+	{
+		return IsOpen(Glovebox) ? FString(TEXT("Бардачок — посмотреть вещи")) : FString();
+	}
+	if (bOnFoot && Part->ComponentHasTag(TrunkInside))
+	{
+		return IsOpen(Trunk) ? FString(TEXT("Багажник — посмотреть вещи")) : FString();
+	}
 	if (bOnFoot && Part->ComponentHasTag(Fuel))
 	{
 		const FPeregonTelemetry T = Movement->GetTelemetry();
-		return FString::Printf(TEXT("Залить канистру 10 л (в баке %.0f из %.0f л)"), T.FuelL, T.FuelCapacityL);
+		const UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+		if (GI && GI->Pockets.Has(PeregonItems::CanisterFull))
+		{
+			return FString::Printf(TEXT("Залить из канистры (в баке %.0f из %.0f л)"), T.FuelL, T.FuelCapacityL);
+		}
+		return FString::Printf(TEXT("В баке %.0f из %.0f л · нужна канистра с бензином"), T.FuelL, T.FuelCapacityL);
 	}
 	return FString();
 }
@@ -729,6 +864,7 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 				Movement->SetStarter(true);
 				bKeyCranking = true;
 			}
+			PeregonAudio::PlayEvent(this, TEXT("key.turn"), KeyPivot->GetComponentLocation(), 0.5f);
 		}
 		else if (Part->ComponentHasTag(Lights))
 		{
@@ -737,12 +873,26 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		else if (Part->ComponentHasTag(Handbrake))
 		{
 			Movement->SetParkingBrake(!Movement->IsParkingBrake());
+			PeregonAudio::PlayEvent(this, TEXT("handbrake"), HandbrakeLever->GetComponentLocation(), 0.6f);
+		}
+		else if (Part->ComponentHasTag(GloveInside))
+		{
+			if (APeregonPlayerController* DriverPC = Cast<APeregonPlayerController>(GetController()))
+			{
+				DriverPC->OpenInventory(EPeregonStorage::Glovebox);
+			}
 		}
 		return;
 	}
-	if (Walker && Part->ComponentHasTag(Fuel))
+	APeregonPlayerController* PC = User ? Cast<APeregonPlayerController>(User->GetController()) : nullptr;
+	if (Walker && Part->ComponentHasTag(TrunkInside) && PC)
 	{
-		Movement->Refuel(10.f);
+		PC->OpenInventory(EPeregonStorage::Trunk);
+		return;
+	}
+	if (Walker && Part->ComponentHasTag(Fuel) && PC)
+	{
+		PC->UseItem(PeregonItems::CanisterFull, EPeregonStorage::None);
 	}
 }
 
@@ -834,6 +984,7 @@ void APeregonCar::BuildInput()
 	LightsAction = MakeAction(TEXT("IA_Car_Lights"), EInputActionValueType::Boolean);
 	ParkingBrakeAction = MakeAction(TEXT("IA_Car_ParkingBrake"), EInputActionValueType::Boolean);
 	DetailsAction = MakeAction(TEXT("IA_Car_Details"), EInputActionValueType::Boolean);
+	ZoomAction = MakeAction(TEXT("IA_Car_Zoom"), EInputActionValueType::Boolean);
 
 	Mapping = NewObject<UInputMappingContext>(this, TEXT("IMC_Car"));
 	auto Map = [this](UInputAction* Action, const FKey& Key, bool bNegate = false, bool bDeadZone = false) {
@@ -874,7 +1025,9 @@ void APeregonCar::BuildInput()
 	Map(IgnitionAction, EKeys::I);
 	Map(GearboxModeAction, EKeys::G);
 	Map(GearboxModeAction, EKeys::Gamepad_Special_Left);
-	Map(CameraAction, EKeys::C);
+	Map(CameraAction, EKeys::V);
+	Map(ZoomAction, EKeys::C);
+	Map(ZoomAction, EKeys::RightMouseButton);
 	Map(CameraAction, EKeys::Gamepad_RightThumbstick);
 	Map(ResetAction, EKeys::BackSpace);
 	Map(ResetAction, EKeys::Gamepad_Special_Right);
@@ -918,6 +1071,8 @@ void APeregonCar::SetupPlayerInputComponent(UInputComponent* PlayerInputComponen
 	EIC->BindAction(IgnitionAction, ETriggerEvent::Started, this, &APeregonCar::OnToggleIgnition);
 	EIC->BindAction(GearboxModeAction, ETriggerEvent::Started, this, &APeregonCar::OnToggleGearbox);
 	EIC->BindAction(CameraAction, ETriggerEvent::Started, this, &APeregonCar::OnToggleCamera);
+	EIC->BindAction(ZoomAction, ETriggerEvent::Started, this, &APeregonCar::OnZoomPressed);
+	EIC->BindAction(ZoomAction, ETriggerEvent::Completed, this, &APeregonCar::OnZoomReleased);
 	EIC->BindAction(ResetAction, ETriggerEvent::Started, this, &APeregonCar::OnResetCar);
 	EIC->BindAction(InteractAction, ETriggerEvent::Started, this, &APeregonCar::OnInteractPressed);
 	EIC->BindAction(InteractAction, ETriggerEvent::Completed, this, &APeregonCar::OnInteractReleased);
@@ -1000,8 +1155,14 @@ void APeregonCar::OnShiftDown(const FInputActionValue&) { Movement->ShiftDown();
 void APeregonCar::OnToggleIgnition(const FInputActionValue&) { Movement->SetIgnition(!Movement->GetIgnition()); }
 void APeregonCar::OnToggleGearbox(const FInputActionValue&) { Movement->SetAutoGearbox(!Movement->IsAutoGearbox()); }
 void APeregonCar::OnToggleCamera(const FInputActionValue&) { SetFirstPerson(!bFirstPerson); }
+void APeregonCar::OnZoomPressed(const FInputActionValue&) { bZoom = true; }
+void APeregonCar::OnZoomReleased(const FInputActionValue&) { bZoom = false; }
 void APeregonCar::OnToggleLights(const FInputActionValue&) { SetHeadlights(!bHeadlights); }
-void APeregonCar::OnToggleParkingBrake(const FInputActionValue&) { Movement->SetParkingBrake(!Movement->IsParkingBrake()); }
+void APeregonCar::OnToggleParkingBrake(const FInputActionValue&)
+{
+	Movement->SetParkingBrake(!Movement->IsParkingBrake());
+	PeregonAudio::PlayEvent(this, TEXT("handbrake"), HandbrakeLever->GetComponentLocation(), 0.6f);
+}
 
 void APeregonCar::OnInteractPressed(const FInputActionValue&)
 {

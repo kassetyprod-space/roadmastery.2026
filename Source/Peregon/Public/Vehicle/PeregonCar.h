@@ -21,6 +21,7 @@ class USpotLightComponent;
 class USpringArmComponent;
 class UMaterialInterface;
 class UProceduralMeshComponent;
+class UPeregonSynth;
 struct FInputActionValue;
 struct FPeregonTelemetry;
 
@@ -168,6 +169,8 @@ private:
 	void OnToggleLights(const FInputActionValue& Value);
 	void OnToggleParkingBrake(const FInputActionValue& Value);
 	void OnToggleDetails(const FInputActionValue& Value);
+	void OnZoomPressed(const FInputActionValue& Value);
+	void OnZoomReleased(const FInputActionValue& Value);
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> Mapping;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ThrottleAction;
@@ -188,6 +191,9 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> LightsAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ParkingBrakeAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> DetailsAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> ZoomAction;
+	bool bZoom = false;
+	float ZoomFov = 0.f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<APeregonCharacter> Driver;
@@ -202,6 +208,16 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UProceduralMeshComponent>> ModelMeshes;
 	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> GaugeMaterials;
 	void BuildModelMeshes();
+	void BuildSounds();
+	void UpdateSounds(float DeltaSeconds, const FPeregonTelemetry& T);
+	void PlayPartSound(const FPeregonMovingPart& Part, bool bOpen) const;
+
+	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> EngineSound;
+	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> TireSound;
+	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> WindSound;
+	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> SkidSound;
+	int32 LastGear = 0;
+	bool bLastGrind = false;
 	UMaterialInterface* MakeSlotMaterial(uint8 Slot);
 
 	FPeregonFocus Focus;

@@ -127,6 +127,9 @@ public:
 
 	// Продольная скорость кузова, м/с (знак — вперёд/назад).
 	UFUNCTION(BlueprintCallable, Category = "Peregon") float GetForwardSpeed() const { return ForwardSpeedMs; }
+	// Средняя «шершавость» покрытия под колёсами (0 — асфальт, ~0.5 — гравий/грунт) — для звука шин.
+	float GetSurfaceRoughness() const { return SurfaceRoughness; }
+	int32 GetWheelsInContact() const { return WheelsInContact; }
 	UFUNCTION(BlueprintCallable, Category = "Peregon") FPeregonTelemetry GetTelemetry() const;
 
 	// --- Ремонт / заправка ---
@@ -205,5 +208,7 @@ private:
 	bool bIgnition = true;
 	float ForwardSpeedMs = 0.f;
 	TArray<float> WheelCompressionM;
+	float SurfaceRoughness = 0.f;
+	int32 WheelsInContact = 0;
 	TArray<bool> WheelInContact;
 };

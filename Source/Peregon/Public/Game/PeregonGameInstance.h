@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
+#include "Game/PeregonInventory.h"
 #include "PeregonGameInstance.generated.h"
 
 UENUM(BlueprintType)
@@ -44,6 +45,39 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category = "Peregon")
 	int32 Day = 1;
+
+	// Вещи: карманы, бардачок, багажник.
+	UPROPERTY(BlueprintReadWrite, Category = "Peregon|Inventory")
+	FPeregonContainer Pockets;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Peregon|Inventory")
+	FPeregonContainer Glovebox;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Peregon|Inventory")
+	FPeregonContainer Trunk;
+
+	// Самая дальняя точка маршрута, до которой доехали (м) — её карандашом отмечаем на карте.
+	UPROPERTY(BlueprintReadWrite, Category = "Peregon")
+	float TraveledMaxS = 0.f;
+
+	FPeregonContainer* GetStorage(EPeregonStorage Storage)
+	{
+		return Storage == EPeregonStorage::Glovebox ? &Glovebox : (Storage == EPeregonStorage::Trunk ? &Trunk : nullptr);
+	}
+
+	// Набор новой игры: документы в бардачке, пустая канистра в багажнике, карманы пустые.
+	void ResetInventory()
+	{
+		Pockets = FPeregonContainer();
+		Pockets.Capacity = 6;
+		Glovebox = FPeregonContainer();
+		Glovebox.Capacity = 4;
+		Glovebox.Add(PeregonItems::Documents);
+		Trunk = FPeregonContainer();
+		Trunk.Capacity = 10;
+		Trunk.Add(PeregonItems::CanisterEmpty);
+		TraveledMaxS = 0.f;
+	}
 
 	bool TrySpend(float Amount)
 	{

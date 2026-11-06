@@ -15,7 +15,14 @@
 #include "GameFramework/PlayerController.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "ProceduralMeshComponent.h"
+#include "rgen/Atlas.h"
 #include "rgen/Noise.h"
+#include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "World/PeregonServicePoint.h"
 
 namespace PeregonRoad
@@ -38,6 +45,111 @@ const FLinearColor HouseColors[] = {
 FString PoiName(const rgen::Poi& Poi)
 {
 	return FString(UTF8_TO_TCHAR(Poi.Name.c_str()));
+}
+
+bool IsSettlement(const rgen::Poi& Poi)
+{
+	return Poi.Type == rgen::PoiType::Village || Poi.Type == rgen::PoiType::Finish || (Poi.Type == rgen::PoiType::Town && Poi.S > 1.0);
+}
+
+// Точная геометрия трассы из OpenStreetMap (Tools/MapPipeline/fetch_route.py → Content/Data/Routes/r255.json):
+// частые точки дороги с километражем. Именованные пункты атласа «прилипают» к линии по своему километражу.
+void ApplyOsmGeometry(rgen::RouteParams& Params)
+{
+	const FString File = FPaths::ProjectContentDir() / TEXT("Data/Routes/r255.json");
+	FString Text;
+	if (!FPaths::FileExists(File) || !FFileHelper::LoadFileToString(Text, *File))
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+	const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid() || !Root->TryGetArrayField(TEXT("points"), Points) || Points->Num() < 10)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Peregon] %s не прочитан — используется встроенный атлас"), *File);
+		return;
+	}
+	struct FGeo
+	{
+		double Lat, Lon, Km, Elev;
+	};
+	TArray<FGeo> Line;
+	for (const TSharedPtr<FJsonValue>& V : *Points)
+	{
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (V.IsValid() && V->TryGetObject(Obj))
+		{
+			FGeo G{0.0, 0.0, 0.0, -1.0};
+			(*Obj)->TryGetNumberField(TEXT("lat"), G.Lat);
+			(*Obj)->TryGetNumberField(TEXT("lon"), G.Lon);
+			(*Obj)->TryGetNumberField(TEXT("km"), G.Km);
+			(*Obj)->TryGetNumberField(TEXT("elev"), G.Elev);
+			Line.Add(G);
+		}
+	}
+	const rgen::GeoPoint Origin = rgen::NovosibirskKemerovoOrigin();
+	auto AtKm = [&Line](double Km) {
+		for (int32 I = 1; I < Line.Num(); ++I)
+		{
+			if (Line[I].Km >= Km)
+			{
+				const double T = FMath::Clamp((Km - Line[I - 1].Km) / FMath::Max(1e-6, Line[I].Km - Line[I - 1].Km), 0.0, 1.0);
+				return FGeo{FMath::Lerp(Line[I - 1].Lat, Line[I].Lat, T), FMath::Lerp(Line[I - 1].Lon, Line[I].Lon, T), Km, -1.0};
+			}
+		}
+		return Line.Last();
+	};
+	// std::vector, а не TArray: в Anchor есть std::string, его нельзя перемещать побайтно.
+	std::vector<rgen::Anchor> Named;
+	for (const rgen::Anchor& A : Params.Anchors)
+	{
+		if (A.Type != rgen::PoiType::Waypoint)
+		{
+			Named.push_back(A);
+		}
+	}
+	const int32 NamedCount = static_cast<int32>(Named.size());
+	std::vector<rgen::Anchor> Merged;
+	int32 NamedIndex = 0;
+	for (const FGeo& G : Line)
+	{
+		while (NamedIndex < NamedCount && Named[static_cast<size_t>(NamedIndex)].Km <= G.Km)
+		{
+			rgen::Anchor A = Named[static_cast<size_t>(NamedIndex++)];
+			const FGeo Snap = AtKm(A.Km);
+			rgen::GeoToGame(Origin, Snap.Lat, Snap.Lon, A.X, A.Y);
+			Merged.push_back(A);
+		}
+		bool bNearNamed = false;
+		for (const rgen::Anchor& A : Named)
+		{
+			bNearNamed |= FMath::Abs(A.Km - G.Km) < 1.0;
+		}
+		if (bNearNamed)
+		{
+			continue;
+		}
+		rgen::Anchor W;
+		rgen::GeoToGame(Origin, G.Lat, G.Lon, W.X, W.Y);
+		W.Km = G.Km;
+		W.Z = Merged.empty() ? 0.0 : Merged.back().Z;
+		if (G.Elev >= 0.0)
+		{
+			W.Z = (G.Elev - 150.0) * rgen::kGameScale;
+		}
+		Merged.push_back(W);
+	}
+	for (; NamedIndex < NamedCount; ++NamedIndex)
+	{
+		rgen::Anchor A = Named[static_cast<size_t>(NamedIndex)];
+		const FGeo Snap = AtKm(A.Km);
+		rgen::GeoToGame(Origin, Snap.Lat, Snap.Lon, A.X, A.Y);
+		Merged.push_back(A);
+	}
+	Params.Anchors = Merged;
+	Params.WanderAmplitude = 0.02; // по OSM дорога и так настоящая
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Геометрия Р-255 из OSM: %d точек"), Line.Num());
 }
 } // namespace PeregonRoad
 
@@ -129,9 +241,12 @@ void APeregonRoadWorld::Generate(int32 Seed)
 		SetupAssets();
 	}
 
-	rgen::RouteParams Params;
-	Params.Seed = static_cast<uint32_t>(Seed);
+	// Настоящий маршрут: Новосибирск — Кемерово по Р-255 (масштаб 1:5).
+	rgen::RouteParams Params = rgen::NovosibirskKemerovo(static_cast<uint32_t>(Seed));
+	PeregonRoad::ApplyOsmGeometry(Params);
 	Route.Build(Params);
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Маршрут «%s»: %.1f км в игре, %d точек"), UTF8_TO_TCHAR(Params.Name.c_str()), Route.Length() / 1000.0,
+		static_cast<int32>(Route.Pois().size()));
 	TrackedS = 0.0;
 	bGenerated = true;
 
@@ -174,8 +289,12 @@ FString APeregonRoadWorld::GetPlaceName(double S) const
 {
 	for (const rgen::Poi& Poi : Route.Pois())
 	{
-		const double Radius = (Poi.Type == rgen::PoiType::Village || Poi.Type == rgen::PoiType::Finish) ? 230.0 : 80.0;
-		if (FMath::Abs(Poi.S - S) < Radius || (Poi.Type == rgen::PoiType::Town && S < 150.0))
+		if (Poi.Type == rgen::PoiType::Border || Poi.Type == rgen::PoiType::Waypoint)
+		{
+			continue;
+		}
+		const double Radius = PeregonRoad::IsSettlement(Poi) ? 230.0 : 80.0;
+		if (FMath::Abs(Poi.S - S) < Radius || (Poi.Type == rgen::PoiType::Town && Poi.S <= 1.0 && S < 150.0))
 		{
 			return PeregonRoad::PoiName(Poi);
 		}
@@ -225,13 +344,17 @@ void APeregonRoadWorld::AnnouncePlaces(double PrevS, double NewS)
 	for (const rgen::Poi& Poi : Route.Pois())
 	{
 		const double Entry = Poi.S - 220.0;
-		if ((Poi.Type == rgen::PoiType::Village || Poi.Type == rgen::PoiType::Finish) && PrevS < Entry && NewS >= Entry)
+		if (PeregonRoad::IsSettlement(Poi) && PrevS < Entry && NewS >= Entry)
 		{
 			GM->Toast(PeregonRoad::PoiName(Poi));
 		}
+		if (Poi.Type == rgen::PoiType::Border && PrevS < Poi.S && NewS >= Poi.S)
+		{
+			GM->Toast(FString::Printf(TEXT("Въезд: %s. Нужна карта этой области"), *PeregonRoad::PoiName(Poi)), 6.f);
+		}
 		if (Poi.Type == rgen::PoiType::Finish && PrevS < Poi.S && NewS >= Poi.S)
 		{
-			GM->Toast(FString::Printf(TEXT("Вы доехали до посёлка %s! Конец тестового участка."), *PeregonRoad::PoiName(Poi)), 8.f);
+			GM->Toast(FString::Printf(TEXT("%s! Участок Р-255 пройден. Продолжение — дальше на восток."), *PeregonRoad::PoiName(Poi)), 8.f);
 		}
 	}
 }
@@ -508,11 +631,15 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 			Wires->AddInstance(FTransform(FRotationMatrix::MakeFromX(B - A).Rotator(), Mid, FVector((B - A).Size() / 100.0, 0.02, 0.02)));
 		}
 	}
-	for (double S = FMath::CeilToDouble(FMath::Max(S0, 1.0) / 1000.0) * 1000.0; S < S1; S += 1000.0)
+	// Километровые знаки — настоящий километраж Р-255, через каждые 5 км.
+	const double Km0 = Route.RealKmAt(FMath::Max(S0, 1.0));
+	const double Km1 = Route.RealKmAt(FMath::Min(S1, Route.Length()));
+	for (double Km = FMath::CeilToDouble(Km0 / 5.0) * 5.0; Km < Km1; Km += 5.0)
 	{
-		if (S <= Route.Length())
+		const double S = Route.SAtRealKm(Km);
+		if (S >= S0 && S < S1)
 		{
-			AddSign(Chunk, S, 6.8, FString::Printf(TEXT("%d"), FMath::RoundToInt(S / 1000.0)), false);
+			AddSign(Chunk, S, 6.8, FString::Printf(TEXT("%d"), FMath::RoundToInt(Km)), false);
 		}
 	}
 
@@ -538,7 +665,11 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		switch (Poi.Type)
 		{
 		case rgen::PoiType::Town:
-			if (S0 <= 120.0 && 120.0 < S1)
+			if (Poi.S > 1.0)
+			{
+				BuildVillage(Chunk, Poi, S0, S1);
+			}
+			else if (S0 <= 120.0 && 120.0 < S1)
 			{
 				AddSign(Chunk, 120.0, Half + 3.0, Name, true);
 			}
@@ -547,8 +678,15 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		case rgen::PoiType::Finish:
 			BuildVillage(Chunk, Poi, S0, S1);
 			break;
+		case rgen::PoiType::Border:
+			if (Poi.S >= S0 && Poi.S < S1)
+			{
+				AddSign(Chunk, Poi.S, Half + 3.0, Name.Replace(TEXT(" — "), TEXT("\n")), false);
+			}
+			break;
 		case rgen::PoiType::Fuel:
 		case rgen::PoiType::Cafe:
+		case rgen::PoiType::Shop:
 		{
 			if (Poi.S < S0 || Poi.S >= S1)
 			{
@@ -592,7 +730,9 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 				FTransform(FRotator(0.0, Yaw, 0.0), Location), this, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 			if (Service)
 			{
-				Service->Kind = Poi.Type == rgen::PoiType::Fuel ? EPeregonService::Fuel : EPeregonService::Cafe;
+				Service->Kind = Poi.Type == rgen::PoiType::Fuel ? EPeregonService::Fuel
+					: (Poi.Type == rgen::PoiType::Shop ? EPeregonService::Shop : EPeregonService::Cafe);
+				Service->Region = Poi.Region;
 				Service->DisplayName = Name;
 				Service->FinishSpawning(FTransform(FRotator(0.0, Yaw, 0.0), Location));
 				Chunk.Actors.Add(Service);

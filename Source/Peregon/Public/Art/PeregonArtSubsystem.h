@@ -92,6 +92,8 @@ public:
 	static FSlateFontInfo SlateFont(EPeregonFont Style, int32 Size);
 	// Шрифт для Canvas (HUD, таблички). Может вернуть null — тогда используйте шрифт движка.
 	static UFont* CanvasFont(EPeregonFont Style, int32 Size);
+	// Размер надписи в пикселях (Slate-измеритель). Без Slate — грубая оценка.
+	static FVector2D MeasureText(const FString& Text, EPeregonFont Style, int32 Size);
 
 	// Материал-надпись: текст рисуется кодом в текстуру (кириллица, любой шрифт).
 	UMaterialInstanceDynamic* MakeLabelMaterial(UObject* Outer, const FString& Text, const FLinearColor& Ink, const FLinearColor& Paper,

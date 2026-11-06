@@ -1,4 +1,4 @@
-// Контроллер игрока: показывает главное меню и меню паузы (Slate, без бинарных ассетов).
+// Контроллер игрока: главное меню, пауза и игровые окна (инвентарь, магазин, карта). Slate, без бинарных ассетов.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -38,10 +38,39 @@ public:
 	FString UiSaveDescription() const;
 	bool UiCanSave() const;
 
+	// Игровые окна (игра на паузе, пока окно открыто).
+	void OpenInventory(EPeregonStorage Storage = EPeregonStorage::None);
+	void OpenShop(const TArray<FName>& Items, const FString& Title, float FuelPrice);
+	void OpenMap();
+	void OpenMapRegion(int32 Region);
+	void ClosePanel();
+	bool IsPanelOpen() const { return PanelContainer.IsValid(); }
+	void ToggleInventory();
+	void ToggleMap();
+
+	// Вещи. Storage::None — карманы.
+	FPeregonContainer* GetContainer(EPeregonStorage Storage) const;
+	bool CanMoveItem(FName Id, EPeregonStorage From, EPeregonStorage To) const;
+	void MoveItem(FName Id, EPeregonStorage From, EPeregonStorage To);
+	void UseItem(FName Id, EPeregonStorage From);
+	float GetShopPrice(FName Id) const;
+	bool CanBuyItem(FName Id) const;
+	void BuyItem(FName Id);
+	float GetMoney() const;
+	// Карта области под рукой: в карманах или (если сидим в машине) в бардачке.
+	bool HasMapForRegion(int32 Region) const;
+
 private:
 	void OpenMenu(bool bPause);
+	void ShowPanel(TSharedRef<SWidget> Panel, TSharedPtr<SWidget> Focus);
+	void OnEscape();
+	void Toast(const FString& Text) const;
 
 	TSharedPtr<SPeregonMenu> MenuWidget;
 	TSharedPtr<SWidget> MenuContainer;
 	bool bPauseMenu = false;
+
+	TSharedPtr<SWidget> PanelWidget;
+	TSharedPtr<SWidget> PanelContainer;
+	float ShopFuelPrice = 52.f;
 };

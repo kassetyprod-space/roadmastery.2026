@@ -127,7 +127,7 @@ int main(int Argc, char** Argv)
 	const float WorstReach = (CompressedCenterZ + 21.f) + std::sqrt(28.5f * 28.5f + 9.f * 9.f);
 	Check(WorstReach < 35.5f, "колесо помещается в арку на отбойнике и выкрутке");
 
-	const char* Tags[] = {"Hood", "Trunk", "DoorFL", "DoorFR", "DoorRL", "DoorRR", "Glovebox", "Key", "Lights", "Handbrake", "Fuel"};
+	const char* Tags[] = {"Hood", "Trunk", "DoorFL", "DoorFR", "DoorRL", "DoorRR", "Glovebox", "Key", "Lights", "Handbrake", "Fuel", "GloveInside", "TrunkInside"};
 	for (const char* Tag : Tags)
 	{
 		bool bFound = false;

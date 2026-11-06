@@ -237,6 +237,18 @@ void UPeregonVehicleMovementComponent::StepVehicle(float DeltaTime, UPrimitiveCo
 		C.Surface.Roughness = Surface.Roughness;
 	}
 
+	float RoughSum = 0.f;
+	WheelsInContact = 0;
+	for (const vsim::WheelContact& C : Contacts)
+	{
+		if (C.bInContact)
+		{
+			RoughSum += static_cast<float>(C.Surface.Roughness);
+			++WheelsInContact;
+		}
+	}
+	SurfaceRoughness = WheelsInContact > 0 ? RoughSum / static_cast<float>(WheelsInContact) : 0.f;
+
 	vsim::Assists A;
 	A.bAutoGearbox = bAutoGearbox;
 	A.bAutoClutch = bAutoClutch || bAutoGearbox;

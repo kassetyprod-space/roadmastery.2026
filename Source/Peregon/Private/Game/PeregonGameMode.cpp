@@ -128,6 +128,7 @@ void APeregonGameMode::StartNewGame(const FPeregonRunConfig& Config)
 		GI->Money = Config.StartMoney;
 		GI->TimeOfDayHours = Config.StartHour;
 		GI->Day = 1;
+		GI->ResetInventory();
 	}
 	StartSession(Config, nullptr);
 }
@@ -146,7 +147,7 @@ FString APeregonGameMode::DescribeSave() const
 	}
 	const int32 Hours = FMath::FloorToInt(Save->TimeOfDayHours);
 	const int32 Minutes = FMath::FloorToInt((Save->TimeOfDayHours - Hours) * 60.f);
-	return FString::Printf(TEXT("%s · день %d, %02d:%02d · %.1f км"), *Save->PlaceName, Save->Day, Hours, Minutes, Save->RouteS / 1000.f);
+	return FString::Printf(TEXT("%s · день %d, %02d:%02d · %.0f км по Р-255"), *Save->PlaceName, Save->Day, Hours, Minutes, Save->RouteS * 0.005f);
 }
 
 bool APeregonGameMode::ContinueGame()
@@ -162,8 +163,24 @@ bool APeregonGameMode::ContinueGame()
 		GI->Money = Save->Money;
 		GI->TimeOfDayHours = Save->TimeOfDayHours;
 		GI->Day = Save->Day;
+		if (Save->Version >= 2)
+		{
+			GI->Pockets = Save->Pockets;
+			GI->Glovebox = Save->Glovebox;
+			GI->Trunk = Save->Trunk;
+			GI->TraveledMaxS = Save->TraveledMaxS;
+		}
+		else
+		{
+			GI->ResetInventory();
+		}
 	}
-	StartSession(Save->Config, Save);
+	// Сохранения до версии 2 — со старой тестовой трассы: машина начинает заново в Новосибирске.
+	StartSession(Save->Config, Save->Version >= 2 ? Save : nullptr);
+	if (Save->Version < 2 && Car)
+	{
+		Car->GetVehicleMovement()->ApplyCarState(Save->CarState);
+	}
 	return true;
 }
 
@@ -188,6 +205,10 @@ bool APeregonGameMode::SaveGame(const FString& PlaceName)
 	Save->RouteS = static_cast<float>(RoadWorld->FindS(Car->GetActorLocation(), RoadWorld->GetTrackedS()));
 	Save->SavedAt = FDateTime::Now();
 	Save->PlaceName = PlaceName.IsEmpty() ? RoadWorld->GetPlaceName(Save->RouteS) : PlaceName;
+	Save->Pockets = GI->Pockets;
+	Save->Glovebox = GI->Glovebox;
+	Save->Trunk = GI->Trunk;
+	Save->TraveledMaxS = GI->TraveledMaxS;
 	return UGameplayStatics::SaveGameToSlot(Save, UPeregonSaveGame::SlotName, 0);
 }
 
@@ -317,6 +338,13 @@ void APeregonGameMode::Tick(float DeltaSeconds)
 	if (Mode == EPeregonMode::Road || Mode == EPeregonMode::ProvingGround)
 	{
 		RecoverFallen();
+	}
+	if (Mode == EPeregonMode::Road && RoadWorld)
+	{
+		if (UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>())
+		{
+			GI->TraveledMaxS = FMath::Max(GI->TraveledMaxS, static_cast<float>(RoadWorld->GetTrackedS()));
+		}
 	}
 
 	// Облёт трассы на фоне главного меню.

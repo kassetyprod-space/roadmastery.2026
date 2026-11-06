@@ -35,3 +35,8 @@ Thumbs.db
 # Вывод тестов физики
 *.csv
 Tools/CarPreview/car.json
+
+# Звуковые библиотеки (PSE и др.) — у каждого свои, публиковать исходники нельзя.
+Content/Sounds/**/*.wav
+Content/Sounds/**/*.WAV
+Content/Sounds/**/*.ogg

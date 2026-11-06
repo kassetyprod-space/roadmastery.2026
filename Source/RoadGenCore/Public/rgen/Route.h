@@ -1,9 +1,11 @@
 // Peregon — RoadGenCore
 // Трасса: осевая линия дороги, профиль высот, рельеф вдоль дороги, точки интереса.
 //
-// Сейчас осевая линия процедурная: прямые → переходные кривые → дуги, как проектируют настоящие
-// трассы (кривизна растёт плавно, без «изломов» руля). Позже сюда же придёт полилиния из
-// OpenStreetMap (Tools/MapPipeline) — всё остальное (рельеф, обочины, сёла, стриминг) не изменится.
+// Два режима осевой линии:
+//  • процедурный: прямые → переходные кривые → дуги, как проектируют настоящие трассы;
+//  • по опорным точкам (Anchors): реальные населённые пункты в масштабе 1:5 (см. rgen/Atlas.h),
+//    дорога идёт от точки к точке с плавными переходными кривыми и естественными «гуляниями».
+//    Позже сюда же можно подать полилинию из OpenStreetMap (Tools/MapPipeline) — как частые опорные точки.
 //
 // Координаты в метрах. X, Y — план (как в Unreal: Y вправо от X), Z — вверх.
 // S — расстояние вдоль дороги от начала, T — смещение поперёк (> 0 — вправо по ходу).
@@ -17,6 +19,40 @@
 
 namespace rgen
 {
+enum class PoiType
+{
+	Town,    // город/райцентр (S = 0 — начало маршрута)
+	Village,
+	Fuel,
+	Cafe,
+	Finish,
+	Shop,    // магазин у дороги (карты, мелочи)
+	Border,  // граница области
+	Waypoint // точка формы дороги без названия
+};
+
+// Опорная точка маршрута (в метрах игрового мира).
+struct Anchor
+{
+	double X = 0.0;
+	double Y = 0.0;
+	double Z = 0.0;     // высота, м (уже в масштабе игры)
+	double Km = 0.0;    // реальный километраж трассы
+	PoiType Type = PoiType::Waypoint;
+	int Side = 1;
+	std::string Name;   // UTF-8
+	std::string Region; // область, к которой относится участок ПОСЛЕ этой точки (пусто — та же)
+};
+
+// Сервис у дороги, привязанный к реальному километражу.
+struct ServiceSpec
+{
+	double Km = 0.0;
+	PoiType Type = PoiType::Fuel;
+	int Side = 1;
+	std::string Name;
+};
+
 struct RouteParams
 {
 	uint32_t Seed = 1;
@@ -29,6 +65,12 @@ struct RouteParams
 	double TerrainAmplitude = 26.0; // м, рельеф вдали от дороги
 	double LaneWidth = 3.5;       // м, две полосы
 	double ShoulderWidth = 2.0;   // м, гравийная обочина
+	double WanderAmplitude = 0.2; // рад, насколько дорога «гуляет» между опорными точками
+	double KmPerMeter = 0.005;    // реальные км на метр игры (масштаб 1:5)
+	std::string Name;             // название маршрута (UTF-8)
+	std::vector<Anchor> Anchors;  // не пусто — режим по опорным точкам
+	std::vector<ServiceSpec> Services;
+	std::string StartRegion = "Новосибирская область";
 };
 
 struct RouteSample
@@ -41,21 +83,22 @@ struct RouteSample
 	double Grade = 0.0;     // dZ/dS
 };
 
-enum class PoiType
-{
-	Town,    // начало маршрута
-	Village,
-	Fuel,
-	Cafe,
-	Finish
-};
-
 struct Poi
 {
 	PoiType Type = PoiType::Village;
 	double S = 0.0;
 	int Side = 1;          // сторона дороги для АЗС и кафе
 	std::string Name;      // UTF-8
+	double RealKm = 0.0;   // километраж настоящей трассы
+	int Region = 0;        // индекс в Regions()
+};
+
+// Участок маршрута в пределах одной области (для бумажных карт).
+struct Region
+{
+	std::string Name;
+	double S0 = 0.0;
+	double S1 = 0.0;
 };
 
 // Участок, где рельеф выравнивается до уровня дороги (площадка АЗС, улица села).
@@ -90,22 +133,34 @@ public:
 
 	const std::vector<Poi>& Pois() const { return PoiList; }
 	const std::vector<FlattenZone>& Flatten() const { return FlattenList; }
-	// Первая точка интереса дальше S (или nullptr).
+	// Первая точка интереса дальше S (или nullptr). Точки формы и границы пропускаются.
 	const Poi* NextPoi(double S) const;
+
+	const std::vector<Region>& Regions() const { return RegionList; }
+	int RegionAt(double S) const;
+	// Километраж настоящей трассы в точке S (кусочно-линейно по опорным точкам).
+	double RealKmAt(double S) const;
+	double SAtRealKm(double Km) const;
+	bool IsGuided() const { return !P.Anchors.empty(); }
 
 	double MinZ() const { return ZMin; }
 	double MaxZ() const { return ZMax; }
 
 private:
 	void BuildPlan();
+	void BuildGuidedPlan();
 	void BuildProfile();
 	void BuildPois();
+	void BuildGuidedPois();
+	void AddFlatten(const Poi& Item);
 	double NaturalNoise(double X, double Y) const;
 
 	RouteParams P;
 	std::vector<RouteSample> Samples;
 	std::vector<Poi> PoiList;
 	std::vector<FlattenZone> FlattenList;
+	std::vector<Region> RegionList;
+	std::vector<double> AnchorS; // S, в которой дорога прошла каждую опорную точку
 	double TotalLength = 0.0;
 	double ZMin = 0.0;
 	double ZMax = 0.0;

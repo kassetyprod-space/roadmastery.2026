@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "Game/PeregonGameInstance.h"
 #include "Game/PeregonGameMode.h"
+#include "Game/PeregonPlayerController.h"
 #include "Player/PeregonCharacter.h"
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
@@ -15,6 +16,7 @@ namespace PeregonService
 {
 const FName PumpTag(TEXT("Pump"));
 const FName RestTag(TEXT("Rest"));
+const FName ShopTag(TEXT("Shop"));
 const FVector PumpLocal[] = {FVector(11.0, -3.5, 1.0), FVector(11.0, 3.5, 1.0)};
 constexpr float PumpReachCm = 900.f;
 
@@ -35,13 +37,11 @@ void APeregonServicePoint::BeginPlay()
 {
 	Super::BeginPlay();
 	CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (Kind == EPeregonService::Fuel)
+	switch (Kind)
 	{
-		BuildFuel();
-	}
-	else
-	{
-		BuildCafe();
+	case EPeregonService::Fuel: BuildFuel(); break;
+	case EPeregonService::Shop: BuildShop(); break;
+	default: BuildCafe(); break;
 	}
 }
 
@@ -76,7 +76,10 @@ void APeregonServicePoint::AddLabel(const FVector& Location, const FString& Text
 		return;
 	}
 	// Текст рисуется в текстуру шрифтом Golos (кириллица), табличка — плоский квад.
-	const float Aspect = FMath::Max(1.5f, Text.Len() * 0.62f + 0.6f);
+	// Пропорции таблички — по реальной ширине надписи этим шрифтом (а не по числу букв).
+	const FVector2D Measured = UPeregonArtSubsystem::MeasureText(Text, EPeregonFont::SemiBold, 34);
+	const float Aspect = Measured.Y > 0.0 ? FMath::Clamp(static_cast<float>(Measured.X / Measured.Y) * 1.08f + 0.35f, 1.2f, 16.f)
+										 : FMath::Max(1.5f, Text.Len() * 0.62f + 0.6f);
 	const float HeightCm = SizeCm * 1.7f;
 	const int32 HeightPx = 64;
 	const int32 WidthPx = FMath::Clamp(FMath::RoundToInt(HeightPx * Aspect), 64, 1024);
@@ -116,7 +119,10 @@ void APeregonServicePoint::BuildFuel()
 	// Магазин.
 	AddBox(FVector(-4.0, 0.0, 1.75), FVector(8.0, 14.0, 3.5), Plaster, true);
 	AddBox(FVector(-4.0, 0.0, 3.6), FVector(8.6, 14.6, 0.25), Red, false);
-	AddBox(FVector(0.02, 0.0, 1.4), FVector(0.06, 9.0, 1.8), Glass, false);
+	AddBox(FVector(0.02, -1.5, 1.4), FVector(0.06, 7.0, 1.8), Glass, false);
+	AddBox(FVector(0.05, 4.2, 1.1), FVector(0.1, 1.2, 2.2), FPeregonLook(EPeregonTex::Paint, FLinearColor(0.25f, 0.25f, 0.27f), 0.5f), true,
+		PeregonService::ShopTag);
+	AddLabel(FVector(0.12, 4.2, 2.45), TEXT("МАГАЗИН"), 7.f, FColor::White, FLinearColor(0.6f, 0.05f, 0.04f));
 	AddLabel(FVector(0.08, 0.0, 3.0), DisplayName, 30.f, FColor(30, 30, 30), FLinearColor(0.8f, 0.78f, 0.72f));
 
 	// Стела с ценой у дороги.
@@ -145,6 +151,9 @@ void APeregonServicePoint::BuildCafe()
 	AddLabel(FVector(2.66, 0.0, 2.78), DisplayName, 20.f, FColor(60, 25, 10), FLinearColor(0.8f, 0.75f, 0.6f));
 	AddLabel(FVector(2.66, 0.0, 2.55), TEXT("ОБЕДЫ · НОЧЛЕГ"), 8.f, FColor(60, 25, 10), FLinearColor(0.8f, 0.75f, 0.6f));
 
+	// Окошко раздачи: чай в дорогу.
+	AddBox(FVector(2.55, -5.0, 1.25), FVector(0.12, 1.2, 0.9), Board, true, PeregonService::ShopTag);
+	AddLabel(FVector(2.63, -5.0, 1.85), TEXT("ЧАЙ С СОБОЙ"), 6.f, FColor(60, 25, 10), FLinearColor(0.8f, 0.75f, 0.6f));
 	for (double Y : {-4.0, 4.0})
 	{
 		AddBox(FVector(6.0, Y, 0.75), FVector(1.3, 1.3, 0.08), TableLook, true);
@@ -152,6 +161,53 @@ void APeregonServicePoint::BuildCafe()
 		AddBox(FVector(6.0, Y - 1.1, 0.45), FVector(1.3, 0.35, 0.06), TableLook, false);
 		AddBox(FVector(6.0, Y + 1.1, 0.45), FVector(1.3, 0.35, 0.06), TableLook, false);
 	}
+}
+
+void APeregonServicePoint::BuildShop()
+{
+	const FPeregonLook Walls(EPeregonTex::Plaster, FLinearColor(0.75f, 0.78f, 0.62f), 0.9f);
+	const FPeregonLook Roof(EPeregonTex::RoofMetal, FLinearColor(0.2f, 0.32f, 0.22f), 0.5f, 0.5f);
+	const FPeregonLook Door(EPeregonTex::WoodPlanks, FLinearColor(0.4f, 0.28f, 0.16f), 0.9f);
+	const FPeregonLook Glass(EPeregonTex::Glass, FLinearColor(1.1f, 1.05f, 0.85f), 0.1f);
+	const FPeregonLook Board(EPeregonTex::Paint, FLinearColor(0.12f, 0.25f, 0.5f), 0.6f);
+
+	AddBox(FVector(-2.0, 0.0, 1.5), FVector(6.0, 8.0, 3.0), Walls, true);
+	AddBox(FVector(-2.0, 0.0, 3.15), FVector(6.6, 8.6, 0.3), Roof, false);
+	AddBox(FVector(1.03, 1.8, 1.05), FVector(0.1, 1.2, 2.1), Door, true, PeregonService::ShopTag);
+	AddBox(FVector(1.02, -1.8, 1.5), FVector(0.06, 2.4, 1.2), Glass, false);
+	AddBox(FVector(1.1, 0.0, 2.6), FVector(0.1, 5.6, 0.6), Board, false);
+	AddLabel(FVector(1.16, 0.0, 2.6), TEXT("ПРОДУКТЫ"), 22.f, FColor::White, FLinearColor(0.12f, 0.25f, 0.5f));
+	AddLabel(FVector(1.1, -1.8, 0.65), TEXT("КАРТЫ · ЧАЙ · КАНИСТРЫ"), 5.f, FColor(30, 30, 30), FLinearColor(0.75f, 0.78f, 0.62f));
+}
+
+TArray<FName> APeregonServicePoint::GetShopCatalog() const
+{
+	TArray<FName> Items;
+	auto AddIf = [&Items](FName Id) {
+		if (!Id.IsNone() && PeregonItems::Find(Id))
+		{
+			Items.AddUnique(Id);
+		}
+	};
+	switch (Kind)
+	{
+	case EPeregonService::Fuel:
+		AddIf(PeregonItems::MapForRegion(Region));
+		AddIf(PeregonItems::CanisterFull);
+		AddIf(PeregonItems::CanisterEmpty);
+		AddIf(PeregonItems::Thermos);
+		break;
+	case EPeregonService::Shop:
+		AddIf(PeregonItems::MapForRegion(Region));
+		AddIf(PeregonItems::MapForRegion(Region + 1));
+		AddIf(PeregonItems::Thermos);
+		AddIf(PeregonItems::CanisterEmpty);
+		break;
+	default:
+		AddIf(PeregonItems::Thermos);
+		break;
+	}
+	return Items;
 }
 
 bool APeregonServicePoint::GetCarNeed(float& OutLiters) const
@@ -180,9 +236,20 @@ FString APeregonServicePoint::GetInteractPrompt(const UPrimitiveComponent* Part,
 	{
 		return FString();
 	}
+	if (Part->ComponentHasTag(PeregonService::ShopTag))
+	{
+		return User && User->IsA<APeregonCharacter>() ? FString::Printf(TEXT("Зайти: %s"), *DisplayName) : FString();
+	}
 	if (Part->ComponentHasTag(PeregonService::PumpTag))
 	{
 		float Liters = 0.f;
+		const bool bCarHere = GetCarNeed(Liters) && Liters >= 0.5f;
+		if (!bCarHere && GI->Pockets.Has(PeregonItems::CanisterEmpty))
+		{
+			const float Cost = PeregonItems::CanisterLiters * FuelPrice;
+			return GI->Money + 0.01f >= Cost ? FString::Printf(TEXT("Наполнить канистру 20 л за %s"), *PeregonService::Rubles(Cost))
+											: FString::Printf(TEXT("На канистру не хватает денег (%s)"), *PeregonService::Rubles(GI->Money));
+		}
 		if (!GetCarNeed(Liters))
 		{
 			return TEXT("Подгоните машину к колонке");
@@ -220,10 +287,31 @@ void APeregonServicePoint::InteractStart(UPrimitiveComponent* Part, APawn* User)
 	{
 		return;
 	}
+	if (Part->ComponentHasTag(PeregonService::ShopTag))
+	{
+		if (APeregonPlayerController* PC = User ? Cast<APeregonPlayerController>(User->GetController()) : nullptr)
+		{
+			PC->OpenShop(GetShopCatalog(), DisplayName, FuelPrice);
+		}
+		return;
+	}
 	if (Part->ComponentHasTag(PeregonService::PumpTag))
 	{
 		float Liters = 0.f;
-		if (!GetCarNeed(Liters) || Liters < 0.5f)
+		const bool bCarHere = GetCarNeed(Liters) && Liters >= 0.5f;
+		if (!bCarHere && GI->Pockets.Has(PeregonItems::CanisterEmpty))
+		{
+			if (!GI->TrySpend(PeregonItems::CanisterLiters * FuelPrice))
+			{
+				GM->Toast(TEXT("Не хватает денег на бензин"));
+				return;
+			}
+			GI->Pockets.Remove(PeregonItems::CanisterEmpty);
+			GI->Pockets.Add(PeregonItems::CanisterFull);
+			GM->Toast(TEXT("Канистра наполнена: 20 л"));
+			return;
+		}
+		if (!bCarHere)
 		{
 			return;
 		}

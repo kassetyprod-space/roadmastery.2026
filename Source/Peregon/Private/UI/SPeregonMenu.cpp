@@ -137,7 +137,7 @@ void SPeregonMenu::Construct(const FArguments& InArgs)
 					.AutoHeight()
 					[
 						SNew(STextBlock)
-						.Text(INVTEXT("Прототип · Esc / Tab — назад · данные карт © участники OpenStreetMap"))
+						.Text(INVTEXT("Прототип · Esc / F10 — назад · данные карт © участники OpenStreetMap"))
 						.Font(Font(10))
 						.ColorAndOpacity(DimColor)
 					]
@@ -176,7 +176,7 @@ void SPeregonMenu::GoBack()
 FReply SPeregonMenu::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
 	const FKey Key = InKeyEvent.GetKey();
-	if (Key == EKeys::Escape || Key == EKeys::Tab || Key == EKeys::Gamepad_FaceButton_Right || Key == EKeys::Gamepad_Special_Right)
+	if (Key == EKeys::Escape || Key == EKeys::Tab || Key == EKeys::F10 || Key == EKeys::Gamepad_FaceButton_Right || Key == EKeys::Gamepad_Special_Right)
 	{
 		GoBack();
 		return FReply::Handled();

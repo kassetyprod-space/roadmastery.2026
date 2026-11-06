@@ -6,6 +6,9 @@
 #include "Engine/Font.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Fonts/CompositeFont.h"
+#include "Fonts/FontMeasure.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Rendering/SlateRenderer.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Misc/Paths.h"
 #include "ProceduralMeshComponent.h"
@@ -397,11 +400,64 @@ UTexture2D* UPeregonArtSubsystem::Generate(EPeregonTex Type)
 	}
 	Tex->Filter = TF_Nearest;   // пиксели без размытия — PSX
 	Tex->SRGB = true;
-	Tex->LODGroup = TEXTUREGROUP_Pixels2D;
-	FTexture2DMipMap& Mip = Tex->GetPlatformData()->Mips[0];
-	void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
-	FMemory::Memcpy(Data, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
-	Mip.BulkData.Unlock();
+	// Не Pixels2D: та группа запрещает мипы, а без мипов мелкие пиксели вдали «рябят» (муар).
+	Tex->LODGroup = TEXTUREGROUP_World;
+	Tex->NeverStream = true;
+	FTexturePlatformData* Platform = Tex->GetPlatformData();
+	{
+		FTexture2DMipMap& Mip = Platform->Mips[0];
+		void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
+		FMemory::Memcpy(Data, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+		Mip.BulkData.Unlock();
+	}
+	// Цепочка мипов усреднением 2×2 (в линейном цвете), до 1×1.
+	TArray<FLinearColor> Level;
+	Level.Reserve(Pixels.Num());
+	for (const FColor& C : Pixels)
+	{
+		Level.Add(FLinearColor::FromSRGBColor(C));
+	}
+	int32 MipW = W;
+	int32 MipH = H;
+	while (MipW > 1 || MipH > 1)
+	{
+		const int32 NextW = FMath::Max(1, MipW / 2);
+		const int32 NextH = FMath::Max(1, MipH / 2);
+		TArray<FLinearColor> Next;
+		Next.SetNumZeroed(NextW * NextH);
+		TArray<FColor> Packed;
+		Packed.SetNumUninitialized(NextW * NextH);
+		for (int32 Y = 0; Y < NextH; ++Y)
+		{
+			for (int32 X = 0; X < NextW; ++X)
+			{
+				FLinearColor Sum(0.f, 0.f, 0.f, 0.f);
+				for (int32 DY = 0; DY < 2; ++DY)
+				{
+					for (int32 DX = 0; DX < 2; ++DX)
+					{
+						const int32 SX = FMath::Min(MipW - 1, X * 2 + DX);
+						const int32 SY = FMath::Min(MipH - 1, Y * 2 + DY);
+						Sum += Level[SY * MipW + SX];
+					}
+				}
+				Next[Y * NextW + X] = Sum * 0.25f;
+				Packed[Y * NextW + X] = Next[Y * NextW + X].ToFColor(true);
+			}
+		}
+		FTexture2DMipMap* Mip = new FTexture2DMipMap();
+		Mip->SizeX = NextW;
+		Mip->SizeY = NextH;
+		Mip->SizeZ = 1;
+		Platform->Mips.Add(Mip);
+		Mip->BulkData.Lock(LOCK_READ_WRITE);
+		void* Dest = Mip->BulkData.Realloc(static_cast<int64>(Packed.Num()) * sizeof(FColor));
+		FMemory::Memcpy(Dest, Packed.GetData(), Packed.Num() * sizeof(FColor));
+		Mip->BulkData.Unlock();
+		Level = MoveTemp(Next);
+		MipW = NextW;
+		MipH = NextH;
+	}
 	Tex->UpdateResource();
 	return Tex;
 }
@@ -501,6 +557,16 @@ FSlateFontInfo UPeregonArtSubsystem::SlateFont(EPeregonFont Style, int32 Size)
 	return FCoreStyle::GetDefaultFontStyle(Style == EPeregonFont::Regular ? "Regular" : "Bold", Size);
 }
 
+FVector2D UPeregonArtSubsystem::MeasureText(const FString& Text, EPeregonFont Style, int32 Size)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return FVector2D(Text.Len() * Size * 0.62, Size * 1.3);
+	}
+	const auto Measured = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Text, SlateFont(Style, Size));
+	return FVector2D(Measured.X, Measured.Y);
+}
+
 UFont* UPeregonArtSubsystem::CanvasFont(EPeregonFont Style, int32 Size)
 {
 	UPeregonArtSubsystem* Self = Instance.Get();
@@ -561,11 +627,87 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeLabelMaterial(UObject* Outer
 			{
 				Font = GEngine->GetLargeFont();
 			}
+			// Надпись всегда помещается: при необходимости переносим на две строки и уменьшаем шрифт.
+			TArray<FString> Lines;
+			Text.ParseIntoArray(Lines, TEXT("\n"), true);
+			if (Lines.Num() == 0)
+			{
+				Lines.Add(Text);
+			}
+			const float MaxW = static_cast<float>(Size.X) * 0.9f;
+			const float MaxH = static_cast<float>(Size.Y) * 0.84f;
+			auto Measure = [Canvas](UFont* F, const TArray<FString>& In, float& OutW, float& OutH) {
+				OutW = 0.f;
+				OutH = 0.f;
+				for (const FString& L : In)
+				{
+					float LW = 0.f;
+					float LH = 0.f;
+					Canvas->TextSize(F, L, LW, LH);
+					OutW = FMath::Max(OutW, LW);
+					OutH += LH;
+				}
+			};
+			// Длинную однострочную надпись разбиваем по пробелу ближе к середине, если так крупнее.
+			if (Lines.Num() == 1 && Lines[0].Contains(TEXT(" ")))
+			{
+				float W1 = 0.f;
+				float H1 = 0.f;
+				Measure(Font, Lines, W1, H1);
+				if (W1 > MaxW)
+				{
+					const FString& One = Lines[0];
+					int32 Best = INDEX_NONE;
+					for (int32 I = 0; I < One.Len(); ++I)
+					{
+						if (One[I] == TEXT(' ') && (Best == INDEX_NONE || FMath::Abs(I - One.Len() / 2) < FMath::Abs(Best - One.Len() / 2)))
+						{
+							Best = I;
+						}
+					}
+					const TArray<FString> Two = {One.Left(Best), One.Mid(Best + 1)};
+					float W2 = 0.f;
+					float H2 = 0.f;
+					Measure(Font, Two, W2, H2);
+					const float Scale1 = FMath::Min(MaxW / FMath::Max(W1, 1.f), MaxH / FMath::Max(H1, 1.f));
+					const float Scale2 = FMath::Min(MaxW / FMath::Max(W2, 1.f), MaxH / FMath::Max(H2, 1.f));
+					if (Scale2 > Scale1)
+					{
+						Lines = Two;
+					}
+				}
+			}
+			int32 Px = FontPx;
 			float TextW = 0.f;
 			float TextH = 0.f;
-			Canvas->TextSize(Font, Text, TextW, TextH);
+			for (;;)
+			{
+				Measure(Font, Lines, TextW, TextH);
+				if ((TextW <= MaxW && TextH <= MaxH) || Px <= 8)
+				{
+					break;
+				}
+				const float Fit = FMath::Min(MaxW / FMath::Max(TextW, 1.f), MaxH / FMath::Max(TextH, 1.f));
+				Px = FMath::Max(8, FMath::Min(Px - 1, FMath::FloorToInt(static_cast<float>(Px) * Fit)));
+				if (UFont* Smaller = CanvasFont(Style, Px))
+				{
+					Font = Smaller;
+				}
+				else
+				{
+					break;
+				}
+			}
 			Canvas->SetDrawColor(Ink.ToFColor(true));
-			Canvas->DrawText(Font, Text, (Size.X - TextW) * 0.5f, (Size.Y - TextH) * 0.5f);
+			float Y = (static_cast<float>(Size.Y) - TextH) * 0.5f;
+			for (const FString& L : Lines)
+			{
+				float LW = 0.f;
+				float LH = 0.f;
+				Canvas->TextSize(Font, L, LW, LH);
+				Canvas->DrawText(Font, L, (static_cast<float>(Size.X) - LW) * 0.5f, Y);
+				Y += LH;
+			}
 		}
 		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World, Context);
 		LabelCache.Add(Key, Target);

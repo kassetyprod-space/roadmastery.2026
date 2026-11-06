@@ -1,4 +1,4 @@
-// Придорожный сервис: АЗС (заправка за деньги) или кафе (отдых и сохранение).
+// Придорожный сервис: АЗС (заправка, магазин), кафе (отдых и сохранение), магазин «Продукты» (карты, мелочи).
 // Локальные оси: +X смотрит на дорогу.
 #pragma once
 
@@ -16,7 +16,8 @@ UENUM(BlueprintType)
 enum class EPeregonService : uint8
 {
 	Fuel,
-	Cafe
+	Cafe,
+	Shop
 };
 
 UCLASS()
@@ -45,12 +46,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon")
 	float NightStayPrice = 400.f;
 
+	// Область маршрута (какую карту продают).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon")
+	int32 Region = 0;
+
+	// Что продают за прилавком.
+	TArray<FName> GetShopCatalog() const;
+
 private:
 	UStaticMeshComponent* AddBox(const FVector& Center, const FVector& SizeM, const FPeregonLook& Look, bool bCollision, FName InteractTag = NAME_None);
 	// Надпись-табличка (лицом к дороге). SizeCm — высота букв.
 	void AddLabel(const FVector& Location, const FString& Text, float SizeCm, const FColor& Ink, const FLinearColor& Paper);
 	void BuildFuel();
 	void BuildCafe();
+	void BuildShop();
 
 	// Сколько литров нужно машине игрока и стоит ли она у колонки.
 	bool GetCarNeed(float& OutLiters) const;
