@@ -1,4 +1,4 @@
-// Машина игрока: кузов «коробками» в PSX-духе с полноценным салоном.
+// Машина игрока: процедурная модель «Сокол-1500» (цельный кузов, салон, моторный отсек) в PSX-духе.
 // Двери, капот, багажник, бардачок открываются; ключ, фары, ручник работают мышкой из салона.
 // Вид от 1-го лица (с инерцией головы на перегрузках) и от 3-го лица (орбитальная камера).
 // Ввод (Enhanced Input) собирается в коде, чтобы проект запускался без бинарных .uasset.
@@ -19,8 +19,8 @@ class UPeregonVehicleMovementComponent;
 class USceneComponent;
 class USpotLightComponent;
 class USpringArmComponent;
-class UStaticMesh;
-class UStaticMeshComponent;
+class UMaterialInterface;
+class UProceduralMeshComponent;
 struct FInputActionValue;
 struct FPeregonTelemetry;
 
@@ -128,10 +128,6 @@ protected:
 
 private:
 	// Построение «модели» из примитивов.
-	UStaticMeshComponent* AddPart(const TCHAR* Name, USceneComponent* Parent, UStaticMesh* InMesh, const FVector& Location,
-		const FVector& SizeCm, const FRotator& Rotation, const FLinearColor& Color);
-	UStaticMeshComponent* AddBeam(const TCHAR* Name, USceneComponent* Parent, UStaticMesh* InMesh, const FVector& From, const FVector& To,
-		float Thickness, const FLinearColor& Color);
 	USceneComponent* AddPivot(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 	void AddMovingPart(FName Tag, USceneComponent* Pivot, const FRotator& Open, float Speed = 2.5f);
 	FPeregonMovingPart* FindMovingPart(FName Tag);
@@ -200,7 +196,13 @@ private:
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> LampMaterials;
 
 	// Цвета деталей (красятся в BeginPlay через динамические материалы).
-	TArray<TPair<UStaticMeshComponent*, FLinearColor>> PartColors;
+	// Узлы модели по vmodel::Part (Body — корень).
+	UPROPERTY() TArray<TObjectPtr<USceneComponent>> PartPivots;
+	UPROPERTY() TObjectPtr<USceneComponent> LightKnobPivot;
+	UPROPERTY(Transient) TArray<TObjectPtr<UProceduralMeshComponent>> ModelMeshes;
+	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> GaugeMaterials;
+	void BuildModelMeshes();
+	UMaterialInterface* MakeSlotMaterial(uint8 Slot);
 
 	FPeregonFocus Focus;
 	TWeakObjectPtr<AActor> InteractingActor;

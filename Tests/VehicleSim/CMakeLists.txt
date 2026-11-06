@@ -25,3 +25,10 @@ endif()
 
 enable_testing()
 add_test(NAME vsim_tests COMMAND vsim_tests)
+
+add_executable(vmodel_tests BodyModelTests.cpp)
+target_link_libraries(vmodel_tests PRIVATE vsim)
+if(MSVC)
+  target_compile_options(vmodel_tests PRIVATE /utf-8)
+endif()
+add_test(NAME vmodel_tests COMMAND vmodel_tests)

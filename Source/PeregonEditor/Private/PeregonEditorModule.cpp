@@ -1,5 +1,5 @@
-// Создание мастер-материала M_PSX2 (текстура × цвет, шероховатость, металл, свечение,
-// мировые или мешевые UV). Раньше это делал Python-скрипт, но он мог молча не сработать;
+// Создание мастер-материалов M_PSX2 (текстура × цвет, шероховатость, металл, свечение,
+// мировые или мешевые UV) и M_PSX2_Glass (то же, но полупрозрачный — стёкла машины). Раньше это делал Python-скрипт, но он мог молча не сработать;
 // C++ надёжнее: ошибки видны при сборке, а результат — в Output Log с префиксом [Peregon].
 #include "AssetToolsModule.h"
 #include "Containers/Ticker.h"
@@ -26,7 +26,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogPeregonEditor, Log, All);
 namespace PeregonEditorContent
 {
 const TCHAR* MaterialDir = TEXT("/Game/Peregon/Materials");
-const TCHAR* MaterialName = TEXT("M_PSX2");
 
 template <typename T>
 T* AddNode(UMaterial* Material, int32 X, int32 Y)
@@ -45,7 +44,7 @@ UMaterialExpressionScalarParameter* AddScalar(UMaterial* Material, const TCHAR* 
 	return Node;
 }
 
-void CreatePsxMaterial()
+void CreatePsxMaterial(const TCHAR* MaterialName, bool bGlass)
 {
 	const FString PackagePath = FString(MaterialDir) / MaterialName;
 	if (FPackageName::DoesPackageExist(PackagePath))
@@ -65,6 +64,12 @@ void CreatePsxMaterial()
 	}
 	Material->TwoSided = true;
 	Material->bUsedWithInstancedStaticMeshes = true;
+	if (bGlass)
+	{
+		Material->BlendMode = BLEND_Translucent;
+		Material->TranslucencyLightingMode = TLM_SurfacePerPixelLighting;
+		UMaterialEditingLibrary::ConnectMaterialProperty(AddScalar(Material, TEXT("Opacity"), 0.3f, -450, 760), TEXT(""), MP_Opacity);
+	}
 
 	// UV: из меша или мировые (WorldUV = 1, плитка TileSize см).
 	UMaterialExpressionTextureCoordinate* TexCoord = AddNode<UMaterialExpressionTextureCoordinate>(Material, -1400, -100);
@@ -111,8 +116,8 @@ void CreatePsxMaterial()
 
 	UMaterialEditingLibrary::RecompileMaterial(Material);
 	const bool bSaved = UEditorAssetLibrary::SaveAsset(Material->GetPathName(), false);
-	UE_LOG(LogPeregonEditor, Display, TEXT("[Peregon] Материал %s %s. Закоммитьте Content/Peregon/Materials/M_PSX2.uasset."),
-		*PackagePath, bSaved ? TEXT("создан и сохранён") : TEXT("создан, но НЕ сохранён"));
+	UE_LOG(LogPeregonEditor, Display, TEXT("[Peregon] Материал %s %s. Закоммитьте Content/Peregon/Materials/%s.uasset."),
+		*PackagePath, bSaved ? TEXT("создан и сохранён") : TEXT("создан, но НЕ сохранён"), MaterialName);
 }
 } // namespace PeregonEditorContent
 
@@ -123,7 +128,8 @@ public:
 	{
 		// Через секунду после старта: реестр ассетов и редактор уже готовы.
 		TickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float) {
-			PeregonEditorContent::CreatePsxMaterial();
+			PeregonEditorContent::CreatePsxMaterial(TEXT("M_PSX2"), false);
+			PeregonEditorContent::CreatePsxMaterial(TEXT("M_PSX2_Glass"), true);
 			return false;
 		}), 1.f);
 	}

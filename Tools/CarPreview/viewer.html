@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#9fb3c4}canvas{display:block}</style></head>
+<body><canvas id="c" width="1400" height="900"></canvas><script>
+const P = new URLSearchParams(location.hash.slice(1));
+const num = (k, d) => P.has(k) ? P.get(k).split(',').map(Number) : d;
+const eye = num('eye', [380, -420, 120]), tgt = num('tgt', [0, 0, 0]), fov = num('fov', [35])[0];
+const open = P.get('open') || '', cull = P.get('cull') !== '0', noglass = P.get('noglass') === '1';
+const COL = {Paint:[.55,.1,.08], Chrome:[.82,.82,.8], BlackTrim:[.05,.05,.055], Rubber:[.03,.03,.03], Glass:[.25,.33,.38],
+ Headlamp:[1,.95,.8], Taillamp:[.75,.04,.03], Indicator:[1,.5,.05], Interior:[.36,.33,.3], InteriorDark:[.11,.105,.1],
+ Fabric:[.45,.21,.11], Carpet:[.16,.14,.12], Headliner:[.72,.7,.64], GaugeFace:[.9,.88,.78], Needle:[1,.35,.05],
+ Engine:[.24,.25,.27], Metal:[.42,.42,.43], Plate:[.95,.95,.92]};
+const SPEC = {Paint:.5, Chrome:1, Glass:.9, Metal:.4, Headlamp:.6};
+const gl = document.getElementById('c').getContext('webgl', {antialias:true});
+gl.getExtension('OES_element_index_uint');
+const vs = `attribute vec3 p; attribute vec3 n; uniform mat4 mvp; varying vec3 vn; varying vec3 vp;
+void main(){ vn=n; vp=p; gl_Position = mvp*vec4(p,1.0);} `;
+const fs = `precision highp float; varying vec3 vn; varying vec3 vp; uniform vec3 col; uniform float spec; uniform float alpha; uniform vec3 eye;
+void main(){ vec3 N = normalize(vn); if(!gl_FrontFacing) N=-N; vec3 L = normalize(vec3(0.45,-0.55,0.75));
+ float d = max(dot(N,L),0.0); float h = 0.5+0.5*N.z; vec3 V = normalize(eye-vp); vec3 H = normalize(L+V);
+ float s = pow(max(dot(N,H),0.0), 40.0)*spec; vec3 c = col*(0.28*h+0.12 + 0.85*d) + vec3(s);
+ gl_FragColor = vec4(pow(c, vec3(1.0/1.4)), alpha);} `;
+function sh(t, s){const o=gl.createShader(t); gl.shaderSource(o,s); gl.compileShader(o); if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(o); return o;}
+const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog); gl.useProgram(prog);
+const U = n => gl.getUniformLocation(prog, n);
+function rotY(t){const c=Math.cos(t),s=Math.sin(t); return v=>[v[0]*c - v[2]*s, v[1], v[0]*s + v[2]*c];}
+function rotZ(t){const c=Math.cos(t),s=Math.sin(t); return v=>[v[0]*c - v[1]*s, v[0]*s + v[1]*c, v[2]];}
+const D = Math.PI/180;
+function partXf(name, origin, data){
+  let r = v=>v;
+  if (open.includes(name)) {
+    if (name==='Hood') r = rotY(55*D); if (name==='Trunk') r = rotY(-65*D);
+    if (name==='DoorFL'||name==='DoorRL') r = rotZ(65*D); if (name==='DoorFR'||name==='DoorRR') r = rotZ(-65*D);
+    if (name==='Glovebox') r = rotY(70*D);
+  }
+  if (name==='Steering') { const X=data.steeringDir; let Y=[ -X[1], X[0], 0 ]; // Up x X, Up=(0,0,1)
+    const l=Math.hypot(...Y); Y=Y.map(a=>a/l); const Z=[X[1]*Y[2]-X[2]*Y[1], X[2]*Y[0]-X[0]*Y[2], X[0]*Y[1]-X[1]*Y[0]];
+    const b = v=>[X[0]*v[0]+Y[0]*v[1]+Z[0]*v[2], X[1]*v[0]+Y[1]*v[1]+Z[1]*v[2], X[2]*v[0]+Y[2]*v[1]+Z[2]*v[2]];
+    return {pos:v=>{const q=b(v); return [q[0]+origin[0],q[1]+origin[1],q[2]+origin[2]];}, nrm:b}; }
+  return {pos:v=>{const q=r(v); return [q[0]+origin[0],q[1]+origin[1],q[2]+origin[2]];}, nrm:r};
+}
+const toGL = v=>[v[1], v[2], -v[0]];
+const draws = [];
+function addSection(sec, xf){
+  const n = sec.pos.length/3, pa = new Float32Array(n*3), na = new Float32Array(n*3);
+  for (let i=0;i<n;i++){ const p = toGL(xf.pos([sec.pos[3*i],sec.pos[3*i+1],sec.pos[3*i+2]])); const q = toGL(xf.nrm([sec.nrm[3*i],sec.nrm[3*i+1],sec.nrm[3*i+2]]));
+    pa.set(p,3*i); na.set(q,3*i); }
+  const pb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,pb); gl.bufferData(gl.ARRAY_BUFFER,pa,gl.STATIC_DRAW);
+  const nb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,nb); gl.bufferData(gl.ARRAY_BUFFER,na,gl.STATIC_DRAW);
+  const ib=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(sec.idx),gl.STATIC_DRAW);
+  draws.push({pb,nb,ib,count:sec.idx.length,mat:sec.mat});
+}
+function mat4mul(a,b){const o=new Float32Array(16); for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+j]*b[i*4+k]; o[i*4+j]=s;} return o;}
+function persp(f,a,n,fa){const t=1/Math.tan(f/2); return new Float32Array([t/a,0,0,0, 0,t,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,2*fa*n/(n-fa),0]);}
+function look(e,c,u){const z=[e[0]-c[0],e[1]-c[1],e[2]-c[2]]; let l=Math.hypot(...z); z.forEach((v,i)=>z[i]=v/l);
+ const x=[u[1]*z[2]-u[2]*z[1],u[2]*z[0]-u[0]*z[2],u[0]*z[1]-u[1]*z[0]]; l=Math.hypot(...x); x.forEach((v,i)=>x[i]=v/l);
+ const y=[z[1]*x[2]-z[2]*x[1],z[2]*x[0]-z[0]*x[2],z[0]*x[1]-z[1]*x[0]];
+ return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -(x[0]*e[0]+x[1]*e[1]+x[2]*e[2]), -(y[0]*e[0]+y[1]*e[1]+y[2]*e[2]), -(z[0]*e[0]+z[1]*e[1]+z[2]*e[2]),1]);}
+fetch('car.json').then(r=>r.json()).then(data=>{
+  const wheels = [['WheelLeft',[116.4,-68.25,-23.5]],['WheelRight',[116.4,68.25,-23.5]],['WheelLeft',[-126,-66.05,-23.5]],['WheelRight',[-126,66.05,-23.5]]];
+  for (const part of data.parts){
+    if (part.name.startsWith('Wheel')) continue;
+    const xf = partXf(part.name, part.origin, data); part.sections.forEach(s=>addSection(s,xf));
+  }
+  for (const [name,o] of wheels){ const part = data.parts.find(p=>p.name===name); const xf = partXf(name,o,data); part.sections.forEach(s=>addSection(s,xf)); }
+  // земля
+  addSection({mat:'Ground',pos:[-600,-600,-52, 600,-600,-52, 600,600,-52, -600,600,-52], nrm:[0,0,1,0,0,1,0,0,1,0,0,1], idx:[0,2,1,0,3,2]}, {pos:v=>v,nrm:v=>v});
+  COL.Ground=[.42,.44,.4];
+  const E = toGL(eye), T = toGL(tgt);
+  const mvp = mat4mul(persp(fov*D, 1400/900, 2, 5000), look(E,T,[0,1,0]));
+  gl.viewport(0,0,1400,900); gl.clearColor(.62,.7,.77,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); if (cull){ gl.enable(gl.CULL_FACE); gl.frontFace(gl.CCW); gl.cullFace(gl.BACK);} 
+  gl.uniformMatrix4fv(U('mvp'), false, mvp); gl.uniform3fv(U('eye'), E);
+  const pl = gl.getAttribLocation(prog,'p'), nl = gl.getAttribLocation(prog,'n');
+  const order = draws.filter(d=>d.mat!=='Glass').concat(noglass?[]:draws.filter(d=>d.mat==='Glass'));
+  for (const d of order){
+    const glass = d.mat==='Glass'; if (glass){ gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);} 
+    gl.uniform3fv(U('col'), COL[d.mat]||[1,0,1]); gl.uniform1f(U('spec'), SPEC[d.mat]||0.05); gl.uniform1f(U('alpha'), glass?0.35:1);
+    gl.bindBuffer(gl.ARRAY_BUFFER,d.pb); gl.enableVertexAttribArray(pl); gl.vertexAttribPointer(pl,3,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,d.nb); gl.enableVertexAttribArray(nl); gl.vertexAttribPointer(nl,3,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,d.ib); gl.drawElements(gl.TRIANGLES,d.count,gl.UNSIGNED_INT,0);
+  }
+  document.title='done';
+}).catch(e=>{document.title='error '+e;});
+</script></body></html>

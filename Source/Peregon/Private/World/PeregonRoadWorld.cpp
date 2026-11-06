@@ -341,7 +341,9 @@ void APeregonRoadWorld::BuildGrid(FMeshBuffers& Out, const TArray<double>& Ss, c
 			Out.Normals.Add(N.IsNearlyZero() ? FVector::UpVector : N);
 		}
 	}
-	// Треугольники по часовой стрелке при взгляде сверху — лицевая сторона вверх.
+	// Лицевая сторона треугольника в Unreal — та, для которой (P2 − P0) × (P1 − P0) смотрит наружу
+	// (против часовой стрелки при взгляде на неё). Земля должна смотреть вверх: иначе солнце светит
+	// ей «в спину» (дорога чёрная), а трассировки колёс проходят сквозь односторонний триангл-меш.
 	for (int32 R = 0; R + 1 < Rows; ++R)
 	{
 		for (int32 C = 0; C + 1 < Cols; ++C)
@@ -350,7 +352,7 @@ void APeregonRoadWorld::BuildGrid(FMeshBuffers& Out, const TArray<double>& Ss, c
 			const int32 B = A + 1;
 			const int32 Cn = A + Cols;
 			const int32 D = Cn + 1;
-			Out.Triangles.Append({A, Cn, B, B, Cn, D});
+			Out.Triangles.Append({A, B, Cn, B, D, Cn});
 		}
 	}
 }

@@ -6,10 +6,8 @@
 #include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SpotLightComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/LocalPlayer.h"
-#include "Engine/StaticMesh.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Game/PeregonHUD.h"
@@ -19,24 +17,25 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralMeshComponent.h"
 #include "Player/PeregonCharacter.h"
-#include "UObject/ConstructorHelpers.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
+#include "vsim/BodyModel.h"
+
+namespace PeregonCarModel
+{
+// Модель строится один раз за запуск (≈0.1 с) и дальше переиспользуется всеми машинами.
+const vmodel::Model& Get()
+{
+	static const vmodel::Model Model = vmodel::BuildSokol();
+	return Model;
+}
+
+FVector ToVector(const vmodel::V3& V) { return FVector(V.X, V.Y, V.Z); }
+} // namespace PeregonCarModel
 
 namespace PeregonCarLook
 {
-const FLinearColor Paint(0.32f, 0.04f, 0.04f);      // выцветшая «вишня»
-const FLinearColor Dark(0.025f, 0.025f, 0.03f);
-const FLinearColor Interior(0.07f, 0.065f, 0.06f);
-const FLinearColor Seat(0.16f, 0.08f, 0.045f);
-const FLinearColor Chrome(0.55f, 0.55f, 0.53f);
-const FLinearColor EngineColor(0.10f, 0.10f, 0.11f);
-const FLinearColor LampColor(0.9f, 0.85f, 0.6f);
-const FLinearColor TailColor(0.55f, 0.02f, 0.02f);
-const FLinearColor GaugeFace(0.85f, 0.83f, 0.75f);
-const FLinearColor NeedleColor(0.9f, 0.25f, 0.05f);
-const FLinearColor TireColor(0.015f, 0.015f, 0.015f);
-
 const FName DoorFL(TEXT("DoorFL"));
 const FName DoorFR(TEXT("DoorFR"));
 const FName DoorRL(TEXT("DoorRL"));
@@ -63,7 +62,7 @@ constexpr float MaxExitSpeed = 3.f; // м/с
 } // namespace PeregonCarLook
 
 // ---------------------------------------------------------------------------------------------
-// Конструктор: собираем машину из примитивов. Начало координат — центр кузова (≈ центр масс, 52 см над землёй).
+// Конструктор: физика, узлы подвижных частей, камеры. Начало координат — центр кузова (≈ центр масс, 52 см над землёй).
 // X — вперёд, Y — вправо, Z — вверх. Размеры в сантиметрах.
 // ---------------------------------------------------------------------------------------------
 APeregonCar::APeregonCar()
@@ -74,15 +73,6 @@ APeregonCar::APeregonCar()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	UStaticMesh* Cube = CubeFinder.Object;
-	UStaticMesh* Cylinder = CylinderFinder.Object;
-	UStaticMesh* Sphere = SphereFinder.Object;
-	const FRotator Zero = FRotator::ZeroRotator;
-	const FRotator AlongX(90.f, 0.f, 0.f); // ось цилиндра → вдоль X
 
 	// --- Физика: один бокс нижней части кузова. Колёса — сферы-трассировки в компоненте движения.
 	Body = CreateDefaultSubobject<UBoxComponent>(TEXT("Body"));
@@ -109,43 +99,55 @@ APeregonCar::APeregonCar()
 
 	Movement = CreateDefaultSubobject<UPeregonVehicleMovementComponent>(TEXT("VehicleMovement"));
 
-	// --- Моторный отсек и капот
-	AddPart(TEXT("EngineBayFloor"), Body, Cube, FVector(150.f, 0.f, -25.f), FVector(110.f, 150.f, 4.f), Zero, Dark);
-	AddPart(TEXT("FenderL"), Body, Cube, FVector(150.f, -78.f, 2.f), FVector(110.f, 6.f, 66.f), Zero, Paint);
-	AddPart(TEXT("FenderR"), Body, Cube, FVector(150.f, 78.f, 2.f), FVector(110.f, 6.f, 66.f), Zero, Paint);
-	AddPart(TEXT("FrontPanel"), Body, Cube, FVector(202.f, 0.f, 2.f), FVector(6.f, 150.f, 66.f), Zero, Paint);
-	AddPart(TEXT("Grille"), Body, Cube, FVector(205.5f, 0.f, 10.f), FVector(2.f, 86.f, 20.f), Zero, Chrome);
-	AddPart(TEXT("EngineBlock"), Body, Cube, FVector(148.f, 0.f, 0.f), FVector(60.f, 55.f, 45.f), Zero, EngineColor);
-	AddPart(TEXT("Radiator"), Body, Cube, FVector(190.f, 0.f, 5.f), FVector(5.f, 110.f, 45.f), Zero, Dark);
-	AddPart(TEXT("AirFilter"), Body, Cylinder, FVector(145.f, 0.f, 27.f), FVector(32.f, 32.f, 8.f), Zero, Chrome);
-	AddPart(TEXT("Battery"), Body, Cube, FVector(170.f, 52.f, 0.f), FVector(18.f, 24.f, 20.f), Zero, Dark);
-	AddPart(TEXT("Cowl"), Body, Cube, FVector(90.f, 0.f, 36.f), FVector(12.f, 156.f, 4.f), Zero, Paint);
+	// --- Геометрия — процедурная модель «Сокол-1500» (VehicleSimCore/vsim/BodyModel). Здесь только узлы
+	// подвижных частей и невидимые «мишени» взаимодействия; сами меши создаются в BeginPlay.
+	const vmodel::Model& Model = PeregonCarModel::Get();
+	PartPivots.SetNum(static_cast<int32>(vmodel::Part::Count));
+	auto MakePartPivot = [&](vmodel::Part Id, const TCHAR* Name, const FRotator& Rotation = FRotator::ZeroRotator) {
+		const vmodel::PartMesh* Mesh = Model.Find(Id);
+		USceneComponent* Pivot = AddPivot(Name, Body, Mesh ? PeregonCarModel::ToVector(Mesh->Origin) : FVector::ZeroVector, Rotation);
+		PartPivots[static_cast<int32>(Id)] = Pivot;
+		return Pivot;
+	};
 
-	USceneComponent* HoodPivot = AddPivot(TEXT("HoodPivot"), Body, FVector(95.f, 0.f, 35.f));
-	UStaticMeshComponent* HoodPanel = AddPart(TEXT("HoodPanel"), HoodPivot, Cube, FVector(55.f, 0.f, 1.5f), FVector(110.f, 156.f, 3.f), Zero, Paint);
-	PeregonInteraction::MakeInteractable(HoodPanel, Hood);
-	AddMovingPart(Hood, HoodPivot, FRotator(55.f, 0.f, 0.f), 1.6f);
+	AddMovingPart(Hood, MakePartPivot(vmodel::Part::Hood, TEXT("HoodPivot")), FRotator(55.f, 0.f, 0.f), 1.6f);
+	AddMovingPart(Trunk, MakePartPivot(vmodel::Part::Trunk, TEXT("TrunkPivot")), FRotator(-65.f, 0.f, 0.f), 1.6f);
+	// Двери: петли спереди, открываются наружу.
+	AddMovingPart(DoorFL, MakePartPivot(vmodel::Part::DoorFL, TEXT("DoorFLPivot")), FRotator(0.f, 65.f, 0.f), 3.f);
+	AddMovingPart(DoorFR, MakePartPivot(vmodel::Part::DoorFR, TEXT("DoorFRPivot")), FRotator(0.f, -65.f, 0.f), 3.f);
+	AddMovingPart(DoorRL, MakePartPivot(vmodel::Part::DoorRL, TEXT("DoorRLPivot")), FRotator(0.f, 65.f, 0.f), 3.f);
+	AddMovingPart(DoorRR, MakePartPivot(vmodel::Part::DoorRR, TEXT("DoorRRPivot")), FRotator(0.f, -65.f, 0.f), 3.f);
+	AddMovingPart(Glovebox, MakePartPivot(vmodel::Part::Glovebox, TEXT("GlovePivot")), FRotator(70.f, 0.f, 0.f), 3.f);
 
-	// --- Багажник
-	AddPart(TEXT("TrunkFloor"), Body, Cube, FVector(-157.f, 0.f, -25.f), FVector(95.f, 150.f, 4.f), Zero, Dark);
-	AddPart(TEXT("QuarterL"), Body, Cube, FVector(-157.f, -78.f, 2.f), FVector(95.f, 6.f, 66.f), Zero, Paint);
-	AddPart(TEXT("QuarterR"), Body, Cube, FVector(-157.f, 78.f, 2.f), FVector(95.f, 6.f, 66.f), Zero, Paint);
-	AddPart(TEXT("RearPanel"), Body, Cube, FVector(-203.f, 0.f, 2.f), FVector(6.f, 156.f, 66.f), Zero, Paint);
-	AddPart(TEXT("SpareWheel"), Body, Cylinder, FVector(-165.f, 30.f, -18.f), FVector(55.f, 55.f, 16.f), Zero, TireColor);
-	USceneComponent* TrunkPivot = AddPivot(TEXT("TrunkPivot"), Body, FVector(-110.f, 0.f, 35.f));
-	UStaticMeshComponent* TrunkLid = AddPart(TEXT("TrunkLid"), TrunkPivot, Cube, FVector(-47.5f, 0.f, 1.5f), FVector(95.f, 156.f, 3.f), Zero, Paint);
-	PeregonInteraction::MakeInteractable(TrunkLid, Trunk);
-	AddMovingPart(Trunk, TrunkPivot, FRotator(-65.f, 0.f, 0.f), 1.6f);
-	UStaticMeshComponent* FuelCap = AddPart(TEXT("FuelCap"), Body, Cube, FVector(-150.f, 81.5f, 18.f), FVector(7.f, 2.f, 7.f), Zero, Dark);
-	PeregonInteraction::MakeInteractable(FuelCap, Fuel);
+	// Руль: X узла — по оси колонки к водителю, обод в плоскости YZ.
+	SteeringBaseRotation = FRotationMatrix::MakeFromX(PeregonCarModel::ToVector(Model.SteeringColumnDir)).Rotator();
+	SteeringPivot = MakePartPivot(vmodel::Part::Steering, TEXT("SteeringPivot"), SteeringBaseRotation);
+	SpeedoNeedle = MakePartPivot(vmodel::Part::SpeedoNeedle, TEXT("SpeedoNeedle"));
+	TachoNeedle = MakePartPivot(vmodel::Part::TachoNeedle, TEXT("TachoNeedle"));
+	FuelNeedle = MakePartPivot(vmodel::Part::FuelNeedle, TEXT("FuelNeedle"));
+	TempNeedle = MakePartPivot(vmodel::Part::TempNeedle, TEXT("TempNeedle"));
+	KeyPivot = MakePartPivot(vmodel::Part::Key, TEXT("KeyPivot"));
+	LightKnobPivot = MakePartPivot(vmodel::Part::LightKnob, TEXT("LightKnobPivot"));
+	GearLever = MakePartPivot(vmodel::Part::GearLever, TEXT("GearLever"));
+	HandbrakeLever = MakePartPivot(vmodel::Part::Handbrake, TEXT("HandbrakeLever"));
+	ClutchPedal = MakePartPivot(vmodel::Part::ClutchPedal, TEXT("ClutchPedal"));
+	BrakePedal = MakePartPivot(vmodel::Part::BrakePedal, TEXT("BrakePedal"));
+	GasPedal = MakePartPivot(vmodel::Part::GasPedal, TEXT("GasPedal"));
+	PartPivots[static_cast<int32>(vmodel::Part::Body)] = Body;
 
-	// --- Бамперы, фары, фонари
-	AddPart(TEXT("BumperF"), Body, Cube, FVector(210.f, 0.f, -18.f), FVector(8.f, 166.f, 9.f), Zero, Chrome);
-	AddPart(TEXT("BumperR"), Body, Cube, FVector(-210.f, 0.f, -18.f), FVector(8.f, 166.f, 9.f), Zero, Chrome);
-	AddPart(TEXT("LampL"), Body, Cylinder, FVector(205.5f, -55.f, 12.f), FVector(17.f, 17.f, 3.f), AlongX, LampColor);
-	AddPart(TEXT("LampR"), Body, Cylinder, FVector(205.5f, 55.f, 12.f), FVector(17.f, 17.f, 3.f), AlongX, LampColor);
-	AddPart(TEXT("TailL"), Body, Cube, FVector(-206.f, -60.f, 15.f), FVector(2.f, 28.f, 10.f), Zero, TailColor);
-	AddPart(TEXT("TailR"), Body, Cube, FVector(-206.f, 60.f, 15.f), FVector(2.f, 28.f, 10.f), Zero, TailColor);
+	// Мишени взаимодействия: невидимые боксы, ловят только луч Interact.
+	for (int32 I = 0; I < static_cast<int32>(Model.HitBoxes.size()); ++I)
+	{
+		const vmodel::HitBox& H = Model.HitBoxes[static_cast<size_t>(I)];
+		USceneComponent* Parent = PartPivots[static_cast<int32>(H.Owner)];
+		UBoxComponent* Hit = CreateDefaultSubobject<UBoxComponent>(*FString::Printf(TEXT("Hit_%s_%d"), ANSI_TO_TCHAR(H.Tag), I));
+		Hit->SetupAttachment(Parent ? Parent : Body.Get());
+		Hit->SetRelativeLocation(PeregonCarModel::ToVector(H.Center));
+		Hit->SetBoxExtent(PeregonCarModel::ToVector(H.HalfSize));
+		Hit->SetHiddenInGame(true);
+		Hit->SetCanEverAffectNavigation(false);
+		PeregonInteraction::MakeInteractable(Hit, FName(ANSI_TO_TCHAR(H.Tag)));
+	}
 
 	HeadlightL = CreateDefaultSubobject<USpotLightComponent>(TEXT("HeadlightL"));
 	HeadlightR = CreateDefaultSubobject<USpotLightComponent>(TEXT("HeadlightR"));
@@ -162,129 +164,13 @@ APeregonCar::APeregonCar()
 		Lamp->SetLightColor(FLinearColor(1.f, 0.92f, 0.75f));
 		Lamp->SetVisibility(false);
 	}
-	HeadlightL->SetRelativeLocation(FVector(212.f, -55.f, 12.f));
-	HeadlightR->SetRelativeLocation(FVector(212.f, 55.f, 12.f));
+	HeadlightL->SetRelativeLocation(PeregonCarModel::ToVector(Model.HeadlightL));
+	HeadlightR->SetRelativeLocation(PeregonCarModel::ToVector(Model.HeadlightR));
 
-	// --- Каркас салона
-	AddPart(TEXT("FloorPan"), Body, Cube, FVector(-7.5f, 0.f, -28.f), FVector(205.f, 156.f, 4.f), Zero, Interior);
-	AddPart(TEXT("SillL"), Body, Cube, FVector(-10.f, -79.f, -25.f), FVector(205.f, 6.f, 10.f), Zero, Paint);
-	AddPart(TEXT("SillR"), Body, Cube, FVector(-10.f, 79.f, -25.f), FVector(205.f, 6.f, 10.f), Zero, Paint);
-	for (int32 Side = -1; Side <= 1; Side += 2)
-	{
-		const float Y = static_cast<float>(Side);
-		const TCHAR* S = Side < 0 ? TEXT("L") : TEXT("R");
-		AddBeam(*FString::Printf(TEXT("PillarA%s"), S), Body, Cube, FVector(93.f, 70.f * Y, 43.f), FVector(55.f, 64.f * Y, 87.f), 6.f, Paint);
-		AddBeam(*FString::Printf(TEXT("PillarB%s"), S), Body, Cube, FVector(-15.f, 74.f * Y, 43.f), FVector(-18.f, 67.f * Y, 88.f), 7.f, Paint);
-		AddBeam(*FString::Printf(TEXT("PillarC%s"), S), Body, Cube, FVector(-108.f, 70.f * Y, 43.f), FVector(-75.f, 64.f * Y, 88.f), 9.f, Paint);
-	}
-	AddBeam(TEXT("WindshieldHeader"), Body, Cube, FVector(55.f, -64.f, 87.f), FVector(55.f, 64.f, 87.f), 5.f, Paint);
-	AddBeam(TEXT("RearHeader"), Body, Cube, FVector(-75.f, -64.f, 88.f), FVector(-75.f, 64.f, 88.f), 5.f, Paint);
-	AddPart(TEXT("Roof"), Body, Cube, FVector(-10.f, 0.f, 90.f), FVector(132.f, 136.f, 4.f), Zero, Paint);
-	AddPart(TEXT("Headliner"), Body, Cube, FVector(-10.f, 0.f, 87.5f), FVector(128.f, 130.f, 1.f), Zero, Interior);
-	AddPart(TEXT("ParcelShelf"), Body, Cube, FVector(-105.f, 0.f, 42.f), FVector(20.f, 140.f, 3.f), Zero, Interior);
-	AddPart(TEXT("Mirror"), Body, Cube, FVector(57.f, 0.f, 80.f), FVector(2.f, 22.f, 6.f), Zero, Dark);
-
-	// --- Двери: петля спереди, открываются наружу. Внутренняя ручка тоже интерактивна.
-	auto MakeDoor = [&](FName Tag, float HingeX, float Side, float Length) {
-		const FString Base = Tag.ToString();
-		USceneComponent* Pivot = AddPivot(*(Base + TEXT("Pivot")), Body, FVector(HingeX, Side * 80.f, 0.f));
-		UStaticMeshComponent* Panel = AddPart(*(Base + TEXT("Panel")), Pivot, Cube, FVector(-Length * 0.5f, 0.f, 10.f), FVector(Length, 5.f, 70.f), Zero, Paint);
-		AddPart(*(Base + TEXT("Trim")), Pivot, Cube, FVector(-Length * 0.5f, -Side * 3.5f, 12.f), FVector(Length - 6.f, 2.f, 48.f), Zero, Interior);
-		UStaticMeshComponent* Inner = AddPart(*(Base + TEXT("InnerHandle")), Pivot, Cube, FVector(-Length * 0.72f, -Side * 5.5f, 22.f), FVector(9.f, 3.f, 3.f), Zero, Chrome);
-		UStaticMeshComponent* Outer = AddPart(*(Base + TEXT("OuterHandle")), Pivot, Cube, FVector(-Length * 0.8f, Side * 3.5f, 28.f), FVector(10.f, 2.f, 2.5f), Zero, Chrome);
-		PeregonInteraction::MakeInteractable(Panel, Tag);
-		PeregonInteraction::MakeInteractable(Inner, Tag);
-		PeregonInteraction::MakeInteractable(Outer, Tag);
-		AddMovingPart(Tag, Pivot, FRotator(0.f, -65.f * Side, 0.f), 3.f);
-	};
-	MakeDoor(DoorFL, 90.f, -1.f, 105.f);
-	MakeDoor(DoorFR, 90.f, 1.f, 105.f);
-	MakeDoor(DoorRL, -15.f, -1.f, 90.f);
-	MakeDoor(DoorRR, -15.f, 1.f, 90.f);
-
-	// --- Торпедо и приборы
-	AddPart(TEXT("Dashboard"), Body, Cube, FVector(84.f, 0.f, 32.f), FVector(22.f, 148.f, 22.f), Zero, Interior);
-	AddPart(TEXT("DashPad"), Body, Cube, FVector(80.f, 0.f, 44.f), FVector(24.f, 148.f, 3.f), Zero, Dark);
-	AddPart(TEXT("Binnacle"), Body, Cube, FVector(73.f, -35.f, 47.f), FVector(8.f, 34.f, 13.f), Zero, Dark);
-
-	auto MakeGauge = [&](const TCHAR* Name, const FVector& Center, float Diameter) {
-		AddPart(*(FString(Name) + TEXT("Face")), Body, Cylinder, Center + FVector(0.8f, 0.f, 0.f), FVector(Diameter, Diameter, 1.f), AlongX, GaugeFace);
-		USceneComponent* Needle = AddPivot(Name, Body, Center);
-		AddPart(*(FString(Name) + TEXT("Arrow")), Needle, Cube, FVector(0.f, 0.f, Diameter * 0.22f), FVector(0.4f, 0.6f, Diameter * 0.44f), Zero, NeedleColor);
-		return Needle;
-	};
-	SpeedoNeedle = MakeGauge(TEXT("SpeedoNeedle"), FVector(68.f, -43.f, 48.f), 12.f);
-	TachoNeedle = MakeGauge(TEXT("TachoNeedle"), FVector(68.f, -27.f, 48.f), 12.f);
-	FuelNeedle = MakeGauge(TEXT("FuelNeedle"), FVector(68.f, -38.f, 42.f), 4.5f);
-	TempNeedle = MakeGauge(TEXT("TempNeedle"), FVector(68.f, -32.f, 42.f), 4.5f);
-
-	// Рулевое колесо: обод из 12 сегментов, ось колонки смотрит на водителя.
-	SteeringBaseRotation = FRotationMatrix::MakeFromX(FVector(-1.f, 0.f, 0.45f)).Rotator();
-	SteeringPivot = AddPivot(TEXT("SteeringPivot"), Body, FVector(60.f, -35.f, 40.f), SteeringBaseRotation);
-	for (int32 I = 0; I < 12; ++I)
-	{
-		const float Phi = FMath::DegreesToRadians(30.f * I);
-		const FVector Tangent(0.f, -FMath::Sin(Phi), FMath::Cos(Phi));
-		const FRotator SegRot = FRotationMatrix::MakeFromXY(FVector::ForwardVector, Tangent).Rotator();
-		AddPart(*FString::Printf(TEXT("SteeringRim%d"), I), SteeringPivot, Cube, FVector(0.f, 18.f * FMath::Cos(Phi), 18.f * FMath::Sin(Phi)),
-			FVector(2.5f, 10.f, 2.5f), SegRot, Dark);
-	}
-	AddPart(TEXT("SteeringSpoke"), SteeringPivot, Cube, FVector::ZeroVector, FVector(2.f, 34.f, 3.f), Zero, Dark);
-	AddPart(TEXT("SteeringHub"), SteeringPivot, Cube, FVector(-1.f, 0.f, 0.f), FVector(3.f, 8.f, 8.f), Zero, Chrome);
-	AddPart(TEXT("SteeringColumn"), SteeringPivot, Cylinder, FVector(-14.f, 0.f, 0.f), FVector(5.f, 5.f, 26.f), FRotator(-90.f, 0.f, 0.f), Dark);
-
-	KeyPivot = AddPivot(TEXT("KeyPivot"), Body, FVector(68.f, -21.f, 33.f));
-	UStaticMeshComponent* KeyMesh = AddPart(TEXT("KeyMesh"), KeyPivot, Cube, FVector(-2.f, 0.f, 0.f), FVector(4.f, 1.f, 5.f), Zero, Chrome);
-	PeregonInteraction::MakeInteractable(KeyMesh, Key);
-
-	UStaticMeshComponent* LightKnob = AddPart(TEXT("LightKnob"), Body, Cylinder, FVector(72.5f, -56.f, 36.f), FVector(4.f, 4.f, 3.f), AlongX, Chrome);
-	PeregonInteraction::MakeInteractable(LightKnob, Lights);
-
-	USceneComponent* GlovePivot = AddPivot(TEXT("GlovePivot"), Body, FVector(72.5f, 32.f, 23.f));
-	UStaticMeshComponent* GloveLid = AddPart(TEXT("GloveLid"), GlovePivot, Cube, FVector(0.f, 0.f, 8.f), FVector(2.f, 36.f, 16.f), Zero, Interior);
-	PeregonInteraction::MakeInteractable(GloveLid, Glovebox);
-	AddMovingPart(Glovebox, GlovePivot, FRotator(70.f, 0.f, 0.f), 3.f);
-
-	// --- Сиденья, тоннель, рычаги, педали
-	for (int32 Side = -1; Side <= 1; Side += 2)
-	{
-		const float Y = 35.f * Side;
-		const TCHAR* S = Side < 0 ? TEXT("L") : TEXT("R");
-		AddPart(*FString::Printf(TEXT("SeatBase%s"), S), Body, Cube, FVector(-8.f, Y, -12.f), FVector(52.f, 48.f, 14.f), Zero, Seat);
-		AddPart(*FString::Printf(TEXT("SeatBack%s"), S), Body, Cube, FVector(-37.f, Y, 18.f), FVector(10.f, 48.f, 58.f), FRotator(12.f, 0.f, 0.f), Seat);
-		AddPart(*FString::Printf(TEXT("Headrest%s"), S), Body, Cube, FVector(-43.f, Y, 52.f), FVector(8.f, 26.f, 14.f), FRotator(12.f, 0.f, 0.f), Seat);
-	}
-	AddPart(TEXT("RearBench"), Body, Cube, FVector(-82.f, 0.f, -12.f), FVector(45.f, 140.f, 14.f), Zero, Seat);
-	AddPart(TEXT("RearBack"), Body, Cube, FVector(-104.f, 0.f, 18.f), FVector(10.f, 140.f, 55.f), FRotator(12.f, 0.f, 0.f), Seat);
-	AddPart(TEXT("Tunnel"), Body, Cube, FVector(20.f, 0.f, -20.f), FVector(110.f, 22.f, 12.f), Zero, Dark);
-
-	GearLever = AddPivot(TEXT("GearLever"), Body, FVector(32.f, 0.f, -14.f));
-	AddPart(TEXT("GearStick"), GearLever, Cylinder, FVector(0.f, 0.f, 15.f), FVector(2.f, 2.f, 30.f), Zero, Chrome);
-	AddPart(TEXT("GearKnob"), GearLever, Sphere, FVector(0.f, 0.f, 30.f), FVector(6.f, 6.f, 6.f), Zero, Dark);
-
-	HandbrakeLever = AddPivot(TEXT("HandbrakeLever"), Body, FVector(-2.f, 10.f, -13.f));
-	UStaticMeshComponent* HandbrakeMesh = AddPart(TEXT("HandbrakeMesh"), HandbrakeLever, Cube, FVector(-13.f, 0.f, 0.f), FVector(26.f, 3.f, 4.f), Zero, Dark);
-	PeregonInteraction::MakeInteractable(HandbrakeMesh, Handbrake);
-
-	auto MakePedal = [&](const TCHAR* Name, float Y) {
-		USceneComponent* Pivot = AddPivot(Name, Body, FVector(90.f, Y, 5.f));
-		AddPart(*(FString(Name) + TEXT("Arm")), Pivot, Cube, FVector(0.f, 0.f, -9.f), FVector(1.5f, 1.5f, 18.f), Zero, Dark);
-		AddPart(*(FString(Name) + TEXT("Pad")), Pivot, Cube, FVector(-1.f, 0.f, -18.f), FVector(2.f, 6.f, 8.f), Zero, Chrome);
-		return Pivot;
-	};
-	ClutchPedal = MakePedal(TEXT("ClutchPedal"), -50.f);
-	BrakePedal = MakePedal(TEXT("BrakePedal"), -38.f);
-	GasPedal = MakePedal(TEXT("GasPedal"), -26.f);
-
-	// --- Колёса (позиции берём у физики)
+	// --- Колёса (позиции берём у физики, меш — в BeginPlay)
 	for (int32 I = 0; I < Movement->GetNumWheels(); ++I)
 	{
 		USceneComponent* Pivot = AddPivot(*FString::Printf(TEXT("WheelPivot%d"), I), Body, Movement->GetWheelAttachLocal(I));
-		const float Diameter = Movement->GetWheelRadiusCm(I) * 2.f;
-		const float Width = Movement->GetWheelWidthCm(I);
-		AddPart(*FString::Printf(TEXT("Tire%d"), I), Pivot, Cylinder, FVector::ZeroVector, FVector(Diameter, Diameter, Width), FRotator(0.f, 0.f, 90.f), TireColor);
-		// Перекладина на диске — видно вращение.
-		AddPart(*FString::Printf(TEXT("Hub%d"), I), Pivot, Cube, FVector::ZeroVector, FVector(Diameter * 0.8f, Width + 2.f, 6.f), Zero, Chrome);
 		WheelPivots.Add(Pivot);
 		Movement->WheelVisuals.Add(Pivot);
 	}
@@ -315,30 +201,6 @@ APeregonCar::APeregonCar()
 // ---------------------------------------------------------------------------------------------
 // Помощники построения
 // ---------------------------------------------------------------------------------------------
-UStaticMeshComponent* APeregonCar::AddPart(const TCHAR* Name, USceneComponent* Parent, UStaticMesh* InMesh, const FVector& Location,
-	const FVector& SizeCm, const FRotator& Rotation, const FLinearColor& Color)
-{
-	UStaticMeshComponent* Part = CreateDefaultSubobject<UStaticMeshComponent>(Name);
-	Part->SetupAttachment(Parent);
-	if (InMesh)
-	{
-		Part->SetStaticMesh(InMesh);
-	}
-	Part->SetRelativeLocationAndRotation(Location, Rotation);
-	Part->SetRelativeScale3D(SizeCm / 100.f);
-	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Part->SetGenerateOverlapEvents(false);
-	PartColors.Add(TPair<UStaticMeshComponent*, FLinearColor>(Part, Color));
-	return Part;
-}
-
-UStaticMeshComponent* APeregonCar::AddBeam(const TCHAR* Name, USceneComponent* Parent, UStaticMesh* InMesh, const FVector& From, const FVector& To,
-	float Thickness, const FLinearColor& Color)
-{
-	const FVector Dir = To - From;
-	return AddPart(Name, Parent, InMesh, (From + To) * 0.5f, FVector(Dir.Size(), Thickness, Thickness), FRotationMatrix::MakeFromX(Dir).Rotator(), Color);
-}
-
 USceneComponent* APeregonCar::AddPivot(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FRotator& Rotation)
 {
 	USceneComponent* Pivot = CreateDefaultSubobject<USceneComponent>(Name);
@@ -383,49 +245,134 @@ void APeregonCar::ToggleMovingPart(FName Tag)
 void APeregonCar::BeginPlay()
 {
 	Super::BeginPlay();
-	using namespace PeregonCarLook;
-	// Текстуры и материалы: цвет детали из конструктора → «вид» поверхности.
-	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
-	LampMaterials.Reset();
-	for (const TPair<UStaticMeshComponent*, FLinearColor>& Entry : PartColors)
-	{
-		UStaticMeshComponent* Mesh = Entry.Key;
-		const FLinearColor& C = Entry.Value;
-		if (!Mesh)
-		{
-			continue;
-		}
-		FPeregonLook Look(EPeregonTex::Plastic, C, 0.75f);
-		if (C.Equals(Paint)) { Look = FPeregonLook(EPeregonTex::Paint, PaintColor, 0.4f); }
-		else if (C.Equals(Seat)) { Look = FPeregonLook(EPeregonTex::Fabric, C * 1.6f, 0.95f); }
-		else if (C.Equals(Chrome)) { Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.9f, 0.9f, 0.88f), 0.25f, 1.f); }
-		else if (C.Equals(TireColor)) { Look = FPeregonLook(EPeregonTex::Rubber, FLinearColor(0.12f, 0.12f, 0.12f), 0.9f); }
-		else if (C.Equals(EngineColor)) { Look = FPeregonLook(EPeregonTex::Plastic, C * 2.f, 0.5f, 0.7f); }
-		else if (C.Equals(GaugeFace) || C.Equals(NeedleColor)) { Look = FPeregonLook(EPeregonTex::White, C, 0.6f); }
-		else if (C.Equals(LampColor) || C.Equals(TailColor)) { Look = FPeregonLook(EPeregonTex::Glass, C * 2.5f, 0.15f); }
-		else if (C.Equals(Interior)) { Look = FPeregonLook(EPeregonTex::Plastic, C * 1.8f, 0.85f); }
-
-		if (Art)
-		{
-			UMaterialInstanceDynamic* Mid = Art->MakeMaterial(Mesh, Look);
-			Mesh->SetMaterial(0, Mid);
-			if (Mid && (C.Equals(LampColor) || C.Equals(TailColor)))
-			{
-				LampMaterials.Add(Mid);
-			}
-		}
-		else if (Mesh->GetMaterial(0))
-		{
-			if (UMaterialInstanceDynamic* Mid = Mesh->CreateDynamicMaterialInstance(0))
-			{
-				Mid->SetVectorParameterValue(TEXT("Color"), C.Equals(Paint) ? PaintColor : C);
-			}
-		}
-	}
+	BuildModelMeshes();
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
 	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
 	PlaceOnGround(GetActorTransform());
 	SetHeadlights(false);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Меши из процедурной модели: по компоненту на узел, по секции на материал.
+// ---------------------------------------------------------------------------------------------
+UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
+{
+	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	if (!Art)
+	{
+		return nullptr;
+	}
+	const vmodel::Mat M = static_cast<vmodel::Mat>(Slot);
+	if (M == vmodel::Mat::Glass)
+	{
+		return Art->MakeGlassMaterial(this, FLinearColor(0.42f, 0.5f, 0.52f), 0.22f);
+	}
+	FPeregonLook Look;
+	switch (M)
+	{
+	case vmodel::Mat::Paint: Look = FPeregonLook(EPeregonTex::Paint, PaintColor, 0.35f); break;
+	case vmodel::Mat::Chrome: Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.9f, 0.9f, 0.88f), 0.18f, 1.f); break;
+	case vmodel::Mat::BlackTrim: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.035f, 0.035f, 0.04f), 0.6f); break;
+	case vmodel::Mat::Rubber: Look = FPeregonLook(EPeregonTex::Rubber, FLinearColor(0.11f, 0.11f, 0.11f), 0.92f); break;
+	case vmodel::Mat::Headlamp: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.9f, 0.88f, 0.78f), 0.12f); break;
+	case vmodel::Mat::Taillamp: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.6f, 0.03f, 0.02f), 0.15f); break;
+	case vmodel::Mat::Indicator: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.9f, 0.42f, 0.04f), 0.15f); break;
+	case vmodel::Mat::Interior: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.2f, 0.19f, 0.17f), 0.8f); break;
+	case vmodel::Mat::InteriorDark: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.055f, 0.052f, 0.05f), 0.7f); break;
+	case vmodel::Mat::Fabric: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.34f, 0.16f, 0.08f), 0.95f); break;
+	case vmodel::Mat::Carpet: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.09f, 0.08f, 0.07f), 1.f); break;
+	case vmodel::Mat::Headliner: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.6f, 0.58f, 0.52f), 0.95f); break;
+	case vmodel::Mat::GaugeFace: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.85f, 0.83f, 0.74f), 0.6f); break;
+	case vmodel::Mat::Needle: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.95f, 0.3f, 0.05f), 0.5f); break;
+	case vmodel::Mat::Engine: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.16f, 0.16f, 0.17f), 0.5f, 0.7f); break;
+	case vmodel::Mat::Metal: Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.32f, 0.32f, 0.33f), 0.55f, 0.8f); break;
+	case vmodel::Mat::Plate: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.9f, 0.9f, 0.87f), 0.5f); break;
+	default: Look = FPeregonLook(EPeregonTex::White, FLinearColor::White, 0.8f); break;
+	}
+	UMaterialInstanceDynamic* Mid = Art->MakeMaterial(this, Look);
+	if (Mid && (M == vmodel::Mat::Headlamp || M == vmodel::Mat::Taillamp))
+	{
+		LampMaterials.Add(Mid);
+	}
+	if (Mid && (M == vmodel::Mat::GaugeFace || M == vmodel::Mat::Needle))
+	{
+		GaugeMaterials.Add(Mid);
+	}
+	return Mid;
+}
+
+void APeregonCar::BuildModelMeshes()
+{
+	const vmodel::Model& Model = PeregonCarModel::Get();
+	LampMaterials.Reset();
+	GaugeMaterials.Reset();
+	TArray<UMaterialInterface*> SlotMaterials;
+	for (int32 Slot = 0; Slot < static_cast<int32>(vmodel::Mat::Count); ++Slot)
+	{
+		SlotMaterials.Add(MakeSlotMaterial(static_cast<uint8>(Slot)));
+	}
+
+	auto Spawn = [&](const vmodel::PartMesh& Part, USceneComponent* Parent, const FString& Name) {
+		UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this, *Name);
+		Mesh->SetupAttachment(Parent);
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetGenerateOverlapEvents(false);
+		Mesh->SetCanEverAffectNavigation(false);
+		Mesh->RegisterComponent();
+		int32 SectionIndex = 0;
+		for (const vmodel::Section& S : Part.Sections)
+		{
+			const int32 N = static_cast<int32>(S.Positions.size());
+			TArray<FVector> Vertices;
+			TArray<FVector> Normals;
+			TArray<FVector2D> UVs;
+			Vertices.Reserve(N);
+			Normals.Reserve(N);
+			UVs.Reserve(N);
+			for (int32 K = 0; K < N; ++K)
+			{
+				Vertices.Add(PeregonCarModel::ToVector(S.Positions[static_cast<size_t>(K)]));
+				Normals.Add(PeregonCarModel::ToVector(S.Normals[static_cast<size_t>(K)]));
+				UVs.Add(FVector2D(S.U[static_cast<size_t>(K)], S.V[static_cast<size_t>(K)]));
+			}
+			TArray<int32> Triangles;
+			Triangles.Append(S.Indices.data(), static_cast<int32>(S.Indices.size()));
+			Mesh->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+			UMaterialInterface* Material = SlotMaterials[static_cast<int32>(S.Material)];
+			if (Material)
+			{
+				Mesh->SetMaterial(SectionIndex, Material);
+			}
+			else if (S.Material == vmodel::Mat::Glass)
+			{
+				Mesh->SetMeshSectionVisible(SectionIndex, false); // нет стеклянного материала — лучше без стёкол, чем непрозрачные
+			}
+			++SectionIndex;
+		}
+		ModelMeshes.Add(Mesh);
+	};
+
+	for (const vmodel::PartMesh& Part : Model.Parts)
+	{
+		if (Part.Id == vmodel::Part::WheelLeft || Part.Id == vmodel::Part::WheelRight)
+		{
+			continue;
+		}
+		USceneComponent* Parent = PartPivots.IsValidIndex(static_cast<int32>(Part.Id)) ? PartPivots[static_cast<int32>(Part.Id)].Get() : nullptr;
+		Spawn(Part, Parent ? Parent : Body.Get(), FString::Printf(TEXT("Model_%s"), ANSI_TO_TCHAR(vmodel::PartName(Part.Id))));
+	}
+	const vmodel::PartMesh* WheelL = Model.Find(vmodel::Part::WheelLeft);
+	const vmodel::PartMesh* WheelR = Model.Find(vmodel::Part::WheelRight);
+	for (int32 I = 0; I < WheelPivots.Num(); ++I)
+	{
+		const bool bLeft = Movement->GetWheelAttachLocal(I).Y < 0.f;
+		if (const vmodel::PartMesh* Wheel = bLeft ? WheelL : WheelR)
+		{
+			Spawn(*Wheel, WheelPivots[I], FString::Printf(TEXT("Model_Wheel%d"), I));
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Модель машины: %d узлов, %d треугольников"), ModelMeshes.Num(), static_cast<int32>(Model.TriangleCount()));
 }
 
 void APeregonCar::Tick(float DeltaSeconds)
@@ -561,11 +508,12 @@ void APeregonCar::UpdateMovingParts(float DeltaSeconds)
 void APeregonCar::UpdateCockpit(float DeltaSeconds, const FPeregonTelemetry& T)
 {
 	// Руль: ~1.5 оборота от центра до упора.
-	SteeringPivot->SetRelativeRotation(SteeringBaseRotation.Quaternion() * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-T.SteeringWheelDeg)));
+	SteeringPivot->SetRelativeRotation(SteeringBaseRotation.Quaternion() * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(T.SteeringWheelDeg)));
 
 	auto SetNeedle = [](USceneComponent* Needle, float Fraction, float Sweep) {
 		const float Angle = FMath::Lerp(-Sweep, Sweep, FMath::Clamp(Fraction, 0.f, 1.f));
-		Needle->SetRelativeRotation(FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Angle)));
+		// Положительный угол по оси X поворачивает стрелку против часовой (с места водителя), поэтому минус.
+		Needle->SetRelativeRotation(FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-Angle)));
 	};
 	SetNeedle(SpeedoNeedle, FMath::Abs(T.SpeedKmh) / 180.f, 125.f);
 	SetNeedle(TachoNeedle, T.Rpm / 8000.f, 125.f);
@@ -663,6 +611,21 @@ void APeregonCar::SetHeadlights(bool bOn)
 		{
 			Mid->SetScalarParameterValue(TEXT("Emissive"), bOn ? 6.f : 0.f);
 		}
+	}
+	// Подсветка приборов.
+	for (UMaterialInstanceDynamic* Mid : GaugeMaterials)
+	{
+		if (Mid)
+		{
+			Mid->SetScalarParameterValue(TEXT("Emissive"), bOn ? 0.6f : 0.f);
+		}
+	}
+	// Ручка света «вытянута», когда фары горят.
+	if (LightKnobPivot)
+	{
+		const vmodel::PartMesh* Knob = PeregonCarModel::Get().Find(vmodel::Part::LightKnob);
+		const FVector Base = Knob ? PeregonCarModel::ToVector(Knob->Origin) : LightKnobPivot->GetRelativeLocation();
+		LightKnobPivot->SetRelativeLocation(Base + FVector(bOn ? -1.2f : 0.f, 0.f, 0.f));
 	}
 }
 

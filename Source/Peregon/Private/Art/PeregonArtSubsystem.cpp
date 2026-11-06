@@ -324,6 +324,31 @@ void UPeregonArtSubsystem::EnsureBaseMaterial()
 		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет /Game/Peregon/Materials/M_PSX2 — его создаёт модуль PeregonEditor при запуске редактора. Пока — без текстур."));
 		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	}
+	GlassMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2_Glass.M_PSX2_Glass"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!GlassMaterial)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет M_PSX2_Glass — стёкла машины будут скрыты (материал создаёт PeregonEditor)."));
+	}
+}
+
+UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeGlassMaterial(UObject* Outer, const FLinearColor& Tint, float Opacity)
+{
+	EnsureBaseMaterial();
+	if (!GlassMaterial)
+	{
+		return nullptr;
+	}
+	UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(GlassMaterial, Outer ? Outer : this);
+	if (Mid)
+	{
+		Mid->SetTextureParameterValue(TEXT("Tex"), GetTexture(EPeregonTex::White));
+		Mid->SetVectorParameterValue(TEXT("Color"), Tint);
+		Mid->SetScalarParameterValue(TEXT("Roughness"), 0.05f);
+		Mid->SetScalarParameterValue(TEXT("Metallic"), 0.f);
+		Mid->SetScalarParameterValue(TEXT("Opacity"), Opacity);
+		Mid->SetScalarParameterValue(TEXT("WorldUV"), 0.f);
+	}
+	return Mid;
 }
 
 bool UPeregonArtSubsystem::HasPsxMaterial()

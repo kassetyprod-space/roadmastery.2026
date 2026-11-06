@@ -26,8 +26,8 @@
 1. Клонировать репозиторий (с Git LFS).
 2. ПКМ по `Peregon.uproject` → *Generate Visual Studio project files*.
 3. Открыть `Peregon.uproject` → *Yes* на вопрос о сборке модулей.
-4. При первом запуске редактор сам создаст материал `Content/Peregon/Materials/M_PSX2`
-   (модуль `PeregonEditor`, в Output Log строка `[Peregon] Материал ... создан`). Его стоит закоммитить.
+4. При первом запуске редактор сам создаст материалы `Content/Peregon/Materials/M_PSX2` и `M_PSX2_Glass`
+   (модуль `PeregonEditor`, в Output Log строки `[Peregon] Материал ... создан`). Их стоит закоммитить.
 5. Нажать **Play**. Откроется главное меню на фоне трассы.
 
 Меню паузы — **Tab** (в редакторе Esc останавливает Play; в собранной игре работает и Esc).

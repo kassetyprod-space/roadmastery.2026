@@ -34,3 +34,4 @@ Thumbs.db
 
 # Вывод тестов физики
 *.csv
+Tools/CarPreview/car.json

@@ -105,6 +105,8 @@ public:
 
 	UTexture2D* GetTexture(EPeregonTex Type);
 	UMaterialInstanceDynamic* MakeMaterial(UObject* Outer, const FPeregonLook& Look);
+	// Полупрозрачное стекло (M_PSX2_Glass). Null, если материала нет — тогда стёкла лучше скрыть.
+	UMaterialInstanceDynamic* MakeGlassMaterial(UObject* Outer, const FLinearColor& Tint, float Opacity);
 	bool HasPsxMaterial();
 
 private:
@@ -116,6 +118,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> BaseMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> GlassMaterial;
 
 	UPROPERTY(Transient)
 	TMap<int32, TObjectPtr<UFont>> CanvasFonts;
