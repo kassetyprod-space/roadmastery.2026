@@ -436,7 +436,7 @@ void APeregonCar::ApplyDirt()
 	const FLinearColor Metal(0.42f, 0.42f, 0.44f);
 	const FLinearColor Primer(0.36f, 0.37f, 0.38f);
 	const FLinearColor Putty(0.62f, 0.58f, 0.42f);
-	const UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
 	const bool bVertexPaint = Art && Art->HasWeatherMaterials();
 	// Цвет панели: краска → (выгорание) → голый металл / грунт / шпаклёвка → ржавчина пятнами → дыры.
 	auto PanelColor = [&](int32 Index, float Noise) -> FLinearColor {

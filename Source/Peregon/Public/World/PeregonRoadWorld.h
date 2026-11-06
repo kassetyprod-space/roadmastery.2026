@@ -97,6 +97,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Peregon")
 	bool bAnnouncePlaces = true;
 
+public:
+	// Материалы набора построек (дома, асфальт, бетон, дерево) — для дворов вне чанков (сюжетный двор).
+	FPeregonKitMaterials KitMaterials() const;
+
 private:
 	struct FChunk
 	{
@@ -138,7 +142,6 @@ private:
 		bool bShadow = true);
 	UStaticMeshComponent* AddSceneryMesh(UStaticMesh* Mesh, const FTransform& Transform, UMaterialInterface* Material);
 	APeregonSky* FindSky();
-	FPeregonKitMaterials KitMaterials() const;
 
 	rgen::Route Route;
 	rgen::Landscape Landscape;

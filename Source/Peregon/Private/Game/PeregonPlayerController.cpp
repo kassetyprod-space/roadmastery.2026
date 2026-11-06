@@ -51,10 +51,8 @@ void APeregonPlayerController::SetupInputComponent()
 	for (const FKey& Key : {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine,
 			 EKeys::Zero, EKeys::G})
 	{
-		FInputKeyBinding Binding(FInputChord(Key), IE_Pressed);
+		FInputKeyBinding& Binding = InputComponent->BindKey(Key, IE_Pressed, this, &APeregonPlayerController::OnHotkey);
 		Binding.bConsumeInput = false;
-		Binding.KeyDelegate.GetDelegateWithKeySignature().BindUObject(this, &APeregonPlayerController::OnHotkey);
-		InputComponent->KeyBindings.Add(Binding);
 	}
 }
 
