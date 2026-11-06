@@ -47,7 +47,8 @@ public:
 
 private:
 	UStaticMeshComponent* AddBox(const FVector& Center, const FVector& SizeM, const FPeregonLook& Look, bool bCollision, FName InteractTag = NAME_None);
-	void AddLabel(const FVector& Location, const FString& Text, float Size, const FColor& Color);
+	// Надпись-табличка (лицом к дороге). SizeCm — высота букв.
+	void AddLabel(const FVector& Location, const FString& Text, float SizeCm, const FColor& Ink, const FLinearColor& Paper);
 	void BuildFuel();
 	void BuildCafe();
 

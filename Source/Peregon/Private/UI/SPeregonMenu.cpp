@@ -1,5 +1,7 @@
 #include "UI/SPeregonMenu.h"
 
+#include "Art/PeregonArtSubsystem.h"
+
 #include "Brushes/SlateColorBrush.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Game/PeregonGameUserSettings.h"
@@ -27,7 +29,12 @@ const FLinearColor AccentColor(0.95f, 0.62f, 0.25f, 1.f);
 
 FSlateFontInfo Font(int32 Size, bool bBold = false)
 {
-	return FCoreStyle::GetDefaultFontStyle(bBold ? "Bold" : "Regular", Size);
+	return UPeregonArtSubsystem::SlateFont(bBold ? EPeregonFont::SemiBold : EPeregonFont::Regular, Size);
+}
+
+FSlateFontInfo TitleFont(int32 Size)
+{
+	return UPeregonArtSubsystem::SlateFont(EPeregonFont::Display, Size);
 }
 
 const FButtonStyle& Button()
@@ -105,7 +112,7 @@ void SPeregonMenu::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 						.Text(INVTEXT("ПЕРЕГОН"))
-						.Font(Font(46, true))
+						.Font(TitleFont(40))
 						.ColorAndOpacity(TextColor)
 					]
 					+ SVerticalBox::Slot()

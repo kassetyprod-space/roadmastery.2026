@@ -1,14 +1,21 @@
 // Первичное текстурирование. Все текстуры рисуются кодом (детерминированный шум, 32–128 px,
 // без фильтрации — PSX-вид), поэтому в репозитории нет бинарных картинок.
-// Материал один на всё — M_PSX (создаётся скриптом Content/Python/init_unreal.py при запуске редактора).
-// Если M_PSX нет, используется стандартный материал движка, и детали просто красятся цветом.
+// Материал один на всё — M_PSX2 (его создаёт модуль PeregonEditor при запуске редактора).
+// Если M_PSX2 нет, используется стандартный материал движка, и детали просто красятся цветом.
+// Здесь же шрифты с кириллицей (Content/Fonts) и надписи для табличек.
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Fonts/SlateFontInfo.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "PeregonArtSubsystem.generated.h"
 
+class AActor;
+class UFont;
 class UMaterialInstanceDynamic;
+class UProceduralMeshComponent;
+class USceneComponent;
+class UTextureRenderTarget2D;
 class UMaterialInterface;
 class UMeshComponent;
 class UTexture2D;
@@ -42,6 +49,15 @@ enum class EPeregonTex : uint8
 	Count UMETA(Hidden)
 };
 
+// Шрифты из Content/Fonts (OFL, с кириллицей).
+UENUM(BlueprintType)
+enum class EPeregonFont : uint8
+{
+	Regular,   // Golos Text
+	SemiBold,  // Golos Text SemiBold
+	Display    // Unbounded Bold — заголовки и крупные цифры
+};
+
 // Внешний вид поверхности.
 USTRUCT(BlueprintType)
 struct FPeregonLook
@@ -69,6 +85,21 @@ class PEREGON_API UPeregonArtSubsystem : public UGameInstanceSubsystem
 public:
 	static UPeregonArtSubsystem* Get(const UObject* WorldContext);
 
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+	// Шрифт для Slate (меню). Без файла — шрифт движка.
+	static FSlateFontInfo SlateFont(EPeregonFont Style, int32 Size);
+	// Шрифт для Canvas (HUD, таблички). Может вернуть null — тогда используйте шрифт движка.
+	static UFont* CanvasFont(EPeregonFont Style, int32 Size);
+
+	// Материал-надпись: текст рисуется кодом в текстуру (кириллица, любой шрифт).
+	UMaterialInstanceDynamic* MakeLabelMaterial(UObject* Outer, const FString& Text, const FLinearColor& Ink, const FLinearColor& Paper,
+		int32 WidthPx, int32 HeightPx, int32 FontPx, EPeregonFont Style = EPeregonFont::SemiBold);
+	// Плоская табличка (лицом к +X локальной системы), без коллизии.
+	static UProceduralMeshComponent* AddLabelQuad(AActor* Owner, USceneComponent* Parent, const FTransform& Relative, float WidthCm, float HeightCm,
+		UMaterialInterface* Material);
+
 	// Покрасить все слоты меша. Безопасно вызывать без подсистемы (ничего не делает).
 	static void ApplyLook(const UObject* WorldContext, UMeshComponent* Mesh, const FPeregonLook& Look);
 
@@ -85,6 +116,14 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> BaseMaterial;
+
+	UPROPERTY(Transient)
+	TMap<int32, TObjectPtr<UFont>> CanvasFonts;
+
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<UTextureRenderTarget2D>> LabelCache;
+
+	static TWeakObjectPtr<UPeregonArtSubsystem> Instance;
 
 	TArray<FLinearColor> AverageColors;
 	bool bPsx = false;

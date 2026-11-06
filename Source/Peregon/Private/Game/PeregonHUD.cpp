@@ -1,5 +1,7 @@
 #include "Game/PeregonHUD.h"
 
+#include "Art/PeregonArtSubsystem.h"
+
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -26,8 +28,21 @@ FString GearName(int32 Gear)
 	return Gear < 0 ? TEXT("R") : (Gear == 0 ? TEXT("N") : FString::FromInt(Gear));
 }
 
+// 0 — мелкий, 1 — обычный, 2 — крупный, 3 — передача, 4 — скорость.
 UFont* Font(int32 Size)
 {
+	struct FSpec
+	{
+		EPeregonFont Style;
+		int32 Px;
+	};
+	static const FSpec Specs[] = {{EPeregonFont::Regular, 11}, {EPeregonFont::Regular, 14}, {EPeregonFont::SemiBold, 18},
+		{EPeregonFont::Display, 30}, {EPeregonFont::Display, 44}};
+	const FSpec& Spec = Specs[FMath::Clamp(Size, 0, 4)];
+	if (UFont* Custom = UPeregonArtSubsystem::CanvasFont(Spec.Style, Spec.Px))
+	{
+		return Custom;
+	}
 	if (!GEngine)
 	{
 		return nullptr;
@@ -62,6 +77,14 @@ void APeregonHUD::DrawHUD()
 	}
 	DrawTrip();
 	DrawToasts();
+	if (UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this))
+	{
+		if (!Art->HasPsxMaterial())
+		{
+			DrawTextShadowed(TEXT("Нет материала M_PSX2 — текстуры выключены. Перезапустите редактор (его создаёт модуль PeregonEditor)."),
+				PeregonUi::Amber, PeregonUi::Margin, Canvas->ClipY - 22.f, PeregonUi::Font(0));
+		}
+	}
 	if (const APeregonCar* Car = Cast<APeregonCar>(Pawn))
 	{
 		DrawCrosshair(&Car->GetFocus(), Car->IsFirstPerson(), TEXT("ЛКМ"));
@@ -113,16 +136,16 @@ void APeregonHUD::DrawCluster(const APeregonCar* Car)
 	// Скорость крупно, передача рядом.
 	const FString Speed = FString::Printf(TEXT("%d"), FMath::RoundToInt(FMath::Abs(T.SpeedKmh)));
 	float SpeedW = 0.f, SpeedH = 0.f;
-	GetTextSize(Speed, SpeedW, SpeedH, Font(3), 1.6f);
+	GetTextSize(Speed, SpeedW, SpeedH, Font(4));
 	const float SpeedY = Bottom - 54.f - SpeedH;
-	DrawTextShadowed(Speed, Text, Right - SpeedW, SpeedY, Font(3), 1.6f);
+	DrawTextShadowed(Speed, Text, Right - SpeedW, SpeedY, Font(4));
 	DrawTextShadowed(TEXT("км/ч"), Dim, Right - 34.f, SpeedY + SpeedH - 4.f, Font(0));
 
 	const FString Gear = GearName(T.Gear);
 	float GearW = 0.f, GearH = 0.f;
-	GetTextSize(Gear, GearW, GearH, Font(3), 1.2f);
+	GetTextSize(Gear, GearW, GearH, Font(3));
 	const FLinearColor GearColor = T.bGearGrind ? Red : (Move->IsAutoGearbox() ? Dim : Text);
-	DrawTextShadowed(Gear, GearColor, Right - SpeedW - 18.f - GearW, SpeedY + SpeedH - GearH, Font(3), 1.2f);
+	DrawTextShadowed(Gear, GearColor, Right - SpeedW - 18.f - GearW, SpeedY + SpeedH - GearH, Font(3));
 	if (Move->IsAutoGearbox())
 	{
 		DrawTextShadowed(TEXT("АВТ"), Dim, Right - SpeedW - 18.f - GearW, SpeedY + SpeedH - 2.f, Font(0));

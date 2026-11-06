@@ -219,13 +219,15 @@ void Vehicle::UpdateSuspension(const std::vector<WheelContact>& Contacts)
 		{
 			const double X = std::max(0.0, C.Compression);
 			const double ShockMul = 0.3 + 0.7 * Clamp01(Cond.Wheels[I].Shock);
-			const double Damping = (C.CompressionVelocity > 0.0 ? S.BumpDamping : S.ReboundDamping) * ShockMul;
-			F = S.Preload + S.SpringRate * X + Damping * C.CompressionVelocity;
+			const double Vel = Clamp(C.CompressionVelocity, -S.MaxCompressionSpeed, S.MaxCompressionSpeed);
+			const double Damping = (Vel > 0.0 ? S.BumpDamping : S.ReboundDamping) * ShockMul;
+			F = S.Preload + S.SpringRate * X + Damping * Vel;
 			const double BumpStart = S.Travel - S.BumpStopRange;
 			if (X > BumpStart)
 			{
-				F += S.BumpStopRate * Sq(X - BumpStart);
+				F += S.BumpStopRate * Sq(std::min(X, S.Travel) - BumpStart);
 			}
+			F = std::min(F, S.MaxForce);
 		}
 		Wheels[I].SuspensionForce = F;
 	}

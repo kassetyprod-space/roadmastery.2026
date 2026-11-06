@@ -23,6 +23,15 @@
 			"Name": "RoadGenCore",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "PeregonEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"AdditionalDependencies": [
+				"Engine",
+				"UnrealEd"
+			]
 		}
 	],
 	"Plugins": [
@@ -32,10 +41,6 @@
 		},
 		{
 			"Name": "ProceduralMeshComponent",
-			"Enabled": true
-		},
-		{
-			"Name": "PythonScriptPlugin",
 			"Enabled": true
 		},
 		{

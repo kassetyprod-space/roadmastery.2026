@@ -6,7 +6,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -420,19 +420,17 @@ void APeregonRoadWorld::AddSign(FChunk& Chunk, double S, double T, const FString
 	AddMesh(Chunk, CubeMesh, FTransform(Rot, Base + FVector(0, 0, 110), FVector(0.08, 0.08, 2.2)), Mat(EPeregonWorldMat::DarkPaint), false);
 	// Белая табличка с чёрной окантовкой (как настоящий знак населённого пункта).
 	AddMesh(Chunk, CubeMesh, FTransform(Rot, Base + FVector(0, 0, 230), FVector(0.04, 2.3, 0.75)), Mat(EPeregonWorldMat::DarkPaint), false);
-	AddMesh(Chunk, CubeMesh, FTransform(Rot, Base + FVector(0, 0, 230) + Rot.Vector() * 2.5, FVector(0.02, 2.15, 0.62)), Mat(EPeregonWorldMat::WhitePaint), false);
-
-	UTextRenderComponent* Label = NewObject<UTextRenderComponent>(this);
-	Label->SetMobility(EComponentMobility::Movable);
-	Label->SetupAttachment(RootComponent);
-	Label->SetText(FText::FromString(Text));
-	Label->SetTextRenderColor(FColor(15, 15, 15));
-	Label->SetWorldSize(Text.Len() > 12 ? 30.f : 46.f);
-	Label->SetHorizontalAlignment(EHTA_Center);
-	Label->SetVerticalAlignment(EVRTA_TextCenter);
-	Label->SetRelativeLocationAndRotation(Base + FVector(0, 0, 230) + Rot.Vector() * 4.0, Rot);
-	Label->RegisterComponent();
-	Chunk.Components.Add(Label);
+	// Белое поле с надписью шрифтом Golos (кириллица рисуется в текстуру).
+	if (UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this))
+	{
+		const int32 FontPx = Text.Len() > 12 ? 24 : 38;
+		UMaterialInstanceDynamic* LabelMat = Art->MakeLabelMaterial(this, Text, FLinearColor(0.01f, 0.01f, 0.01f), FLinearColor(0.85f, 0.85f, 0.82f), 256, 72, FontPx);
+		if (UProceduralMeshComponent* Quad = UPeregonArtSubsystem::AddLabelQuad(this, RootComponent,
+				FTransform(Rot, Base + FVector(0, 0, 230) + Rot.Vector() * 2.5), 215.f, 62.f, LabelMat))
+		{
+			Chunk.Components.Add(Quad);
+		}
+	}
 
 	if (bCrossed)
 	{

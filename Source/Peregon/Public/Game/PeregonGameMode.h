@@ -42,6 +42,9 @@ public:
 	virtual void RestartPlayer(AController* NewPlayer) override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	// Страховка: если машина или пешеход провалились под землю — вернуть на дорогу.
+	void RecoverFallen();
+
 	void EnterMenu();
 	void StartNewGame(const FPeregonRunConfig& Config);
 	bool ContinueGame();

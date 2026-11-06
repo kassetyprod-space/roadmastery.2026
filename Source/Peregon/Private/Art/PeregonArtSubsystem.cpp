@@ -1,6 +1,15 @@
 #include "Art/PeregonArtSubsystem.h"
 
 #include "Components/MeshComponent.h"
+#include "Engine/Canvas.h"
+#include "Engine/Engine.h"
+#include "Engine/Font.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Fonts/CompositeFont.h"
+#include "Kismet/KismetRenderingLibrary.h"
+#include "Misc/Paths.h"
+#include "ProceduralMeshComponent.h"
+#include "Styling/CoreStyle.h"
 #include "Engine/GameInstance.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
@@ -308,11 +317,11 @@ void UPeregonArtSubsystem::EnsureBaseMaterial()
 		return;
 	}
 	bTriedLoad = true;
-	BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX.M_PSX"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX2.M_PSX2"), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	bPsx = BaseMaterial != nullptr;
 	if (!BaseMaterial)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет /Game/Peregon/Materials/M_PSX — перезапустите редактор, его создаст Content/Python/init_unreal.py. Пока — без текстур."));
+		UE_LOG(LogTemp, Warning, TEXT("Peregon: нет /Game/Peregon/Materials/M_PSX2 — его создаёт модуль PeregonEditor при запуске редактора. Пока — без текстур."));
 		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	}
 }
@@ -403,4 +412,171 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeMaterial(UObject* Outer, con
 		Mid->SetVectorParameterValue(TEXT("Color"), Avg * Look.Tint);
 	}
 	return Mid;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Шрифты и надписи
+// ---------------------------------------------------------------------------------------------
+TWeakObjectPtr<UPeregonArtSubsystem> UPeregonArtSubsystem::Instance;
+
+namespace PeregonFonts
+{
+FString Path(EPeregonFont Style)
+{
+	const TCHAR* File = TEXT("GolosText-Regular.ttf");
+	if (Style == EPeregonFont::SemiBold)
+	{
+		File = TEXT("GolosText-SemiBold.ttf");
+	}
+	else if (Style == EPeregonFont::Display)
+	{
+		File = TEXT("Unbounded-Bold.ttf");
+	}
+	return FPaths::ProjectContentDir() / TEXT("Fonts") / File;
+}
+} // namespace PeregonFonts
+
+void UPeregonArtSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+	Instance = this;
+}
+
+void UPeregonArtSubsystem::Deinitialize()
+{
+	if (Instance.Get() == this)
+	{
+		Instance.Reset();
+	}
+	Super::Deinitialize();
+}
+
+FSlateFontInfo UPeregonArtSubsystem::SlateFont(EPeregonFont Style, int32 Size)
+{
+	static TSharedPtr<const FCompositeFont> Fonts[3];
+	static bool bTried[3] = {false, false, false};
+	const int32 Index = FMath::Clamp(static_cast<int32>(Style), 0, 2);
+	if (!bTried[Index])
+	{
+		bTried[Index] = true;
+		const FString File = PeregonFonts::Path(Style);
+		if (FPaths::FileExists(File))
+		{
+			Fonts[Index] = MakeShared<FStandaloneCompositeFont>(NAME_None, File, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Peregon: не найден шрифт %s"), *File);
+		}
+	}
+	if (Fonts[Index].IsValid())
+	{
+		return FSlateFontInfo(Fonts[Index], Size);
+	}
+	return FCoreStyle::GetDefaultFontStyle(Style == EPeregonFont::Regular ? "Regular" : "Bold", Size);
+}
+
+UFont* UPeregonArtSubsystem::CanvasFont(EPeregonFont Style, int32 Size)
+{
+	UPeregonArtSubsystem* Self = Instance.Get();
+	if (!Self)
+	{
+		return nullptr;
+	}
+	const int32 Key = static_cast<int32>(Style) * 1000 + Size;
+	if (TObjectPtr<UFont>* Found = Self->CanvasFonts.Find(Key))
+	{
+		return Found->Get();
+	}
+	UFont* Font = nullptr;
+	const FString File = PeregonFonts::Path(Style);
+	if (FPaths::FileExists(File))
+	{
+		Font = NewObject<UFont>(Self);
+		Font->FontCacheType = EFontCacheType::Runtime;
+		Font->LegacyFontSize = Size;
+		FTypefaceEntry& Entry = Font->CompositeFont.DefaultTypeface.Fonts.AddDefaulted_GetRef();
+		Entry.Name = TEXT("Regular");
+		Entry.Font = FFontData(File, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+	}
+	Self->CanvasFonts.Add(Key, Font);
+	return Font;
+}
+
+UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeLabelMaterial(UObject* Outer, const FString& Text, const FLinearColor& Ink, const FLinearColor& Paper,
+	int32 WidthPx, int32 HeightPx, int32 FontPx, EPeregonFont Style)
+{
+	UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+	if (!World)
+	{
+		return nullptr;
+	}
+	const FString Key = FString::Printf(TEXT("%s|%s|%s|%d|%d|%d|%d"), *Text, *Ink.ToString(), *Paper.ToString(), WidthPx, HeightPx, FontPx, static_cast<int32>(Style));
+	UTextureRenderTarget2D* Target = nullptr;
+	if (TObjectPtr<UTextureRenderTarget2D>* Found = LabelCache.Find(Key))
+	{
+		Target = Found->Get();
+	}
+	if (!Target)
+	{
+		Target = UKismetRenderingLibrary::CreateRenderTarget2D(this, WidthPx, HeightPx, RTF_RGBA8_SRGB, Paper, false);
+		if (!Target)
+		{
+			return nullptr;
+		}
+		UKismetRenderingLibrary::ClearRenderTarget2D(World, Target, Paper);
+		UCanvas* Canvas = nullptr;
+		FVector2D Size(WidthPx, HeightPx);
+		FDrawToRenderTargetContext Context;
+		UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(World, Target, Canvas, Size, Context);
+		if (Canvas)
+		{
+			UFont* Font = CanvasFont(Style, FontPx);
+			if (!Font && GEngine)
+			{
+				Font = GEngine->GetLargeFont();
+			}
+			float TextW = 0.f;
+			float TextH = 0.f;
+			Canvas->TextSize(Font, Text, TextW, TextH);
+			Canvas->SetDrawColor(Ink.ToFColor(true));
+			Canvas->DrawText(Font, Text, (Size.X - TextW) * 0.5f, (Size.Y - TextH) * 0.5f);
+		}
+		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World, Context);
+		LabelCache.Add(Key, Target);
+	}
+	UMaterialInstanceDynamic* Mid = MakeMaterial(Outer, FPeregonLook(EPeregonTex::White, FLinearColor::White, 0.7f));
+	if (Mid && bPsx)
+	{
+		Mid->SetTextureParameterValue(TEXT("Tex"), Target);
+	}
+	return Mid;
+}
+
+UProceduralMeshComponent* UPeregonArtSubsystem::AddLabelQuad(AActor* Owner, USceneComponent* Parent, const FTransform& Relative, float WidthCm, float HeightCm,
+	UMaterialInterface* Material)
+{
+	if (!Owner)
+	{
+		return nullptr;
+	}
+	UProceduralMeshComponent* Quad = NewObject<UProceduralMeshComponent>(Owner);
+	Quad->SetMobility(EComponentMobility::Movable);
+	Quad->SetupAttachment(Parent ? Parent : Owner->GetRootComponent());
+	Quad->SetRelativeTransform(Relative);
+	Quad->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Quad->RegisterComponent();
+	// Лицом к +X: для зрителя, смотрящего вдоль -X, +Y — слева.
+	const float W = WidthCm * 0.5f;
+	const float H = HeightCm * 0.5f;
+	const TArray<FVector> Vertices = {FVector(0.0, W, H), FVector(0.0, -W, H), FVector(0.0, W, -H), FVector(0.0, -W, -H)};
+	const TArray<int32> Triangles = {0, 2, 1, 1, 2, 3};
+	const TArray<FVector> Normals = {FVector::ForwardVector, FVector::ForwardVector, FVector::ForwardVector, FVector::ForwardVector};
+	const TArray<FVector2D> UVs = {FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(0.0, 1.0), FVector2D(1.0, 1.0)};
+	Quad->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+	if (Material)
+	{
+		Quad->SetMaterial(0, Material);
+	}
+	return Quad;
 }

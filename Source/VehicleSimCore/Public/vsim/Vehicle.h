@@ -28,6 +28,8 @@ struct SuspensionParams
 	double BumpStopRange = 0.025;    // м до конца хода, где включается отбойник
 	double BumpStopRate = 2.4e7;     // Н/м² (квадратичный отбойник: ~15 кН на последних 2.5 см)
 	double ShockWearPerMeter = 2.0e-5; // износ амортизатора на метр хода штока
+	double MaxForce = 30000.0;       // Н, предел силы на колесо (иначе пробой подвески «выстреливает» машину)
+	double MaxCompressionSpeed = 4.0; // м/с, ограничение для демпфера (телепорты, первый кадр)
 };
 
 struct BrakeParams

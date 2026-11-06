@@ -281,11 +281,43 @@ void APeregonGameMode::Toast(const FString& Text, float Seconds)
 	}
 }
 
+void APeregonGameMode::RecoverFallen()
+{
+	// Порог: на 20 м ниже самой низкой точки рельефа трассы (или −20 м на полигоне).
+	const double KillZ = (Mode == EPeregonMode::Road && RoadWorld) ? (RoadWorld->GetRoute().MinZ() - 20.0) * 100.0 : -2000.0;
+	auto SafeTransform = [this](const FVector& Where) -> FTransform
+	{
+		if (Mode == EPeregonMode::Road && RoadWorld)
+		{
+			const double S = RoadWorld->GetRoute().FindNearestS(Where.X / 100.0, Where.Y / 100.0, -1.0, 1.0e9);
+			RoadWorld->BuildAround(S);
+			return RoadWorld->RoadTransform(S, 2.0, 1.0);
+		}
+		return FTransform(FRotator::ZeroRotator, FVector(0.0, 0.0, 150.0));
+	};
+	if (Car && Car->GetActorLocation().Z < KillZ)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Peregon] Машина провалилась (Z=%.0f см) — возвращаю на дорогу"), Car->GetActorLocation().Z);
+		Car->PlaceOnGround(SafeTransform(Car->GetActorLocation()));
+		Toast(TEXT("Машина провалилась под землю — вернули на дорогу"));
+	}
+	if (Walker && !Walker->IsHidden() && Walker->GetActorLocation().Z < KillZ)
+	{
+		const FTransform T = SafeTransform(Walker->GetActorLocation());
+		Walker->TeleportTo(T.GetLocation() + FVector(0.0, 0.0, 100.0), T.Rotator());
+		Toast(TEXT("Вы провалились под землю — вернули на дорогу"));
+	}
+}
+
 void APeregonGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	const double Now = GetWorld()->GetRealTimeSeconds();
 	Toasts.RemoveAll([Now](const FPeregonToast& T) { return T.Until < Now; });
+	if (Mode == EPeregonMode::Road || Mode == EPeregonMode::ProvingGround)
+	{
+		RecoverFallen();
+	}
 
 	// Облёт трассы на фоне главного меню.
 	if (Mode == EPeregonMode::Menu && MenuCamera && RoadWorld)

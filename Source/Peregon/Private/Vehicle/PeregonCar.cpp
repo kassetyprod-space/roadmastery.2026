@@ -93,6 +93,8 @@ APeregonCar::APeregonCar()
 	Body->SetAngularDamping(0.05f);
 	// У плоского бокса крен «лёгкий»; у настоящего седана моменты инерции по крену и тангажу больше.
 	Body->BodyInstance.InertiaTensorScale = FVector(1.7f, 1.15f, 1.0f);
+	// Непрерывные столкновения: тонкая процедурная земля не «пропускает» кузов на скорости.
+	Body->BodyInstance.bUseCCD = true;
 	RootComponent = Body;
 
 	CabinBlocker = CreateDefaultSubobject<UBoxComponent>(TEXT("CabinBlocker"));
@@ -422,6 +424,7 @@ void APeregonCar::BeginPlay()
 	}
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
 	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
+	PlaceOnGround(GetActorTransform());
 	SetHeadlights(false);
 }
 
@@ -433,6 +436,10 @@ void APeregonCar::Tick(float DeltaSeconds)
 		return;
 	}
 	CockpitTime += DeltaSeconds;
+	if (bSettling)
+	{
+		UpdateSettling(DeltaSeconds);
+	}
 
 	// Клавиатура — это 0 или 1. Педаль «дожимается» за долю секунды, как ногой; геймпад и так аналоговый.
 	ThrottleSmoothed = FMath::FInterpConstantTo(ThrottleSmoothed, ThrottleAxis, DeltaSeconds, ThrottleAxis > ThrottleSmoothed ? 3.5f : 7.f);
@@ -489,6 +496,44 @@ void APeregonCar::Tick(float DeltaSeconds)
 	{
 		Focus = FPeregonFocus();
 	}
+}
+
+void APeregonCar::PlaceOnGround(const FTransform& Target)
+{
+	Body->SetSimulatePhysics(false);
+	FRotator Rotation = Target.Rotator();
+	Rotation.Roll = 0.f;
+	SetActorLocationAndRotation(Target.GetLocation(), Rotation, false, nullptr, ETeleportType::TeleportPhysics);
+	bSettling = true;
+	SettleTime = 0.f;
+}
+
+void APeregonCar::UpdateSettling(float DeltaSeconds)
+{
+	SettleTime += DeltaSeconds;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PeregonCarSettle), false, this);
+	FHitResult Hit;
+	const FVector Start = GetActorLocation() + FVector(0.f, 0.f, 300.f);
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, Start - FVector(0.f, 0.f, 5000.f), ECC_Visibility, Params);
+	// Ждём пару кадров, чтобы у сгенерированной земли точно появилась коллизия.
+	if (!(bHit && SettleTime > 0.15f) && SettleTime < 5.f)
+	{
+		return;
+	}
+	if (bHit)
+	{
+		// 64 см над землёй: колёса ровно касаются её на полном отбое, машина мягко садится на пружины.
+		SetActorLocation(Hit.ImpactPoint + FVector(0.f, 0.f, 64.f), false, nullptr, ETeleportType::TeleportPhysics);
+		UE_LOG(LogTemp, Log, TEXT("[Peregon] Машина поставлена на %s"), *GetNameSafe(Hit.GetComponent()));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Peregon] Под машиной нет земли с коллизией (канал Visibility) — проверьте генерацию мира"));
+	}
+	bSettling = false;
+	Body->SetSimulatePhysics(true);
+	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 }
 
 void APeregonCar::UpdateMovingParts(float DeltaSeconds)
@@ -1039,8 +1084,5 @@ void APeregonCar::OnResetCar(const FInputActionValue&)
 	// Поставить на колёса (перевернулись / застряли).
 	FRotator Rotation = GetActorRotation();
 	Rotation.Pitch = 0.f;
-	Rotation.Roll = 0.f;
-	SetActorLocationAndRotation(GetActorLocation() + FVector(0.f, 0.f, 150.f), Rotation, false, nullptr, ETeleportType::TeleportPhysics);
-	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
-	Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	PlaceOnGround(FTransform(Rotation, GetActorLocation() + FVector(0.f, 0.f, 150.f)));
 }

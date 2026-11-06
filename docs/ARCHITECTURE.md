@@ -16,7 +16,8 @@ Source/
     ├── Art/                UPeregonArtSubsystem (процедурные PSX-текстуры, материалы)
     └── World/              APeregonRoadWorld (стриминг чанков), APeregonServicePoint (АЗС/кафе),
                             APeregonSky (день/ночь), APeregonProvingGround
-Content/Python/init_unreal.py  создаёт мастер-материал M_PSX при запуске редактора
+Source/PeregonEditor/      модуль редактора: создаёт мастер-материал M_PSX2 при запуске
+Content/Fonts/             Golos Text, Unbounded (SIL OFL, кириллица) — меню, HUD, таблички
 Tests/                     CMake: VehicleSim (стенд + паспорт машины), RoadGen (геометрия трассы)
 ```
 

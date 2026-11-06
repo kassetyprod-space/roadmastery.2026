@@ -26,11 +26,16 @@
 1. Клонировать репозиторий (с Git LFS).
 2. ПКМ по `Peregon.uproject` → *Generate Visual Studio project files*.
 3. Открыть `Peregon.uproject` → *Yes* на вопрос о сборке модулей.
-4. При первом запуске редактор сам создаст материал `Content/Peregon/Materials/M_PSX`
-   (скрипт `Content/Python/init_unreal.py`). Его стоит закоммитить.
+4. При первом запуске редактор сам создаст материал `Content/Peregon/Materials/M_PSX2`
+   (модуль `PeregonEditor`, в Output Log строка `[Peregon] Материал ... создан`). Его стоит закоммитить.
 5. Нажать **Play**. Откроется главное меню на фоне трассы.
 
 Меню паузы — **Tab** (в редакторе Esc останавливает Play; в собранной игре работает и Esc).
+
+## Шрифты
+
+Golos Text и Unbounded — свободные шрифты с кириллицей (SIL Open Font License, файлы лицензий лежат рядом
+в `Content/Fonts`). Gosha Sans платный, поэтому не используется.
 
 ## Управление
 

@@ -194,8 +194,9 @@ void UPeregonVehicleMovementComponent::StepVehicle(float DeltaTime, UPrimitiveCo
 		FVector Normal = Up;
 		if (bSweepHit && Hit.bStartPenetrating)
 		{
-			// Пробой подвески: колесо упёрлось в препятствие на полном сжатии.
-			CompressionCm = TravelCm + 2.0;
+			// Сфера уже внутри препятствия (кочка выше полного сжатия): держим на отбойнике,
+			// без «выстрела» — иначе машина подпрыгивает и проваливается.
+			CompressionCm = TravelCm;
 			F.Contact = SweepStart - Up * SphereR;
 			F.bHit = true;
 		}

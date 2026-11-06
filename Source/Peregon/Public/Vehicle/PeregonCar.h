@@ -71,6 +71,11 @@ public:
 	void ExitCar();
 	APeregonCharacter* GetDriver() const { return Driver; }
 
+	// Поставить машину на землю: физика выключается, по лучу ищется земля, машина ставится на колёса
+	// и только потом снова падает в симуляцию. Так машина не «выстреливает» и не проваливается при появлении.
+	void PlaceOnGround(const FTransform& Target);
+	bool IsSettling() const { return bSettling; }
+
 	// Цвет кузова (задаётся до BeginPlay, например при создании новой игры).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon")
 	FLinearColor PaintColor = FLinearColor(0.32f, 0.04f, 0.04f);
@@ -134,6 +139,7 @@ private:
 	void ToggleMovingPart(FName Tag);
 
 	void UpdateMovingParts(float DeltaSeconds);
+	void UpdateSettling(float DeltaSeconds);
 	void UpdateCockpit(float DeltaSeconds, const FPeregonTelemetry& T);
 	void UpdateCameras(float DeltaSeconds, const FPeregonTelemetry& T);
 	void UpdateFocus();
@@ -217,4 +223,6 @@ private:
 	bool bFirstPerson = true;
 	bool bHeadlights = false;
 	bool bKeyCranking = false;
+	bool bSettling = true;
+	float SettleTime = 0.f;
 };

@@ -1,7 +1,7 @@
 #include "World/PeregonServicePoint.h"
 
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -68,18 +68,20 @@ UStaticMeshComponent* APeregonServicePoint::AddBox(const FVector& Center, const 
 	return Box;
 }
 
-void APeregonServicePoint::AddLabel(const FVector& Location, const FString& Text, float Size, const FColor& Color)
+void APeregonServicePoint::AddLabel(const FVector& Location, const FString& Text, float SizeCm, const FColor& Ink, const FLinearColor& Paper)
 {
-	UTextRenderComponent* Label = NewObject<UTextRenderComponent>(this);
-	Label->SetMobility(EComponentMobility::Movable);
-	Label->SetupAttachment(RootComponent);
-	Label->SetText(FText::FromString(Text));
-	Label->SetTextRenderColor(Color);
-	Label->SetWorldSize(Size);
-	Label->SetHorizontalAlignment(EHTA_Center);
-	Label->SetVerticalAlignment(EVRTA_TextCenter);
-	Label->SetRelativeLocation(Location * 100.0);
-	Label->RegisterComponent();
+	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	if (!Art)
+	{
+		return;
+	}
+	// Текст рисуется в текстуру шрифтом Golos (кириллица), табличка — плоский квад.
+	const float Aspect = FMath::Max(1.5f, Text.Len() * 0.62f + 0.6f);
+	const float HeightCm = SizeCm * 1.7f;
+	const int32 HeightPx = 64;
+	const int32 WidthPx = FMath::Clamp(FMath::RoundToInt(HeightPx * Aspect), 64, 1024);
+	UMaterialInstanceDynamic* Mat = Art->MakeLabelMaterial(this, Text, FLinearColor(Ink), Paper, WidthPx, HeightPx, 34);
+	UPeregonArtSubsystem::AddLabelQuad(this, RootComponent, FTransform(FRotator::ZeroRotator, Location * 100.0), HeightCm * Aspect, HeightCm, Mat);
 }
 
 void APeregonServicePoint::BuildFuel()
@@ -100,7 +102,7 @@ void APeregonServicePoint::BuildFuel()
 	}
 	AddBox(FVector(11.0, 0.0, 5.4), FVector(9.0, 16.0, 0.4), White, false);
 	AddBox(FVector(11.0, 0.0, 5.0), FVector(9.2, 16.2, 0.35), Red, false);
-	AddLabel(FVector(15.7, 0.0, 5.2), TEXT("АЗС"), 70.f, FColor::White);
+	AddLabel(FVector(15.75, 0.0, 5.0), TEXT("АЗС"), 22.f, FColor::White, FLinearColor(0.6f, 0.05f, 0.04f));
 
 	// Островки с колонками.
 	for (const FVector& Pump : PeregonService::PumpLocal)
@@ -108,19 +110,19 @@ void APeregonServicePoint::BuildFuel()
 		AddBox(FVector(Pump.X, Pump.Y, 0.1), FVector(1.4, 3.2, 0.2), Concrete, true);
 		AddBox(Pump, FVector(0.7, 1.0, 1.8), Red, true, PeregonService::PumpTag);
 		AddBox(Pump + FVector(0.36, 0.0, 0.35), FVector(0.02, 0.6, 0.4), Glass, false);
-		AddLabel(Pump + FVector(0.38, 0.0, -0.25), TEXT("АИ-92"), 14.f, FColor::White);
+		AddLabel(Pump + FVector(0.37, 0.0, -0.25), TEXT("АИ-92"), 9.f, FColor::White, FLinearColor(0.6f, 0.05f, 0.04f));
 	}
 
 	// Магазин.
 	AddBox(FVector(-4.0, 0.0, 1.75), FVector(8.0, 14.0, 3.5), Plaster, true);
 	AddBox(FVector(-4.0, 0.0, 3.6), FVector(8.6, 14.6, 0.25), Red, false);
 	AddBox(FVector(0.02, 0.0, 1.4), FVector(0.06, 9.0, 1.8), Glass, false);
-	AddLabel(FVector(0.15, 0.0, 3.0), DisplayName, 48.f, FColor(30, 30, 30));
+	AddLabel(FVector(0.08, 0.0, 3.0), DisplayName, 30.f, FColor(30, 30, 30), FLinearColor(0.8f, 0.78f, 0.72f));
 
 	// Стела с ценой у дороги.
 	AddBox(FVector(17.0, 9.5, 3.0), FVector(0.4, 1.8, 6.0), White, true);
-	AddLabel(FVector(17.25, 9.5, 4.6), TEXT("АИ-92"), 34.f, FColor(160, 20, 15));
-	AddLabel(FVector(17.25, 9.5, 3.8), FString::Printf(TEXT("%.2f"), FuelPrice), 40.f, FColor(20, 20, 20));
+	AddLabel(FVector(17.22, 9.5, 4.6), TEXT("АИ-92"), 20.f, FColor(160, 20, 15), FLinearColor(0.85f, 0.85f, 0.83f));
+	AddLabel(FVector(17.22, 9.5, 3.9), FString::Printf(TEXT("%.2f"), FuelPrice), 24.f, FColor(20, 20, 20), FLinearColor(0.85f, 0.85f, 0.83f));
 }
 
 void APeregonServicePoint::BuildCafe()
@@ -140,8 +142,8 @@ void APeregonServicePoint::BuildCafe()
 		AddBox(FVector(2.52, Y, 1.6), FVector(0.06, 2.2, 1.2), Glass, false);
 	}
 	AddBox(FVector(2.6, 0.0, 2.75), FVector(0.1, 6.0, 0.6), Board, false);
-	AddLabel(FVector(2.7, 0.0, 2.75), DisplayName, 40.f, FColor(60, 25, 10));
-	AddLabel(FVector(2.7, 0.0, 2.25), TEXT("ОБЕДЫ · НОЧЛЕГ"), 18.f, FColor(60, 25, 10));
+	AddLabel(FVector(2.66, 0.0, 2.78), DisplayName, 20.f, FColor(60, 25, 10), FLinearColor(0.8f, 0.75f, 0.6f));
+	AddLabel(FVector(2.66, 0.0, 2.55), TEXT("ОБЕДЫ · НОЧЛЕГ"), 8.f, FColor(60, 25, 10), FLinearColor(0.8f, 0.75f, 0.6f));
 
 	for (double Y : {-4.0, 4.0})
 	{
