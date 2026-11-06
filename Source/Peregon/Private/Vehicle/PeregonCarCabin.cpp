@@ -192,6 +192,12 @@ void APeregonCar::UpdateCabin(float DeltaSeconds)
 				Nearest = FMath::Min(Nearest, FMath::Sqrt(FMath::Square(P.X - Town.X) + FMath::Square(P.Y - Town.Y)) - Town.Radius * (1.0 + Town.Size));
 			}
 			Static = 0.06f + 0.55f * FMath::SmoothStep(1500.f, 9000.f, static_cast<float>(Nearest));
+			// Областная станция в чужой области — почти один шум.
+			const int32 StationRegion = Radio->GetStationRegion();
+			if (StationRegion >= 0 && StationRegion != Road->GetRoute().RegionAt(Road->GetTrackedS()))
+			{
+				Static = FMath::Max(Static, 0.85f);
+			}
 		}
 		Radio->SetReception(Static, bListenerInside ? 0.f : 1.f, Volume);
 	}

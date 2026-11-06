@@ -50,6 +50,8 @@ public:
 	UPROPERTY(Config) int32 MaxLampLights = 24;
 	// Облака: 0 — один слой, 1 — три слоя, 2 — пять слоёв (перистые, кучевые, разорванные).
 	UPROPERTY(Config) int32 CloudQuality = 2;
+	// Машин на дороге: 0 — нет, 1 — мало, 2 — обычно, 3 — много.
+	UPROPERTY(Config) int32 TrafficDensity = 2;
 
 	// --- Звук (0..1.5) ---
 	UPROPERTY(Config) float MasterVolume = 1.f;

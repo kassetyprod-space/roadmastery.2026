@@ -282,6 +282,30 @@ EPeregonProcedural Fallback(const FString& Event)
 	{
 		return EPeregonProcedural::Horn;
 	}
+	if (Event.StartsWith(TEXT("camera.")))
+	{
+		return EPeregonProcedural::Click;
+	}
+	if (Event.StartsWith(TEXT("thunder")))
+	{
+		return EPeregonProcedural::Thunder;
+	}
+	if (Event.StartsWith(TEXT("ambient.dog")))
+	{
+		return EPeregonProcedural::Bark;
+	}
+	if (Event.StartsWith(TEXT("ambient.crow")))
+	{
+		return EPeregonProcedural::Crow;
+	}
+	if (Event.StartsWith(TEXT("train.horn")))
+	{
+		return EPeregonProcedural::Train;
+	}
+	if (Event.StartsWith(TEXT("traffic.pass")))
+	{
+		return EPeregonProcedural::Engine2;
+	}
 	if (Event.StartsWith(TEXT("wiper")))
 	{
 		return EPeregonProcedural::Wiper;
@@ -740,6 +764,67 @@ float UPeregonSynth::ProceduralSample()
 		Tone.Bandpass(700.f + 900.f * Sweep, 3.f, Rate);
 		S = Tone.Process(N) * 0.9f * Sweep + FMath::Sin(2.f * PI * 95.f * Age) * 0.12f * Sweep;
 		Length = 0.6f;
+		break;
+	}
+	case EPeregonProcedural::Thunder:
+	{
+		// Рокот: бурый шум через низкий фильтр, огибающая из нескольких «волн» раската.
+		Brown = Brown * 0.997f + N * 0.03f;
+		Tone.Lowpass(160.f, 0.7f, Rate);
+		const float Roll = 0.55f + 0.45f * FMath::Sin(2.f * PI * 0.9f * Age + 1.3f * FMath::Sin(2.f * PI * 0.37f * Age));
+		const float Env = FMath::Min(1.f, Age / 0.25f) * FMath::Exp(-Age / 2.6f);
+		S = (Tone.Process(N) * 2.2f + Brown * 3.f) * Roll * Env;
+		Length = 8.f;
+		break;
+	}
+	case EPeregonProcedural::Bark:
+	{
+		// Два-три «гав»: гармоничный тон с формантой, высота падает внутри каждого.
+		const float Period = 0.34f;
+		const int32 Index = FMath::FloorToInt(Age / Period);
+		const float Local = Age - Index * Period;
+		const float On = Index < 3 && Local < 0.14f ? FMath::Sin(PI * Local / 0.14f) : 0.f;
+		Cycle = FMath::Frac(Cycle + (520.f - 900.f * Local) / Rate);
+		const float Saw = 2.f * Cycle - 1.f;
+		Tone.Bandpass(1100.f, 2.f, Rate);
+		Tone2.Bandpass(2400.f, 3.f, Rate);
+		S = (Tone.Process(Saw + N * 0.3f) * 1.6f + Tone2.Process(Saw) * 0.6f) * On;
+		Length = 1.05f;
+		break;
+	}
+	case EPeregonProcedural::Crow:
+	{
+		// «Кар»: хриплый тон ~900 Гц с шумом, два раза.
+		const float Local = FMath::Fmod(Age, 0.55f);
+		const float On = Age < 1.1f && Local < 0.3f ? FMath::Sin(PI * Local / 0.3f) : 0.f;
+		Cycle = FMath::Frac(Cycle + (880.f - 200.f * Local) / Rate);
+		const float Saw = 2.f * Cycle - 1.f;
+		Tone.Bandpass(1500.f, 2.5f, Rate);
+		S = Tone.Process(Saw * (0.7f + 0.6f * N)) * 1.4f * On;
+		Length = 1.15f;
+		break;
+	}
+	case EPeregonProcedural::Train:
+	{
+		// Тифон тепловоза: два низких тона (~300 и ~370 Гц), долгий гудок.
+		Cycle = FMath::Frac(Cycle + 300.f / Rate);
+		FirePhase = FMath::Frac(FirePhase + 372.f / Rate);
+		const float Env = FMath::Min(1.f, Age / 0.15f) * (Age < 2.2f ? 1.f : FMath::Exp(-(Age - 2.2f) / 0.2f));
+		Tone.Lowpass(1600.f, 0.7f, Rate);
+		S = Tone.Process(std::tanh(3.f * FMath::Sin(2.f * PI * Cycle)) * 0.5f + std::tanh(3.f * FMath::Sin(2.f * PI * FirePhase)) * 0.45f) * Env * 0.7f;
+		Length = 3.f;
+		break;
+	}
+	case EPeregonProcedural::Engine2:
+	{
+		// Проезд: рокот мотора и шин, нарастает и уходит с понижением тона.
+		const float T = Age / 2.6f;
+		const float Doppler = T < 0.5f ? 1.12f : 0.88f;
+		Cycle = FMath::Frac(Cycle + 70.f * Doppler / Rate);
+		const float Env = FMath::Exp(-FMath::Square((T - 0.5f) * 4.f));
+		Tone.Lowpass(500.f, 0.8f, Rate);
+		S = (FMath::Sin(2.f * PI * Cycle) * 0.5f + Tone.Process(N) * 1.3f) * Env;
+		Length = 2.6f;
 		break;
 	}
 	case EPeregonProcedural::Paper:

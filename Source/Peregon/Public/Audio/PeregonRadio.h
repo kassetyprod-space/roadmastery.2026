@@ -51,6 +51,12 @@ public:
 	void NextTrack();
 	void PrevTrack();
 	FString GetTrackName() const { return TrackName; }
+	// Станции: MP3 прямо в Content/Radio — «Радио Р-255» (ловится везде); каждая подпапка — своя станция.
+	// Имя папки «Кузбасс FM@1» — станция области 1 (по rgen::Route::Regions): в чужой области её почти не слышно.
+	void NextStation();
+	FString GetStationName() const;
+	int32 GetStationRegion() const;
+	int32 GetStationCount() const { return Stations.Num(); }
 	int32 GetTrackCount() const { return Playlist.Num(); }
 	// Шум эфира 0..1, «снаружи машины» 0..1 (глуше), громкость 0..1.
 	void SetReception(float InStatic, float InOutside, float InVolume)
@@ -68,6 +74,15 @@ protected:
 
 private:
 	void ScanFolder();
+	void ScanStations();
+	struct FStation
+	{
+		FString Name;
+		FString Folder;
+		int32 Region = -1;
+	};
+	TArray<FStation> Stations;
+	int32 Station = 0;
 	void StartLoad(int32 Index);
 
 	TArray<FString> Playlist;

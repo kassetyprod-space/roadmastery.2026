@@ -542,19 +542,53 @@ TArray<FName> APeregonServicePoint::GetShopCatalog() const
 	return Items;
 }
 
-bool APeregonServicePoint::GetCarNeed(float& OutLiters) const
+bool APeregonServicePoint::GetCarNeed(float& OutLiters, APeregonCar** OutCar) const
 {
 	OutLiters = 0.f;
 	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
-	const APeregonCar* Car = GM ? GM->GetCar() : nullptr;
+	if (!GM)
+	{
+		return false;
+	}
+	// Любая машина колонны у колонки (сначала — «своя»).
+	APeregonCar* Car = nullptr;
+	bool bNear = false;
+	TArray<APeregonCar*> Order;
+	Order.Add(GM->GetCar());
+	for (APeregonCar* Other : GM->GetCars())
+	{
+		Order.AddUnique(Other);
+	}
+	for (APeregonCar* Candidate : Order)
+	{
+		if (!IsValid(Candidate) || !Candidate->GetVehicleMovement())
+		{
+			continue;
+		}
+		for (const FVector& Pump : PeregonService::PumpLocal)
+		{
+			if (FVector::Dist(Candidate->GetActorLocation(), GetActorTransform().TransformPosition(Pump * 100.0)) < PeregonService::PumpReachCm)
+			{
+				bNear = true;
+			}
+		}
+		if (bNear)
+		{
+			Car = Candidate;
+			break;
+		}
+	}
+	if (!Car)
+	{
+		Car = GM->GetCar();
+	}
 	if (!Car || !Car->GetVehicleMovement())
 	{
 		return false;
 	}
-	bool bNear = false;
-	for (const FVector& Pump : PeregonService::PumpLocal)
+	if (OutCar)
 	{
-		bNear = bNear || FVector::Dist(Car->GetActorLocation(), GetActorTransform().TransformPosition(Pump * 100.0)) < PeregonService::PumpReachCm;
+		*OutCar = Car;
 	}
 	const FPeregonTelemetry T = Car->GetVehicleMovement()->GetTelemetry();
 	OutLiters = FMath::Max(0.f, T.FuelCapacityL - T.FuelL);
@@ -586,7 +620,8 @@ FString APeregonServicePoint::GetInteractPrompt(const UPrimitiveComponent* Part,
 	if (Part->ComponentHasTag(PeregonService::PumpTag))
 	{
 		float Liters = 0.f;
-		const bool bCarHere = GetCarNeed(Liters) && Liters >= 0.5f;
+		APeregonCar* PumpCar = nullptr;
+		const bool bCarHere = GetCarNeed(Liters, &PumpCar) && Liters >= 0.5f;
 		if (!bCarHere && GI->Pockets.Has(PeregonItems::CanisterEmpty))
 		{
 			const float Cost = PeregonItems::CanisterLiters * FuelPrice;
@@ -660,7 +695,8 @@ void APeregonServicePoint::InteractStart(UPrimitiveComponent* Part, APawn* User)
 	if (Part->ComponentHasTag(PeregonService::PumpTag))
 	{
 		float Liters = 0.f;
-		const bool bCarHere = GetCarNeed(Liters) && Liters >= 0.5f;
+		APeregonCar* PumpCar = nullptr;
+		const bool bCarHere = GetCarNeed(Liters, &PumpCar) && Liters >= 0.5f;
 		if (!bCarHere && GI->Pockets.Has(PeregonItems::CanisterEmpty))
 		{
 			if (!GI->TrySpend(PeregonItems::CanisterLiters * FuelPrice))
@@ -670,6 +706,7 @@ void APeregonServicePoint::InteractStart(UPrimitiveComponent* Part, APawn* User)
 			}
 			GI->Pockets.Remove(PeregonItems::CanisterEmpty);
 			GI->Pockets.Add(PeregonItems::CanisterFull);
+			GI->Journal.FuelBoughtL += PeregonItems::CanisterLiters;
 			GM->Toast(TEXT("Канистра наполнена: 20 л"));
 			return;
 		}
@@ -683,7 +720,8 @@ void APeregonServicePoint::InteractStart(UPrimitiveComponent* Part, APawn* User)
 			GM->Toast(TEXT("Не хватает денег на бензин"));
 			return;
 		}
-		GM->GetCar()->GetVehicleMovement()->Refuel(Buy);
+		PumpCar->GetVehicleMovement()->Refuel(Buy);
+		GI->Journal.FuelBoughtL += Buy;
 		GM->Toast(FString::Printf(TEXT("Заправлено %.1f л — %s"), Buy, *PeregonService::Rubles(Buy * FuelPrice)));
 		return;
 	}

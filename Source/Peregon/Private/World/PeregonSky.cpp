@@ -14,6 +14,7 @@
 #include "Engine/World.h"
 #include "Game/PeregonGameInstance.h"
 #include "Game/PeregonGameUserSettings.h"
+#include "Audio/PeregonAudio.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -451,6 +452,7 @@ void APeregonSky::Tick(float DeltaSeconds)
 		}
 	}
 	UpdateSkyMeshes(Camera, DeltaSeconds);
+	UpdateStorm(Camera, DeltaSeconds);
 
 	// Общая погода в материалах мира: мокрые дороги, снег на земле и крышах, ветер в траве и кронах.
 	if (UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this))
@@ -728,4 +730,56 @@ UMaterialInstanceDynamic* APeregonSky::GetPaintedPost()
 		}
 	}
 	return PaintedPost;
+}
+
+void APeregonSky::UpdateStorm(const FVector& Camera, float DeltaSeconds)
+{
+	// Гроза: в ливень (не в снег) раз в 8–40 с молния — вспышка неба, через расстояние/340 м/с — раскат.
+	const float Storm = FMath::Clamp((static_cast<float>(Mix.Rain) - 0.5f) * 2.f, 0.f, 1.f) * (Temperature > 2.f ? 1.f : 0.f);
+	Flash = FMath::Max(0.f, Flash - DeltaSeconds * 6.f);
+	if (Storm > 0.05f)
+	{
+		LightningTimer -= DeltaSeconds;
+		if (LightningTimer <= 0.f)
+		{
+			LightningTimer = FMath::FRandRange(8.f, 40.f) / (0.4f + Storm);
+			const float DistanceM = FMath::FRandRange(400.f, 6000.f);
+			Flash = FMath::Lerp(1.f, 0.25f, DistanceM / 6000.f);
+			FlashFlicker = FMath::FRandRange(0.f, 1.f) < 0.5f ? 0.12f : 0.f; // двойная вспышка
+			Thunders.Add({DistanceM / 340.f, FMath::Lerp(1.f, 0.35f, DistanceM / 6000.f)});
+		}
+	}
+	if (FlashFlicker > 0.f)
+	{
+		FlashFlicker -= DeltaSeconds;
+		if (FlashFlicker <= 0.f)
+		{
+			Flash = FMath::Max(Flash, 0.7f);
+		}
+	}
+	for (int32 I = Thunders.Num() - 1; I >= 0; --I)
+	{
+		Thunders[I].Key -= DeltaSeconds;
+		if (Thunders[I].Key <= 0.f)
+		{
+			// Звук «оттуда» — с направления ветра, в паре десятков метров (чтобы было слышно).
+			const FVector From = Camera + FVector(Wind.GetSafeNormal2D().X, Wind.GetSafeNormal2D().Y, 0.3f) * -3000.f;
+			PeregonAudio::PlayEvent(this, TEXT("thunder"), From, 1.4f * Thunders[I].Value, FMath::FRandRange(0.85f, 1.1f));
+			Thunders.RemoveAt(I);
+		}
+	}
+	if (Flash > 0.001f && SkyLight)
+	{
+		if (USkyLightComponent* SkyComp = SkyLight->GetLightComponent())
+		{
+			SkyComp->SetIntensity(SkyComp->Intensity + 9.f * Flash);
+		}
+	}
+	for (UMaterialInstanceDynamic* Mid : CloudLayerMids)
+	{
+		if (Mid && Flash > 0.001f)
+		{
+			Mid->SetScalarParameterValue(TEXT("Emissive"), 3.f * Flash);
+		}
+	}
 }

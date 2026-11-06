@@ -47,6 +47,11 @@ public:
 	void OpenMapRegion(int32 Region);
 	// Техничка: что не так с машиной рядом (или той, в которой сидим).
 	void OpenManual();
+	// Бортовой журнал (B): пробег, траты, ремонт, фотографии, пройденные места.
+	void OpenJournal();
+	// Фото (F9): кадр без интерфейса в Saved/Screenshots/Peregon, подпись — в журнал.
+	void TakePhoto();
+	void ToggleTasks();
 	void ClosePanel();
 	bool IsPanelOpen() const { return PanelContainer.IsValid(); }
 	void ToggleInventory();

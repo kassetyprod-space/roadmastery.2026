@@ -32,6 +32,7 @@ void UPeregonGameUserSettings::SetToDefaults()
 	PaintStrength = 0.7f;
 	MaxLampLights = 24;
 	CloudQuality = 2;
+	TrafficDensity = 2;
 	MasterVolume = EngineVolume = EffectsVolume = AmbienceVolume = RadioVolume = 1.f;
 }
 

@@ -13,6 +13,7 @@
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonGarageYard.h"
 #include "World/PeregonNightLights.h"
+#include "World/PeregonTraffic.h"
 #include "World/PeregonPickup.h"
 #include "World/PeregonProvingGround.h"
 #include "World/PeregonRoadWorld.h"
@@ -76,7 +77,7 @@ void APeregonGameMode::ClearSession()
 	{
 		PC->UnPossess();
 	}
-	TArray<AActor*> Doomed{Car.Get(), Walker.Get(), RoadWorld.Get(), ProvingGround.Get(), MenuCamera.Get(), GarageYard.Get()};
+	TArray<AActor*> Doomed{Car.Get(), Walker.Get(), RoadWorld.Get(), ProvingGround.Get(), MenuCamera.Get(), GarageYard.Get(), Traffic.Get()};
 	for (APeregonCar* Other : Cars)
 	{
 		Doomed.AddUnique(Other);
@@ -96,6 +97,7 @@ void APeregonGameMode::ClearSession()
 	Car = nullptr;
 	Cars.Reset();
 	GarageYard = nullptr;
+	Traffic = nullptr;
 	Walker = nullptr;
 	RoadWorld = nullptr;
 	ProvingGround = nullptr;
@@ -198,6 +200,10 @@ bool APeregonGameMode::ContinueGame()
 			GI->Glovebox = Save->Glovebox;
 			GI->Trunk = Save->Trunk;
 			GI->TraveledMaxS = Save->TraveledMaxS;
+			if (Save->Version >= 5)
+			{
+				GI->Journal = Save->Journal;
+			}
 		}
 		else
 		{
@@ -240,6 +246,22 @@ bool APeregonGameMode::SaveGame(const FString& PlaceName)
 	Save->CarColor = Car->PaintColor;
 	const std::vector<double> Packed = vsim::parts::Pack(Car->GetParts());
 	Save->Parts.Append(Packed.data(), static_cast<int32>(Packed.size()));
+	Save->Journal = GI->Journal;
+	for (APeregonCar* Other : Cars)
+	{
+		if (!IsValid(Other) || Other == Car)
+		{
+			continue;
+		}
+		FPeregonSavedCar& Saved = Save->Convoy.AddDefaulted_GetRef();
+		Saved.Transform = Other->GetActorTransform();
+		Saved.CarState = Other->GetVehicleMovement()->GetCarState();
+		const std::vector<double> OtherParts = vsim::parts::Pack(Other->GetParts());
+		Saved.Parts.Append(OtherParts.data(), static_cast<int32>(OtherParts.size()));
+		Saved.Color = Other->PaintColor;
+		Saved.Glovebox = Other->GloveStore;
+		Saved.Trunk = Other->TrunkStore;
+	}
 	Save->TraveledMaxS = GI->TraveledMaxS;
 	Save->Climate = GI->Climate;
 	return UGameplayStatics::SaveGameToSlot(Save, UPeregonSaveGame::SlotName, 0);
@@ -289,6 +311,16 @@ void APeregonGameMode::StartSession(const FPeregonRunConfig& Config, const UPere
 		}
 	}
 
+	if (Mode == EPeregonMode::Road)
+	{
+		APeregonTraffic* Flow = GetWorld()->SpawnActor<APeregonTraffic>(APeregonTraffic::StaticClass(), FTransform::Identity, Params);
+		if (Flow)
+		{
+			Flow->RoadWorld = RoadWorld;
+			Traffic = Flow;
+		}
+	}
+
 	// Сюжетное начало: двор с гаражами, машина без половины деталей.
 	const bool bGarage = Mode == EPeregonMode::Road && !Save && Config.bGarageStart;
 	APeregonGarageYard* Yard = nullptr;
@@ -332,12 +364,32 @@ void APeregonGameMode::StartSession(const FPeregonRunConfig& Config, const UPere
 	if (Save)
 	{
 		Car->GetVehicleMovement()->ApplyCarState(Save->CarState);
+		// Остальная колонна — где её оставили.
+		for (const FPeregonSavedCar& Saved : Save->Convoy)
+		{
+			vsim::parts::CarState OtherParts;
+			const std::vector<double> Data(Saved.Parts.GetData(), Saved.Parts.GetData() + Saved.Parts.Num());
+			const bool bParts = vsim::parts::Unpack(Data, OtherParts);
+			FTransform Where = Saved.Transform;
+			Where.AddToTranslation(FVector(0, 0, 40));
+			if (APeregonCar* Other = SpawnCar(Where, Saved.Color, bParts ? &OtherParts : nullptr))
+			{
+				Other->GetVehicleMovement()->ApplyCarState(Saved.CarState);
+				Other->GloveStore = Saved.Glovebox;
+				Other->TrunkStore = Saved.Trunk;
+				Other->GetVehicleMovement()->SetParkingBrake(true);
+			}
+		}
 	}
 	else if (bGarage)
 	{
 		FPeregonCarState Tank = Car->GetVehicleMovement()->GetCarState();
 		Tank.FuelL = 6.f; // на донышке — до первой АЗС хватит
 		Car->GetVehicleMovement()->ApplyCarState(Tank);
+		if (UPeregonGameInstance* TutorialGI = GetGameInstance<UPeregonGameInstance>())
+		{
+			TutorialGI->Journal.bTutorial = true; // задачи «первой машины» на экране (F1)
+		}
 		// Брошенный «Сокол» на разборке: всё на месте, но всё уставшее. Донор или вторая машина колонны.
 		const vsim::parts::CarState Donor = vsim::parts::MakeAbandoned(static_cast<uint32>(Config.Seed) * 31u + 7u, 0.32);
 		if (APeregonCar* Second = SpawnCar(Yard->GetDonorSpot(), FLinearColor(0.45f, 0.38f, 0.22f), &Donor))

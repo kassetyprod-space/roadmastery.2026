@@ -74,6 +74,12 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> PaintedPost;
 	bool bPaintedTried = false;
 	UMaterialInstanceDynamic* GetPaintedPost();
+	// Гроза: молнии и раскаты.
+	void UpdateStorm(const FVector& Camera, float DeltaSeconds);
+	float LightningTimer = 10.f;
+	float Flash = 0.f;
+	float FlashFlicker = 0.f;
+	TArray<TPair<float, float>> Thunders; // через сколько секунд и насколько громко
 	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> CloudLayerMids;
 	UPROPERTY(Transient) TObjectPtr<UProceduralMeshComponent> Stars;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> StarsMid;

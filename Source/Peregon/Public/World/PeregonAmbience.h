@@ -45,6 +45,11 @@ private:
 	void UpdatePrecipitation(UProceduralMeshComponent* Mesh, UMaterialInstanceDynamic* Mid, FVector2D& Drift, float& Fall, bool bSnow, float Amount,
 		const FVector& Camera, float DeltaSeconds);
 	void UpdateLeaves(const FVector& Camera, const FVector& CameraVelocity, float DeltaSeconds);
+	// Собаки в сёлах, вороны в полях.
+	void UpdateCritters(const FVector& Camera, float DeltaSeconds);
+	float DogTimer = 8.f;
+	float SecondDog = 0.f;
+	float CrowTimer = 15.f;
 	APeregonRoadWorld* FindRoadWorld();
 	bool IsInsideCar() const;
 

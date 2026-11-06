@@ -85,6 +85,7 @@ private:
 	float PaintAmount = 70.f;
 	int32 LampIndex = 2;
 	int32 CloudIndex = 2;
+	int32 TrafficIndex = 2;
 	float VolMaster = 100.f;
 	float VolEngine = 100.f;
 	float VolEffects = 100.f;

@@ -1189,8 +1189,10 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 		}
 		if (Part->ComponentHasTag(TEXT("RadioTune")))
 		{
-			return Radio && Radio->IsPowered() ? FString::Printf(TEXT("%s — колесо мыши: другая песня"), *Radio->GetTrackName())
-											   : FString(TEXT("Включить радио (ЛКМ / N)"));
+			return Radio && Radio->IsPowered()
+				? FString::Printf(TEXT("%s · %s — колесо: другая песня%s"), *Radio->GetStationName(), *Radio->GetTrackName(),
+					Radio->GetStationCount() > 1 ? TEXT(", ЛКМ: другая станция") : TEXT(""))
+				: FString(TEXT("Включить радио (ЛКМ / N)"));
 		}
 		const int32 Win = WindowIndex(Part);
 		if (Win >= 0)
@@ -1307,6 +1309,14 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		else if (Part->ComponentHasTag(TEXT("Dome")))
 		{
 			OnDome(FInputActionValue());
+		}
+		else if (Part->ComponentHasTag(TEXT("RadioTune")) && Radio && Radio->IsPowered() && Radio->GetStationCount() > 1)
+		{
+			Radio->NextStation();
+			if (APeregonGameMode* StationGM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
+			{
+				StationGM->Toast(FString::Printf(TEXT("Станция: %s"), *Radio->GetStationName()), 2.f);
+			}
 		}
 		else if (Part->ComponentHasTag(TEXT("RadioVol")) || Part->ComponentHasTag(TEXT("RadioTune")))
 		{

@@ -1,4 +1,6 @@
 #include "World/PeregonAmbience.h"
+#include "rgen/Route.h"
+#include "Game/PeregonGameMode.h"
 
 #include "Art/PeregonArtSubsystem.h"
 #include "Audio/PeregonAudio.h"
@@ -199,6 +201,7 @@ void APeregonAmbience::Tick(float DeltaSeconds)
 		UpdatePrecipitation(Snow, SnowMid, SnowDrift, SnowFall, true, static_cast<float>(Mix.Snow), Camera, DeltaSeconds);
 	}
 	UpdateLeaves(Camera, CameraVelocity.GetClampedToMaxSize(5000.f), DeltaSeconds);
+	UpdateCritters(Camera, DeltaSeconds);
 
 	const bool bInside = IsInsideCar();
 	if (RainSound)
@@ -330,4 +333,68 @@ void APeregonAmbience::UpdateLeaves(const FVector& Camera, const FVector& Camera
 		LeafTransforms[I] = L.bActive ? FTransform(L.Rot, L.Pos, FVector(0.07f, 0.07f, 0.07f)) : FTransform(FRotator::ZeroRotator, Camera, FVector::ZeroVector);
 	}
 	LeafMesh->BatchUpdateInstancesTransforms(0, LeafTransforms, true, true, true);
+}
+
+void APeregonAmbience::UpdateCritters(const FVector& Camera, float DeltaSeconds)
+{
+	// Жизнь вокруг: в сёлах и городах лают собаки (вечером чаще), в полях и у леса днём каркают вороны.
+	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	const APeregonRoadWorld* World = GM ? GM->GetRoadWorld() : nullptr;
+	if (!World || !Sky)
+	{
+		return;
+	}
+	const float Hours = Sky->GetTimeOfDay();
+	const float Rain = static_cast<float>(Sky->GetWeather().Rain);
+	const double Urban = World->GetLandscape().UrbanMask(Camera.X / 100.0, Camera.Y / 100.0);
+	// Деревня рядом: по расстоянию до ближайшего села на маршруте.
+	double NearVillage = 1e9;
+	const double S = World->GetTrackedS();
+	for (const rgen::Poi& P : World->GetRoute().Pois())
+	{
+		if (P.Type == rgen::PoiType::Village || P.Type == rgen::PoiType::Town)
+		{
+			NearVillage = FMath::Min(NearVillage, FMath::Abs(P.S - S));
+		}
+	}
+	const bool bSettled = Urban > 0.05 || NearVillage < 350.0;
+	auto Around = [&Camera](float MinM, float MaxM) {
+		const float A = FMath::FRandRange(0.f, 2.f * PI);
+		const float D = FMath::FRandRange(MinM, MaxM) * 100.f;
+		return Camera + FVector(FMath::Cos(A) * D, FMath::Sin(A) * D, -100.f);
+	};
+	DogTimer -= DeltaSeconds;
+	if (DogTimer <= 0.f)
+	{
+		const bool bEvening = Hours > 18.f || Hours < 7.f;
+		DogTimer = FMath::FRandRange(6.f, 22.f) * (bEvening ? 0.6f : 1.f);
+		if (bSettled && Rain < 0.6f)
+		{
+			// Иногда подхватывает вторая собака с другого двора.
+			PeregonAudio::PlayEvent(this, TEXT("ambient.dog"), Around(40.f, 160.f), FMath::FRandRange(0.35f, 0.8f), FMath::FRandRange(0.85f, 1.2f));
+			if (FMath::FRand() < 0.35f)
+			{
+				SecondDog = FMath::FRandRange(0.8f, 2.f);
+			}
+		}
+	}
+	if (SecondDog > 0.f)
+	{
+		SecondDog -= DeltaSeconds;
+		if (SecondDog <= 0.f)
+		{
+			PeregonAudio::PlayEvent(this, TEXT("ambient.dog"), Around(80.f, 220.f), FMath::FRandRange(0.25f, 0.5f), FMath::FRandRange(0.7f, 1.3f));
+		}
+	}
+	CrowTimer -= DeltaSeconds;
+	if (CrowTimer <= 0.f)
+	{
+		CrowTimer = FMath::FRandRange(18.f, 55.f);
+		const bool bDay = Hours > 6.f && Hours < 20.f;
+		if (bDay && Rain < 0.4f && Urban < 0.5)
+		{
+			PeregonAudio::PlayEvent(this, TEXT("ambient.crow"), Around(50.f, 200.f) + FVector(0.f, 0.f, 1500.f), FMath::FRandRange(0.3f, 0.6f),
+				FMath::FRandRange(0.9f, 1.1f));
+		}
+	}
 }

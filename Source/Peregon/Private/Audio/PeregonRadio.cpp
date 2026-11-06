@@ -163,14 +163,75 @@ FString UPeregonRadio::GetFolder()
 	return FPaths::ProjectContentDir() / TEXT("Radio");
 }
 
+void UPeregonRadio::ScanStations()
+{
+	Stations.Reset();
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *(GetFolder() / TEXT("*.mp3")), true, false);
+	if (Files.Num() > 0)
+	{
+		Stations.Add({TEXT("Радио «Р-255»"), GetFolder(), -1});
+	}
+	TArray<FString> Dirs;
+	IFileManager::Get().FindFiles(Dirs, *(GetFolder() / TEXT("*")), false, true);
+	for (const FString& Dir : Dirs)
+	{
+		FStation S;
+		S.Folder = GetFolder() / Dir;
+		FString Name = Dir;
+		FString RegionPart;
+		if (Dir.Split(TEXT("@"), &Name, &RegionPart, ESearchCase::IgnoreCase, ESearchDir::FromEnd) && RegionPart.IsNumeric())
+		{
+			S.Region = FCString::Atoi(*RegionPart);
+		}
+		S.Name = Name;
+		TArray<FString> Inside;
+		IFileManager::Get().FindFiles(Inside, *(S.Folder / TEXT("*.mp3")), true, false);
+		if (Inside.Num() > 0)
+		{
+			Stations.Add(S);
+		}
+	}
+	Station = Stations.Num() > 0 ? Station % Stations.Num() : 0;
+}
+
+void UPeregonRadio::NextStation()
+{
+	ScanStations();
+	if (Stations.Num() <= 1 || bLoading)
+	{
+		NextTrack();
+		return;
+	}
+	Station = (Station + 1) % Stations.Num();
+	Playlist.Reset();
+	Current = -1;
+	NextTrack();
+}
+
+FString UPeregonRadio::GetStationName() const
+{
+	return Stations.IsValidIndex(Station) ? Stations[Station].Name : FString(TEXT("Радио"));
+}
+
+int32 UPeregonRadio::GetStationRegion() const
+{
+	return Stations.IsValidIndex(Station) ? Stations[Station].Region : -1;
+}
+
 void UPeregonRadio::ScanFolder()
 {
 	Playlist.Reset();
+	if (Stations.Num() == 0)
+	{
+		ScanStations();
+	}
+	const FString Folder = Stations.IsValidIndex(Station) ? Stations[Station].Folder : GetFolder();
 	TArray<FString> Files;
-	IFileManager::Get().FindFiles(Files, *(GetFolder() / TEXT("*.mp3")), true, false);
+	IFileManager::Get().FindFiles(Files, *(Folder / TEXT("*.mp3")), true, false);
 	for (const FString& File : Files)
 	{
-		Playlist.Add(GetFolder() / File);
+		Playlist.Add(Folder / File);
 	}
 	// Перемешать (Фишер — Йейтс).
 	for (int32 I = Playlist.Num() - 1; I > 0; --I)

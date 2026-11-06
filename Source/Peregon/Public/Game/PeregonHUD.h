@@ -21,6 +21,7 @@ public:
 	virtual void DrawHUD() override;
 
 	void ToggleDetails() { bShowDetails = !bShowDetails; }
+	void ToggleTasks() { bShowTasks = !bShowTasks; }
 
 private:
 	enum class EUiFont : uint8
@@ -52,4 +53,6 @@ private:
 	float UiScale = 1.f;
 	float TripBottom = 0.f; // низ блока маршрута — под ним рисуется F3
 	bool bShowDetails = false;
+	bool bShowTasks = true;
+	void DrawTasks();
 };

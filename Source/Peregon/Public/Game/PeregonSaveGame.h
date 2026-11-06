@@ -7,6 +7,20 @@
 #include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "PeregonSaveGame.generated.h"
 
+// Машина колонны, кроме той, в которой ехали.
+USTRUCT()
+struct FPeregonSavedCar
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FTransform Transform;
+	UPROPERTY() FPeregonCarState CarState;
+	UPROPERTY() TArray<double> Parts;
+	UPROPERTY() FLinearColor Color = FLinearColor::White;
+	UPROPERTY() FPeregonContainer Glovebox;
+	UPROPERTY() FPeregonContainer Trunk;
+};
+
 UCLASS()
 class PEREGON_API UPeregonSaveGame : public USaveGame
 {
@@ -15,7 +29,7 @@ class PEREGON_API UPeregonSaveGame : public USaveGame
 public:
 	static const FString SlotName;
 
-	UPROPERTY() int32 Version = 4;
+	UPROPERTY() int32 Version = 5;
 	UPROPERTY() FPeregonRunConfig Config;
 	UPROPERTY() FTransform CarTransform;
 	UPROPERTY() FPeregonCarState CarState;
@@ -34,4 +48,7 @@ public:
 	// С версии 4: детали и кузов машины (vsim::parts::Pack) и её цвет.
 	UPROPERTY() TArray<double> Parts;
 	UPROPERTY() FLinearColor CarColor = FLinearColor(0.32f, 0.04f, 0.04f);
+	// С версии 5: вся колонна и бортовой журнал.
+	UPROPERTY() TArray<FPeregonSavedCar> Convoy;
+	UPROPERTY() FPeregonJournal Journal;
 };

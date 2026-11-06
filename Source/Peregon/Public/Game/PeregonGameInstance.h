@@ -32,6 +32,24 @@ struct FPeregonRunConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") int32 StartDayOfYear = 258;
 };
 
+// Бортовой журнал: что было в дороге.
+USTRUCT(BlueprintType)
+struct FPeregonJournal
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") float Km = 0.f;           // пройдено за рулём
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") float FuelBoughtL = 0.f;  // куплено бензина
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") float MoneySpent = 0.f;
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") int32 PartsInstalled = 0;
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") int32 BodyJobs = 0;
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") int32 Photos = 0;
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") TArray<FString> PhotoNotes; // «День 2, 14:20 · Мошково»
+	// Обучение в гараже: идёт ли и заводили ли уже мотор.
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") bool bTutorial = false;
+	UPROPERTY(BlueprintReadWrite, Category = "Journal") bool bEngineStarted = false;
+};
+
 // Погода и время года (сохраняется). Логика — в rgen::Climate.
 USTRUCT(BlueprintType)
 struct FPeregonClimate
@@ -120,6 +138,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Peregon|Inventory")
 	FPeregonContainer Trunk;
 
+	UPROPERTY(BlueprintReadWrite, Category = "Peregon")
+	FPeregonJournal Journal;
+
 	// Самая дальняя точка маршрута, до которой доехали (м) — её карандашом отмечаем на карте.
 	UPROPERTY(BlueprintReadWrite, Category = "Peregon")
 	float TraveledMaxS = 0.f;
@@ -142,6 +163,7 @@ public:
 		Trunk.Capacity = 10;
 		Trunk.Add(PeregonItems::CanisterEmpty);
 		TraveledMaxS = 0.f;
+		Journal = FPeregonJournal();
 	}
 
 	bool TrySpend(float Amount)
@@ -151,6 +173,7 @@ public:
 			return false;
 		}
 		Money -= Amount;
+		Journal.MoneySpent += Amount;
 		return true;
 	}
 };

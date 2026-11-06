@@ -8,6 +8,7 @@
 #include "Audio/PeregonRadio.h"
 #include "Components/BoxComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Game/PeregonGameInstance.h"
 #include "Game/PeregonGameMode.h"
 #include "Game/PeregonPlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -503,6 +504,10 @@ bool APeregonCar::PartsInteract(UPrimitiveComponent* Part, APawn* User)
 				Car->bPartsDirty = true;
 				PeregonAudio::PlayEvent(Car, TEXT("door.close"), Car->SlotBoxes[SlotIndex]->GetComponentLocation(), 0.35f, 1.6f);
 				P->Toast(FString::Printf(TEXT("Поставлено: %s"), *PeregonItems::StackLabel(Item)));
+				if (UPeregonGameInstance* GI = Car->GetWorld()->GetGameInstance<UPeregonGameInstance>())
+				{
+					++GI->Journal.PartsInstalled;
+				}
 			});
 			return true;
 		}
@@ -624,6 +629,10 @@ bool APeregonCar::PartsInteract(UPrimitiveComponent* Part, APawn* User)
 			}
 			vsim::parts::Apply(State, Op, Op == vsim::parts::BodyOp::PaintIt ? Color : nullptr);
 			Car->bBodyDirty = true;
+			if (UPeregonGameInstance* GI = Car->GetWorld()->GetGameInstance<UPeregonGameInstance>())
+			{
+				++GI->Journal.BodyJobs;
+			}
 			const vsim::parts::BodyOp Next = vsim::parts::NextStep(State);
 			P->Toast(vsim::parts::PanelScore(State) > 0.95 ? FString(TEXT("Готово — панель как новая"))
 															: FString::Printf(TEXT("Готово. Дальше: %s"), *PeregonCarParts::U(vsim::parts::OpName(Next)).ToLower()));
@@ -676,6 +685,14 @@ void APeregonCar::UpdateParts(float DeltaSeconds, const FPeregonTelemetry& T)
 	const double Odo = T.OdometerKm;
 	const double Km = LastOdometerKm < 0.0 ? 0.0 : FMath::Max(0.0, Odo - LastOdometerKm);
 	LastOdometerKm = Odo;
+	if (Controller && Controller->IsPlayerController())
+	{
+		if (UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>())
+		{
+			GI->Journal.Km += static_cast<float>(Km);
+			GI->Journal.bEngineStarted |= T.bEngineRunning;
+		}
+	}
 	const UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
 	const double Wet = Art ? Art->GetWetness() : 0.0;
 	const double Hours = DeltaSeconds / 60.0; // минута игры ≈ час износа

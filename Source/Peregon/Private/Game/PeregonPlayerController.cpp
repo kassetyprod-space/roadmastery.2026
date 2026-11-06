@@ -1,4 +1,9 @@
 #include "Game/PeregonPlayerController.h"
+#include "rgen/Route.h"
+#include "UnrealClient.h"
+#include "Misc/Paths.h"
+#include "Audio/PeregonAudio.h"
+#include "Game/PeregonHUD.h"
 
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
@@ -49,6 +54,10 @@ void APeregonPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::F6, IE_Pressed, this, &APeregonPlayerController::NextWeather);
 	InputComponent->BindKey(EKeys::F7, IE_Pressed, this, &APeregonPlayerController::SkipDays);
 	InputComponent->BindKey(EKeys::F8, IE_Pressed, this, &APeregonPlayerController::SkipHour);
+	// B — журнал, F9 — фото, F1 — задачи обучения. Клавиши не «съедаются»: машина и пешеход их тоже видят.
+	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &APeregonPlayerController::OpenJournal).bConsumeInput = false;
+	InputComponent->BindKey(EKeys::F9, IE_Pressed, this, &APeregonPlayerController::TakePhoto).bConsumeInput = false;
+	InputComponent->BindKey(EKeys::F1, IE_Pressed, this, &APeregonPlayerController::ToggleTasks).bConsumeInput = false;
 	// Что в руках: 1–0 — ячейка карманов, G — положить на землю (в машине G — коробка передач, её не трогаем).
 	for (const FKey& Key : {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine,
 			 EKeys::Zero, EKeys::G})
@@ -887,5 +896,95 @@ void APeregonPlayerController::OpenManual()
 	Line(TEXT("Голый металл под дождём ржавеет за часы — грунтуйте сразу после зачистки."), 0);
 	Line(TEXT("Печка (U) греет только с прогретым мотором. Чтобы стёкла не потели — приоткройте окно (колесо мыши на ручке)."), 0);
 	TSharedRef<SPeregonManualPanel> Panel = SNew(SPeregonManualPanel).Owner(this).Title(TEXT("Техничка «Сокол-1500»")).Lines(Lines);
+	ShowPanel(Panel, Panel);
+}
+
+void APeregonPlayerController::ToggleTasks()
+{
+	if (APeregonHUD* Hud = Cast<APeregonHUD>(GetHUD()))
+	{
+		Hud->ToggleTasks();
+	}
+}
+
+void APeregonPlayerController::TakePhoto()
+{
+	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+	if (!GM || !GI || GM->GetMode() == EPeregonMode::Menu || IsMenuOpen() || IsPanelOpen())
+	{
+		return;
+	}
+	const APeregonRoadWorld* World = GM->GetRoadWorld();
+	const FString Place = World ? World->GetPlaceName(World->GetTrackedS()) : FString(TEXT("Полигон"));
+	const int32 Hours = FMath::FloorToInt(GI->TimeOfDayHours);
+	const int32 Minutes = FMath::FloorToInt((GI->TimeOfDayHours - Hours) * 60.f);
+	const FString Note = FString::Printf(TEXT("День %d, %02d:%02d · %s"), GI->Day, Hours, Minutes, *Place);
+	const FString File = FPaths::ProjectSavedDir() / TEXT("Screenshots/Peregon") /
+		FString::Printf(TEXT("%03d_day%02d_%02d%02d.png"), GI->Journal.Photos + 1, GI->Day, Hours, Minutes);
+	FScreenshotRequest::RequestScreenshot(File, false, false); // без интерфейса
+	++GI->Journal.Photos;
+	GI->Journal.PhotoNotes.Add(Note);
+	PeregonAudio::PlayEvent(this, TEXT("camera.shutter"), GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector, 0.6f);
+	Toast(FString::Printf(TEXT("Фото %d: %s (журнал — B)"), GI->Journal.Photos, *Note));
+}
+
+void APeregonPlayerController::OpenJournal()
+{
+	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	const UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+	if (!GM || !GI || GM->GetMode() == EPeregonMode::Menu || IsMenuOpen())
+	{
+		return;
+	}
+	if (IsPanelOpen())
+	{
+		ClosePanel();
+		return;
+	}
+	const FPeregonJournal& J = GI->Journal;
+	TArray<FPeregonManualLine> Lines;
+	auto Line = [&Lines](const FString& Text, int32 Style) { Lines.Add({Text, Style}); };
+	Line(TEXT("Дорога"), 1);
+	Line(FString::Printf(TEXT("День %d. Пройдено за рулём: %.1f км. Машин в колонне: %d."), GI->Day, J.Km, GM->GetCars().Num()), 0);
+	Line(FString::Printf(TEXT("Куплено бензина: %.0f л. Потрачено: %.0f ₽. На руках: %.0f ₽."), J.FuelBoughtL, J.MoneySpent, GI->Money), 0);
+	Line(FString::Printf(TEXT("Поставлено деталей: %d. Кузовных работ: %d."), J.PartsInstalled, J.BodyJobs), 0);
+	if (const APeregonRoadWorld* World = GM->GetRoadWorld())
+	{
+		Line(TEXT("Пройденные места"), 1);
+		int32 Passed = 0;
+		for (const rgen::Poi& P : World->GetRoute().Pois())
+		{
+			if (P.Name.empty() || P.Type == rgen::PoiType::Waypoint)
+			{
+				continue;
+			}
+			const bool bDone = P.S <= GI->TraveledMaxS;
+			if (bDone || Passed < 64)
+			{
+				Line(FString::Printf(TEXT("%s — %.0f км"), UTF8_TO_TCHAR(P.Name.c_str()), P.RealKm), bDone ? 4 : 0);
+				Passed += bDone ? 1 : 0;
+			}
+			if (!bDone)
+			{
+				Line(TEXT("…дальше — впереди."), 0);
+				break;
+			}
+		}
+	}
+	Line(TEXT("Фотографии"), 1);
+	if (J.PhotoNotes.Num() == 0)
+	{
+		Line(TEXT("Пока ни одной. F9 — сфотографировать (кадр без интерфейса)."), 0);
+	}
+	for (int32 I = FMath::Max(0, J.PhotoNotes.Num() - 20); I < J.PhotoNotes.Num(); ++I)
+	{
+		Line(FString::Printf(TEXT("%d. %s"), I + 1, *J.PhotoNotes[I]), 0);
+	}
+	if (J.Photos > 0)
+	{
+		Line(FString::Printf(TEXT("Снимки лежат в папке %s"), *FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Screenshots/Peregon"))), 0);
+	}
+	TSharedRef<SPeregonManualPanel> Panel = SNew(SPeregonManualPanel).Owner(this).Title(TEXT("Бортовой журнал")).Lines(Lines);
 	ShowPanel(Panel, Panel);
 }

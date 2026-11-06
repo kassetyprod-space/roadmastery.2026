@@ -452,6 +452,7 @@ TSharedRef<SWidget> SPeregonMenu::BuildSettingsPage()
 	Add(MakeRow(INVTEXT("Лимит кадров"), MakeChoice(&FpsIndex,
 		{INVTEXT("Без лимита"), INVTEXT("30"), INVTEXT("60"), INVTEXT("120"), INVTEXT("144"), INVTEXT("165"), INVTEXT("240")})));
 	Add(MakeRow(INVTEXT("Детализация текстур (после перезапуска)"), MakeChoice(&TextureIndex, {INVTEXT("Обычная"), INVTEXT("Высокая"), INVTEXT("Ультра")})));
+	Add(MakeRow(INVTEXT("Машин на дороге"), MakeChoice(&TrafficIndex, {INVTEXT("Нет"), INVTEXT("Мало"), INVTEXT("Обычно"), INVTEXT("Много")})));
 	Add(MakeRow(INVTEXT("Облака"), MakeChoice(&CloudIndex, {INVTEXT("Один слой"), INVTEXT("Три слоя"), INVTEXT("Пять слоёв")})));
 	Add(MakeRow(INVTEXT("Свет фонарей и окон"), MakeChoice(&LampIndex,
 		{INVTEXT("Только свечение"), INVTEXT("8 ближайших"), INVTEXT("24 ближайших"), INVTEXT("48 ближайших")})));
@@ -489,6 +490,7 @@ void SPeregonMenu::LoadSettings()
 	StyleIndex = FMath::Clamp(S->VisualStyle, 0, 1);
 	TextureIndex = FMath::Clamp(S->TextureDetail, 0, 2);
 	CloudIndex = FMath::Clamp(S->CloudQuality, 0, 2);
+	TrafficIndex = FMath::Clamp(S->TrafficDensity, 0, 3);
 	LampIndex = S->MaxLampLights <= 0 ? 0 : (S->MaxLampLights <= 8 ? 1 : (S->MaxLampLights <= 24 ? 2 : 3));
 	NightDark = S->NightDarkness * 100.f;
 	bVolFog = S->bVolumetricFog;
@@ -560,6 +562,7 @@ void SPeregonMenu::ApplySettings()
 	S->VisualStyle = StyleIndex;
 	S->TextureDetail = TextureIndex;
 	S->CloudQuality = CloudIndex;
+	S->TrafficDensity = TrafficIndex;
 	static const int32 Lamps[] = {0, 8, 24, 48};
 	S->MaxLampLights = Lamps[FMath::Clamp(LampIndex, 0, 3)];
 	S->NightDarkness = NightDark / 100.f;

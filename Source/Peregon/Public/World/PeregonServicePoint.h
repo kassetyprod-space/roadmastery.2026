@@ -73,7 +73,7 @@ private:
 	void BuildShop();
 
 	// Сколько литров нужно машине игрока и стоит ли она у колонки.
-	bool GetCarNeed(float& OutLiters) const;
+	bool GetCarNeed(float& OutLiters, class APeregonCar** OutCar = nullptr) const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> CubeMesh;

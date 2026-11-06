@@ -1,4 +1,6 @@
 #include "Game/PeregonHUD.h"
+#include "rgen/Route.h"
+#include "vsim/CarParts.h"
 
 #include "EngineUtils.h"
 #include "World/PeregonSky.h"
@@ -176,6 +178,91 @@ void APeregonHUD::DrawHUD()
 		DrawCrosshair(&Walker->GetFocus(), true, TEXT("E"));
 	}
 	DrawHeld();
+	DrawTasks();
+}
+
+void APeregonHUD::DrawTasks()
+{
+	// Обучение в гараже: список шагов с галочками (F1 — спрятать).
+	UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+	APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	if (!GI || !GM || !GI->Journal.bTutorial || !bShowTasks || GM->GetMode() != EPeregonMode::Road)
+	{
+		return;
+	}
+	const APeregonCar* Car = GM->GetCar();
+	if (!Car)
+	{
+		return;
+	}
+	using vsim::parts::Slot;
+	const vsim::parts::CarState& Parts = Car->GetParts();
+	auto Got = [&](Slot S) {
+		return Parts.Has(S) || GI->Pockets.Has(PeregonItems::PartItem(static_cast<int32>(S))) || Car->TrunkStore.Has(PeregonItems::PartItem(static_cast<int32>(S)));
+	};
+	double FuelS = 1e9;
+	if (const APeregonRoadWorld* World = GM->GetRoadWorld())
+	{
+		for (const rgen::Poi& P : World->GetRoute().Pois())
+		{
+			if (P.Type == rgen::PoiType::Fuel)
+			{
+				FuelS = P.S;
+				break;
+			}
+		}
+	}
+	const bool bTools = GI->Pockets.Has(PeregonItems::ToolItem(static_cast<int32>(vsim::parts::Tool::Wrenches)))
+		&& GI->Pockets.Has(PeregonItems::ToolItem(static_cast<int32>(vsim::parts::Tool::PlugSocket)));
+	const bool bAll = Parts.Has(Slot::Battery) && Parts.Has(Slot::SparkPlugs) && Parts.Has(Slot::AirFilter) && Parts.Has(Slot::Carburetor);
+	struct FTask
+	{
+		const TCHAR* Text;
+		bool bDone;
+	};
+	const FTask Tasks[] = {
+		{TEXT("Возьмите ключи и свечной ключ с верстака у гаража (E)"), bTools || bAll},
+		{TEXT("Найдите аккумулятор — на помойке у дороги"), Got(Slot::Battery)},
+		{TEXT("Найдите свечи — там же"), Got(Slot::SparkPlugs)},
+		{TEXT("Найдите воздушный фильтр — там же"), Got(Slot::AirFilter)},
+		{TEXT("Купите карбюратор на разборке за забором"), Got(Slot::Carburetor)},
+		{TEXT("Откройте капот, возьмите деталь в руки (1–0) и держите E на её месте"), bAll},
+		{TEXT("Долейте антифриз из канистры у верстака (горловина справа)"), Parts.CoolantL >= 5.0},
+		{TEXT("Сядьте за руль, опустите ручник (P) и заведите мотор (R)"), GI->Journal.bEngineStarted},
+		{TEXT("Доберитесь до первой АЗС и заправьтесь"), GI->TraveledMaxS >= FuelS - 40.0 && GI->Journal.FuelBoughtL > 0.f},
+	};
+	bool bDoneAll = true;
+	for (const FTask& T : Tasks)
+	{
+		bDoneAll &= T.bDone;
+	}
+	if (bDoneAll)
+	{
+		GI->Journal.bTutorial = false;
+		GM->Toast(TEXT("«Сокол» на ходу! Впереди — Владивосток. Техничка в бардачке подскажет, что чинить дальше."), 8.f);
+		return;
+	}
+	const float X = Px(PeregonUi::Margin);
+	float Y = FMath::Max(TripBottom + Px(18.f), Canvas->ClipY * 0.36f); // ниже уведомлений
+	float W = 0.f;
+	for (const FTask& T : Tasks)
+	{
+		W = FMath::Max(W, Measure(T.Text, EUiFont::Small).X);
+	}
+	const float LineH = Measure(TEXT("Н"), EUiFont::Small).Y + Px(4.f);
+	Panel(X - Px(10.f), Y - Px(8.f), W + Px(40.f), LineH * (UE_ARRAY_COUNT(Tasks) + 1) + Px(14.f), 0.45f);
+	Label(TEXT("Первая машина · F1 — спрятать"), EUiFont::Small, PeregonUi::Amber, X, Y);
+	Y += LineH;
+	bool bCurrent = false;
+	for (const FTask& T : Tasks)
+	{
+		// Текущий шаг — ярко, сделанные — с галочкой и тускло, будущие — тускло.
+		const bool bNow = !T.bDone && !bCurrent;
+		bCurrent |= bNow;
+		Label(FString(T.bDone ? TEXT("+ ") : (bNow ? TEXT("> ") : TEXT("  "))) + T.Text, EUiFont::Small,
+			bNow ? PeregonUi::Text : PeregonUi::Dim, X, Y, T.bDone ? 0.5f : 1.f);
+		Y += LineH;
+	}
 }
 
 void APeregonHUD::DrawHeld()

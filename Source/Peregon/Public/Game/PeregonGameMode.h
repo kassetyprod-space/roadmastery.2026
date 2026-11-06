@@ -83,6 +83,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<APeregonCar> Car;
 	UPROPERTY(Transient) TArray<TObjectPtr<APeregonCar>> Cars;
 	UPROPERTY(Transient) TObjectPtr<AActor> GarageYard;
+	UPROPERTY(Transient) TObjectPtr<AActor> Traffic;
 	APeregonCar* SpawnCar(const FTransform& Where, const FLinearColor& Color, const vsim::parts::CarState* Parts);
 	UPROPERTY(Transient) TObjectPtr<APeregonCharacter> Walker;
 	UPROPERTY(Transient) TObjectPtr<APeregonSky> Sky;
