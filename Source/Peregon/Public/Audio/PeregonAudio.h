@@ -71,18 +71,18 @@ public:
 	void SetupOneShot(const FString& Event, EPeregonProcedural Fallback, float Pitch);
 
 	// Параметры — с игрового потока в любой момент.
-	void SetEngineState(float Rpm, float Load, bool bRunning, bool bCranking)
+	void SetEngineState(float InRpm, float InLoad, bool bInRunning, bool bInCranking)
 	{
-		ParamRpm.store(Rpm);
-		ParamLoad.store(Load);
-		ParamRunning.store(bRunning);
-		ParamCranking.store(bCranking);
+		ParamRpm.store(InRpm);
+		ParamLoad.store(InLoad);
+		ParamRunning.store(bInRunning);
+		ParamCranking.store(bInCranking);
 	}
 	// Громкость 0..1 и «интенсивность» (скорость воспроизведения петли или параметр синтеза: скорость, скольжение).
-	void SetLevel(float Volume, float Intensity)
+	void SetLevel(float InVolume, float InIntensity)
 	{
-		ParamVolume.store(Volume);
-		ParamIntensity.store(Intensity);
+		ParamVolume.store(InVolume);
+		ParamIntensity.store(InIntensity);
 	}
 	// Звук «из салона»: приглушаем верха.
 	void SetMuffled(bool bMuffled) { ParamMuffled.store(bMuffled); }

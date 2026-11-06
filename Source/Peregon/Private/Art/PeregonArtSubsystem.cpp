@@ -431,17 +431,17 @@ UTexture2D* UPeregonArtSubsystem::Generate(EPeregonTex Type)
 		{
 			for (int32 X = 0; X < NextW; ++X)
 			{
-				FLinearColor Sum(0.f, 0.f, 0.f, 0.f);
+				FLinearColor Box2x2(0.f, 0.f, 0.f, 0.f);
 				for (int32 DY = 0; DY < 2; ++DY)
 				{
 					for (int32 DX = 0; DX < 2; ++DX)
 					{
 						const int32 SX = FMath::Min(MipW - 1, X * 2 + DX);
 						const int32 SY = FMath::Min(MipH - 1, Y * 2 + DY);
-						Sum += Level[SY * MipW + SX];
+						Box2x2 += Level[SY * MipW + SX];
 					}
 				}
-				Next[Y * NextW + X] = Sum * 0.25f;
+				Next[Y * NextW + X] = Box2x2 * 0.25f;
 				Packed[Y * NextW + X] = Next[Y * NextW + X].ToFColor(true);
 			}
 		}
