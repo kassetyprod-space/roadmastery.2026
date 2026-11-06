@@ -26,7 +26,7 @@ enum class BuildingKind : uint8_t
 	Count
 };
 
-struct Building
+struct RGEN_API Building
 {
 	BuildingKind Kind = BuildingKind::Panel5;
 	double X = 0.0;      // центр основания, м
