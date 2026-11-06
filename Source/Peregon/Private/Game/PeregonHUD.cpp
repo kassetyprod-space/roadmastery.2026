@@ -3,7 +3,10 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "Game/PeregonGameInstance.h"
+#include "Game/PeregonGameMode.h"
 #include "Interaction/PeregonInteractable.h"
+#include "World/PeregonRoadWorld.h"
 #include "Player/PeregonCharacter.h"
 #include "Vehicle/PeregonCar.h"
 #include "Vehicle/PeregonVehicleMovementComponent.h"
@@ -53,6 +56,12 @@ void APeregonHUD::DrawHUD()
 		return;
 	}
 	const APawn* Pawn = GetOwningPawn();
+	if (!Pawn)
+	{
+		return; // главное меню
+	}
+	DrawTrip();
+	DrawToasts();
 	if (const APeregonCar* Car = Cast<APeregonCar>(Pawn))
 	{
 		DrawCrosshair(&Car->GetFocus(), Car->IsFirstPerson(), TEXT("ЛКМ"));
@@ -209,4 +218,82 @@ void APeregonHUD::DrawDetails(const APeregonCar* Car)
 	}
 	Line(TEXT("W/S газ-тормоз  A/D руль  E/Q передачи  Shift сцепление  Space ручник  P стояночный  L фары"), Dim);
 	Line(TEXT("R стартер  I зажигание  G автомат/механика  C камера  F выйти  ЛКМ взаимодействие  Backspace на колёса"), Dim);
+}
+
+void APeregonHUD::DrawTrip()
+{
+	using namespace PeregonUi;
+	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	const UPeregonGameInstance* GI = GetWorld()->GetGameInstance<UPeregonGameInstance>();
+
+	// Справа сверху: время и деньги.
+	if (GI)
+	{
+		const int32 Hours = FMath::FloorToInt(GI->TimeOfDayHours);
+		const int32 Minutes = FMath::FloorToInt((GI->TimeOfDayHours - Hours) * 60.f);
+		const FString Clock = FString::Printf(TEXT("День %d  %02d:%02d"), GI->Day, Hours, Minutes);
+		const FString Money = FString::Printf(TEXT("%d ₽"), FMath::RoundToInt(GI->Money));
+		float W = 0.f, H = 0.f;
+		GetTextSize(Clock, W, H, Font(1));
+		DrawTextShadowed(Clock, Text, Canvas->ClipX - Margin - W, Margin, Font(1));
+		GetTextSize(Money, W, H, Font(1));
+		DrawTextShadowed(Money, Dim, Canvas->ClipX - Margin - W, Margin + 18.f, Font(1));
+	}
+
+	// Сверху по центру: где мы и что впереди.
+	const APeregonRoadWorld* World = GM ? GM->GetRoadWorld() : nullptr;
+	if (!World || GM->GetMode() != EPeregonMode::Road)
+	{
+		return;
+	}
+	const double S = World->GetTrackedS();
+	const rgen::Route& Route = World->GetRoute();
+	FString Line = World->GetPlaceName(S);
+	if (const rgen::Poi* Next = Route.NextPoi(S))
+	{
+		Line += FString::Printf(TEXT("   →   %s  %.1f км"), UTF8_TO_TCHAR(Next->Name.c_str()), (Next->S - S) / 1000.0);
+	}
+	float W = 0.f, H = 0.f;
+	GetTextSize(Line, W, H, Font(1));
+	DrawTextShadowed(Line, Text, (Canvas->ClipX - W) * 0.5f, Margin, Font(1));
+
+	// Тонкая полоса прогресса маршрута.
+	const float BarW = 260.f;
+	const float X = (Canvas->ClipX - BarW) * 0.5f;
+	const float Y = Margin + H + 6.f;
+	const float Progress = static_cast<float>(FMath::Clamp(S / Route.Length(), 0.0, 1.0));
+	DrawRect(Track, X, Y, BarW, 2.f);
+	DrawRect(Text, X, Y, BarW * Progress, 2.f);
+	for (const rgen::Poi& Poi : Route.Pois())
+	{
+		const float Px = X + BarW * static_cast<float>(Poi.S / Route.Length());
+		const bool bService = Poi.Type == rgen::PoiType::Fuel || Poi.Type == rgen::PoiType::Cafe;
+		DrawRect(bService ? Amber : Text, Px - 1.f, Y - 3.f, 2.f, 8.f);
+	}
+}
+
+void APeregonHUD::DrawToasts()
+{
+	using namespace PeregonUi;
+	const APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>();
+	if (!GM)
+	{
+		return;
+	}
+	const double Now = GetWorld()->GetRealTimeSeconds();
+	float Y = Canvas->ClipY * 0.24f;
+	for (const FPeregonToast& Toast : GM->GetToasts())
+	{
+		const float Left = static_cast<float>(Toast.Until - Now);
+		const float Alpha = FMath::Clamp(Left / 0.6f, 0.f, 1.f) * FMath::Clamp(static_cast<float>(Toast.Duration - Left) / 0.25f, 0.f, 1.f);
+		float W = 0.f, H = 0.f;
+		GetTextSize(Toast.Text, W, H, Font(2));
+		FLinearColor C = Text;
+		C.A *= Alpha;
+		FLinearColor Sh = Shadow;
+		Sh.A *= Alpha;
+		DrawText(Toast.Text, Sh, (Canvas->ClipX - W) * 0.5f + 1.f, Y + 1.f, Font(2));
+		DrawText(Toast.Text, C, (Canvas->ClipX - W) * 0.5f, Y, Font(2));
+		Y += H + 6.f;
+	}
 }

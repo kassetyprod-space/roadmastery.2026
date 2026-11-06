@@ -5,13 +5,19 @@
 ```
 Source/
 ├── VehicleSimCore/        чистый C++17, без Unreal — физика машины
-│   ├── Public/vsim/        Math, Tire, Powertrain, Vehicle, Presets
-│   └── Private/vsim/       реализация (+ VehicleSimCoreModule.cpp — обёртка модуля UE)
+├── RoadGenCore/           чистый C++17, без Unreal — трасса, профиль, рельеф, точки интереса
 └── Peregon/               игра
-    ├── Vehicle/            UPeregonVehicleMovementComponent (мост ядро ↔ UE), APeregonCar
-    ├── Game/               APeregonGameMode, APeregonHUD
-    └── World/              APeregonProvingGround (полигон)
-Tests/VehicleSim/          CMake + плоский стенд + тесты ядра
+    ├── Vehicle/            UPeregonVehicleMovementComponent (мост ядро ↔ UE), APeregonCar (салон, двери, приборы)
+    ├── Player/             APeregonCharacter (пешеход)
+    ├── Interaction/        IPeregonInteractable, канал трассировки Interact
+    ├── Game/               GameMode (меню → дорога/полигон без смены уровня), PlayerController, HUD,
+    │                       GameInstance (деньги, время), SaveGame, GameUserSettings
+    ├── UI/                 SPeregonMenu (Slate: меню, новая игра, настройки, пауза)
+    ├── Art/                UPeregonArtSubsystem (процедурные PSX-текстуры, материалы)
+    └── World/              APeregonRoadWorld (стриминг чанков), APeregonServicePoint (АЗС/кафе),
+                            APeregonSky (день/ночь), APeregonProvingGround
+Content/Python/init_unreal.py  создаёт мастер-материал M_PSX при запуске редактора
+Tests/                     CMake: VehicleSim (стенд + паспорт машины), RoadGen (геометрия трассы)
 ```
 
 Ядро не знает про Unreal, поэтому его можно тестировать за полсекунды в CI, переиспользовать
@@ -62,3 +68,13 @@ cmake -S Tests/VehicleSim -B build && cmake --build build && ./build/vsim_tests
 - Async Physics Tick: шаг ядра на физическом потоке с фиксированным dt (сейчас — игровой поток + сабстепинг Chaos).
 - Реакция на опору (толкать физические объекты колёсами) — третий закон Ньютона в компоненте.
 - Конфиги машин в Data Assets вместо `Presets.cpp`; узлы и слоты поверх `VehicleCondition`.
+
+## Мир дороги
+
+`rgen::Route` — таблица осевой линии с шагом 2 м (план, высота, кривизна, уклон) и функция
+`GroundHeight(S, T)`: полотно → обочина → кювет → естественный рельеф (2D-шум), плюс выравнивание
+под площадками и улицами. `APeregonRoadWorld` режет маршрут на чанки по 250 м и держит 2 позади и
+4 впереди игрока; новый чанк строится не чаще одного за кадр. Чанк — процедурные меши (асфальт,
+гравий, трава — у каждого свой физматериал для шин) и инстансы (деревья, столбы, ЛЭП, заборы, крыши).
+
+Чтобы перейти на реальные дороги, достаточно подменить `Route::BuildPlan()` полилинией из OSM.

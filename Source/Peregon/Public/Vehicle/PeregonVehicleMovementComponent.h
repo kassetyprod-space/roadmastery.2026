@@ -66,6 +66,23 @@ struct FPeregonTelemetry
 	UPROPERTY(BlueprintReadOnly, Category = "Telemetry") float SteeringWheelDeg = 0.f;
 };
 
+// Состояние машины для сохранения: топливо, износ, пробег.
+USTRUCT(BlueprintType)
+struct FPeregonCarState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "State") float FuelL = 30.f;
+	UPROPERTY(BlueprintReadWrite, Category = "State") float Engine = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category = "State") float Clutch = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category = "State") float Gearbox = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category = "State") float Radiator = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category = "State") float OdometerKm = 0.f;
+	UPROPERTY(BlueprintReadWrite, Category = "State") TArray<float> TreadMm;
+	UPROPERTY(BlueprintReadWrite, Category = "State") TArray<float> PadMm;
+	UPROPERTY(BlueprintReadWrite, Category = "State") TArray<float> Shock;
+};
+
 UENUM(BlueprintType)
 enum class EPeregonVehiclePreset : uint8
 {
@@ -115,6 +132,9 @@ public:
 	// --- Ремонт / заправка ---
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") void Refuel(float Liters);
 	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") void RepairAll();
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") FPeregonCarState GetCarState() const;
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") void ApplyCarState(const FPeregonCarState& State);
+	UFUNCTION(BlueprintCallable, Category = "Peregon|Service") float GetFuelCapacityL() const;
 
 	// Позиция визуального колеса относительно корня (см) — для пешки, которая строит меши.
 	FVector GetWheelAttachLocal(int32 Index) const;

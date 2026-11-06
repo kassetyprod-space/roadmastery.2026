@@ -1,5 +1,7 @@
 #include "World/PeregonProvingGround.h"
 
+#include "Art/PeregonArtSubsystem.h"
+
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
@@ -70,7 +72,27 @@ UStaticMeshComponent* APeregonProvingGround::AddBox(const FName& Name, const FVe
 		PhysMat->SurfaceType = Surface;
 		Mesh->SetPhysMaterialOverride(PhysMat);
 	}
-	if (UMaterialInstanceDynamic* Mid = Mesh->CreateDynamicMaterialInstance(0))
+	// Текстура по типу покрытия, мировые UV — плитка 4 м не растягивается на километровую плиту.
+	EPeregonTex Tex = EPeregonTex::Asphalt;
+	switch (Surface)
+	{
+	case PeregonGround::Gravel: Tex = EPeregonTex::Gravel; break;
+	case PeregonGround::Mud: Tex = EPeregonTex::Mud; break;
+	case PeregonGround::Snow: Tex = EPeregonTex::Snow; break;
+	case PeregonGround::Ice: Tex = EPeregonTex::Ice; break;
+	default: break;
+	}
+	FPeregonLook Look(bCollision ? Tex : EPeregonTex::Paint, bCollision ? FLinearColor::White : Color, bCollision ? 0.9f : 0.5f);
+	Look.WorldTileCm = bCollision ? 400.f : 0.f;
+	if (Surface == PeregonGround::Ice)
+	{
+		Look.Roughness = 0.08f;
+	}
+	if (UPeregonArtSubsystem::Get(this))
+	{
+		UPeregonArtSubsystem::ApplyLook(this, Mesh, Look);
+	}
+	else if (UMaterialInstanceDynamic* Mid = Mesh->CreateDynamicMaterialInstance(0))
 	{
 		Mid->SetVectorParameterValue(TEXT("Color"), Color);
 	}

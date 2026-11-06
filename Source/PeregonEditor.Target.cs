@@ -7,6 +7,6 @@ public class PeregonEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
-		ExtraModuleNames.AddRange(new string[] { "Peregon", "VehicleSimCore" });
+		ExtraModuleNames.AddRange(new string[] { "Peregon", "VehicleSimCore", "RoadGenCore" });
 	}
 }

@@ -24,6 +24,8 @@ private:
 	void DrawCluster(const APeregonCar* Car);
 	void DrawWarnings(const APeregonCar* Car);
 	void DrawDetails(const APeregonCar* Car);
+	void DrawTrip();
+	void DrawToasts();
 	void DrawTextShadowed(const FString& Text, const FLinearColor& Color, float X, float Y, UFont* Font, float Scale = 1.f);
 
 	bool bShowDetails = false;

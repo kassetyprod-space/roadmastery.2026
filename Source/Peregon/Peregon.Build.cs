@@ -14,7 +14,11 @@ public class Peregon : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"PhysicsCore",
-			"VehicleSimCore"
+			"VehicleSimCore",
+			"RoadGenCore",
+			"ProceduralMeshComponent",
+			"Slate",
+			"SlateCore"
 		});
 	}
 }

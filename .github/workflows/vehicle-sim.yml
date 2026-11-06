@@ -1,15 +1,17 @@
-name: Vehicle physics tests
+name: Core tests (physics + road generator)
 
 on:
   push:
     paths:
       - "Source/VehicleSimCore/**"
-      - "Tests/VehicleSim/**"
+      - "Source/RoadGenCore/**"
+      - "Tests/**"
       - ".github/workflows/vehicle-sim.yml"
   pull_request:
     paths:
       - "Source/VehicleSimCore/**"
-      - "Tests/VehicleSim/**"
+      - "Source/RoadGenCore/**"
+      - "Tests/**"
 
 jobs:
   test:
@@ -23,7 +25,7 @@ jobs:
         with:
           lfs: false
       - name: Configure
-        run: cmake -S Tests/VehicleSim -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S Tests -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --config Release
       - name: Test

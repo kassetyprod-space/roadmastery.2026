@@ -14,6 +14,7 @@ class UBoxComponent;
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
+class UMaterialInstanceDynamic;
 class UPeregonVehicleMovementComponent;
 class USceneComponent;
 class USpotLightComponent;
@@ -68,6 +69,11 @@ public:
 
 	void EnterCar(APeregonCharacter* Character);
 	void ExitCar();
+	APeregonCharacter* GetDriver() const { return Driver; }
+
+	// Цвет кузова (задаётся до BeginPlay, например при создании новой игры).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Peregon")
+	FLinearColor PaintColor = FLinearColor(0.32f, 0.04f, 0.04f);
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Peregon")
@@ -183,6 +189,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<APeregonCharacter> Driver;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> LampMaterials;
 
 	// Цвета деталей (красятся в BeginPlay через динамические материалы).
 	TArray<TPair<UStaticMeshComponent*, FLinearColor>> PartColors;

@@ -1,60 +1,303 @@
 #include "Game/PeregonGameMode.h"
 
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "Game/PeregonHUD.h"
-#include "GameFramework/PlayerStart.h"
+#include "Game/PeregonPlayerController.h"
+#include "Game/PeregonSaveGame.h"
+#include "Kismet/GameplayStatics.h"
 #include "Player/PeregonCharacter.h"
 #include "Vehicle/PeregonCar.h"
+#include "Vehicle/PeregonVehicleMovementComponent.h"
 #include "World/PeregonProvingGround.h"
+#include "World/PeregonRoadWorld.h"
+#include "World/PeregonSky.h"
+
+namespace PeregonFlow
+{
+constexpr double StartS = 60.0;      // м от начала трассы
+constexpr double CarT = 4.2;         // правая обочина
+constexpr double MenuCameraSpeed = 9.0; // м/с
+} // namespace PeregonFlow
 
 APeregonGameMode::APeregonGameMode()
 {
-	// Игрок начинает пешком рядом с машиной: подойти, открыть дверь, сесть, завести.
-	DefaultPawnClass = APeregonCharacter::StaticClass();
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bTickEvenWhenPaused = true;
+	DefaultPawnClass = nullptr;
+	PlayerControllerClass = APeregonPlayerController::StaticClass();
 	HUDClass = APeregonHUD::StaticClass();
 }
 
-void APeregonGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+APlayerController* APeregonGameMode::GetPlayer() const
 {
-	Super::InitGame(MapName, Options, ErrorMessage);
+	return GetWorld()->GetFirstPlayerController();
+}
 
-	TActorIterator<APeregonProvingGround> Existing(GetWorld());
-	if (Existing)
+void APeregonGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
+{
+	// Пешку не спавним: её создаёт режим (меню, дорога, полигон).
+	if (bSkipMenu)
 	{
-		ProvingGround = *Existing;
+		UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>();
+		StartNewGame(GI ? GI->Config : FPeregonRunConfig());
 	}
-	else if (bSpawnProvingGround)
+	else
 	{
-		FActorSpawnParameters Params;
-		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		ProvingGround = GetWorld()->SpawnActor<APeregonProvingGround>(APeregonProvingGround::StaticClass(), FTransform::Identity, Params);
+		EnterMenu();
 	}
 }
 
-void APeregonGameMode::RestartPlayer(AController* NewPlayer)
+void APeregonGameMode::RestartPlayer(AController* /*NewPlayer*/)
 {
-	// Точка старта: PlayerStart уровня, иначе — начало прямой полигона.
-	FTransform Start(FRotator::ZeroRotator, FVector(0.f, 0.f, 200.f));
-	TActorIterator<APlayerStart> PlayerStart(GetWorld());
-	if (PlayerStart)
+	// Пешки создаются в StartSession.
+}
+
+void APeregonGameMode::EnsureSky()
+{
+	if (!Sky)
 	{
-		Start = PlayerStart->GetActorTransform();
+		Sky = GetWorld()->SpawnActor<APeregonSky>();
 	}
-	else if (ProvingGround)
+}
+
+void APeregonGameMode::ClearSession()
+{
+	if (APlayerController* PC = GetPlayer())
 	{
-		Start = ProvingGround->GetSpawnTransform();
+		PC->UnPossess();
+	}
+	for (AActor* Actor : TArray<AActor*>{Car.Get(), Walker.Get(), RoadWorld.Get(), ProvingGround.Get(), MenuCamera.Get()})
+	{
+		if (IsValid(Actor))
+		{
+			Actor->Destroy();
+		}
+	}
+	Car = nullptr;
+	Walker = nullptr;
+	RoadWorld = nullptr;
+	ProvingGround = nullptr;
+	MenuCamera = nullptr;
+	Toasts.Reset();
+	UGameplayStatics::SetGamePaused(this, false);
+}
+
+void APeregonGameMode::EnterMenu()
+{
+	ClearSession();
+	EnsureSky();
+	Mode = EPeregonMode::Menu;
+
+	UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>();
+	if (GI)
+	{
+		GI->TimeOfDayHours = 18.3f; // вечернее солнце на фоне меню
+	}
+	Sky->bFreezeTime = true;
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	RoadWorld = GetWorld()->SpawnActor<APeregonRoadWorld>(APeregonRoadWorld::StaticClass(), FTransform::Identity, Params);
+	RoadWorld->bAnnouncePlaces = false;
+	RoadWorld->Generate(GI ? GI->Config.Seed : 2026);
+	MenuCameraS = 300.0;
+	RoadWorld->BuildAround(MenuCameraS);
+
+	MenuCamera = GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), FTransform::Identity, Params);
+	if (MenuCamera && MenuCamera->GetCameraComponent())
+	{
+		MenuCamera->GetCameraComponent()->SetFieldOfView(70.f);
+		MenuCamera->GetCameraComponent()->bConstrainAspectRatio = false;
+	}
+	Tick(0.f);
+
+	if (APeregonPlayerController* PC = Cast<APeregonPlayerController>(GetPlayer()))
+	{
+		PC->SetViewTarget(MenuCamera);
+		PC->ShowMainMenu();
+	}
+}
+
+void APeregonGameMode::StartNewGame(const FPeregonRunConfig& Config)
+{
+	if (UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>())
+	{
+		GI->Config = Config;
+		GI->Money = Config.StartMoney;
+		GI->TimeOfDayHours = Config.StartHour;
+		GI->Day = 1;
+	}
+	StartSession(Config, nullptr);
+}
+
+bool APeregonGameMode::HasSave() const
+{
+	return UGameplayStatics::DoesSaveGameExist(UPeregonSaveGame::SlotName, 0);
+}
+
+FString APeregonGameMode::DescribeSave() const
+{
+	const UPeregonSaveGame* Save = HasSave() ? Cast<UPeregonSaveGame>(UGameplayStatics::LoadGameFromSlot(UPeregonSaveGame::SlotName, 0)) : nullptr;
+	if (!Save)
+	{
+		return FString();
+	}
+	const int32 Hours = FMath::FloorToInt(Save->TimeOfDayHours);
+	const int32 Minutes = FMath::FloorToInt((Save->TimeOfDayHours - Hours) * 60.f);
+	return FString::Printf(TEXT("%s · день %d, %02d:%02d · %.1f км"), *Save->PlaceName, Save->Day, Hours, Minutes, Save->RouteS / 1000.f);
+}
+
+bool APeregonGameMode::ContinueGame()
+{
+	UPeregonSaveGame* Save = HasSave() ? Cast<UPeregonSaveGame>(UGameplayStatics::LoadGameFromSlot(UPeregonSaveGame::SlotName, 0)) : nullptr;
+	if (!Save)
+	{
+		return false;
+	}
+	if (UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>())
+	{
+		GI->Config = Save->Config;
+		GI->Money = Save->Money;
+		GI->TimeOfDayHours = Save->TimeOfDayHours;
+		GI->Day = Save->Day;
+	}
+	StartSession(Save->Config, Save);
+	return true;
+}
+
+bool APeregonGameMode::SaveGame(const FString& PlaceName)
+{
+	UPeregonGameInstance* GI = GetGameInstance<UPeregonGameInstance>();
+	if (Mode != EPeregonMode::Road || !Car || !RoadWorld || !GI)
+	{
+		return false;
+	}
+	UPeregonSaveGame* Save = Cast<UPeregonSaveGame>(UGameplayStatics::CreateSaveGameObject(UPeregonSaveGame::StaticClass()));
+	if (!Save)
+	{
+		return false;
+	}
+	Save->Config = GI->Config;
+	Save->CarTransform = Car->GetActorTransform();
+	Save->CarState = Car->GetVehicleMovement()->GetCarState();
+	Save->Money = GI->Money;
+	Save->TimeOfDayHours = GI->TimeOfDayHours;
+	Save->Day = GI->Day;
+	Save->RouteS = static_cast<float>(RoadWorld->FindS(Car->GetActorLocation(), RoadWorld->GetTrackedS()));
+	Save->SavedAt = FDateTime::Now();
+	Save->PlaceName = PlaceName.IsEmpty() ? RoadWorld->GetPlaceName(Save->RouteS) : PlaceName;
+	return UGameplayStatics::SaveGameToSlot(Save, UPeregonSaveGame::SlotName, 0);
+}
+
+void APeregonGameMode::ApplyAssists(const FPeregonRunConfig& Config)
+{
+	if (!Car || !Car->GetVehicleMovement())
+	{
+		return;
+	}
+	UPeregonVehicleMovementComponent* Move = Car->GetVehicleMovement();
+	Move->bAutoGearbox = Config.Assists == EPeregonAssists::Casual;
+	Move->bAutoClutch = Config.Assists != EPeregonAssists::Hardcore;
+	Move->bAbs = Config.Assists == EPeregonAssists::Casual;
+}
+
+void APeregonGameMode::StartSession(const FPeregonRunConfig& Config, const UPeregonSaveGame* Save)
+{
+	ClearSession();
+	EnsureSky();
+	Sky->bFreezeTime = false;
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	FTransform CarTransform;
+	if (Config.bProvingGround)
+	{
+		Mode = EPeregonMode::ProvingGround;
+		ProvingGround = GetWorld()->SpawnActorDeferred<APeregonProvingGround>(APeregonProvingGround::StaticClass(), FTransform::Identity);
+		ProvingGround->bSpawnEnvironment = false;
+		ProvingGround->FinishSpawning(FTransform::Identity);
+		const FTransform Start = ProvingGround->GetSpawnTransform();
+		CarTransform = FTransform(Start.Rotator(), Start.GetLocation() + Start.Rotator().RotateVector(FVector(0.f, 350.f, 0.f)) + FVector(0, 0, 20));
+	}
+	else
+	{
+		Mode = EPeregonMode::Road;
+		RoadWorld = GetWorld()->SpawnActor<APeregonRoadWorld>(APeregonRoadWorld::StaticClass(), FTransform::Identity, Params);
+		RoadWorld->Generate(Config.Seed);
+		const double S = Save ? static_cast<double>(Save->RouteS) : PeregonFlow::StartS;
+		RoadWorld->BuildAround(S);
+		CarTransform = Save ? Save->CarTransform : RoadWorld->RoadTransform(S, PeregonFlow::CarT, 0.75);
+		if (Save)
+		{
+			CarTransform.AddToTranslation(FVector(0, 0, 40)); // уронить на колёса, а не в землю
+		}
 	}
 
-	// Машина стоит в 3.5 м справа от игрока, мордой туда же, куда он смотрит.
-	if (!TActorIterator<APeregonCar>(GetWorld()))
+	Car = GetWorld()->SpawnActorDeferred<APeregonCar>(APeregonCar::StaticClass(), CarTransform, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	Car->PaintColor = Config.CarColor;
+	Car->FinishSpawning(CarTransform);
+	ApplyAssists(Config);
+	if (Save)
 	{
-		const FRotator Facing(0.f, Start.Rotator().Yaw, 0.f);
-		const FVector CarLocation = Start.GetLocation() + Facing.RotateVector(FVector(0.f, 350.f, 0.f)) + FVector(0.f, 0.f, 20.f);
-		FActorSpawnParameters Params;
-		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		GetWorld()->SpawnActor<APeregonCar>(APeregonCar::StaticClass(), FTransform(Facing, CarLocation), Params);
+		Car->GetVehicleMovement()->ApplyCarState(Save->CarState);
 	}
 
-	RestartPlayerAtTransform(NewPlayer, Start);
+	// Игрок стоит у водительской двери, лицом по ходу машины.
+	const FRotator Facing(0.f, CarTransform.Rotator().Yaw, 0.f);
+	const FVector WalkerLocation = CarTransform.TransformPosition(FVector(20.f, -170.f, 40.f));
+	Walker = GetWorld()->SpawnActor<APeregonCharacter>(APeregonCharacter::StaticClass(), WalkerLocation, Facing, Params);
+
+	if (APeregonPlayerController* PC = Cast<APeregonPlayerController>(GetPlayer()))
+	{
+		PC->CloseMenu();
+		PC->Possess(Walker);
+		PC->SetControlRotation(Facing);
+	}
+
+	if (Mode == EPeregonMode::Road)
+	{
+		Toast(Save ? FString::Printf(TEXT("С возвращением! %s"), *Save->PlaceName)
+				   : FString(TEXT("Новосибирск → Заречный, 15 км. Подойдите к водительской двери и нажмите E")), 7.f);
+	}
+	else
+	{
+		Toast(TEXT("Испытательный полигон"), 4.f);
+	}
+}
+
+void APeregonGameMode::Toast(const FString& Text, float Seconds)
+{
+	FPeregonToast Item;
+	Item.Text = Text;
+	Item.Duration = Seconds;
+	Item.Until = GetWorld()->GetRealTimeSeconds() + Seconds;
+	Toasts.Add(Item);
+	if (Toasts.Num() > 4)
+	{
+		Toasts.RemoveAt(0);
+	}
+}
+
+void APeregonGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	const double Now = GetWorld()->GetRealTimeSeconds();
+	Toasts.RemoveAll([Now](const FPeregonToast& T) { return T.Until < Now; });
+
+	// Облёт трассы на фоне главного меню.
+	if (Mode == EPeregonMode::Menu && MenuCamera && RoadWorld)
+	{
+		MenuCameraS += DeltaSeconds * PeregonFlow::MenuCameraSpeed;
+		if (MenuCameraS > RoadWorld->GetRoute().Length() - 600.0)
+		{
+			MenuCameraS = 300.0;
+			RoadWorld->BuildAround(MenuCameraS);
+		}
+		const FVector Eye = RoadWorld->RouteToWorld(MenuCameraS, -9.0, 4.5);
+		const FVector Target = RoadWorld->RouteToWorld(MenuCameraS + 45.0, 2.0, 1.5);
+		MenuCamera->SetActorLocationAndRotation(Eye, (Target - Eye).Rotation());
+	}
 }

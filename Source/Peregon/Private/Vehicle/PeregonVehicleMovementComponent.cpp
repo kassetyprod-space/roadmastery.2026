@@ -381,3 +381,49 @@ FPeregonTelemetry UPeregonVehicleMovementComponent::GetTelemetry() const
 	}
 	return Out;
 }
+
+float UPeregonVehicleMovementComponent::GetFuelCapacityL() const
+{
+	return Sim ? static_cast<float>(Sim->Config().FuelCapacityL) : 0.f;
+}
+
+FPeregonCarState UPeregonVehicleMovementComponent::GetCarState() const
+{
+	FPeregonCarState Out;
+	if (!Sim)
+	{
+		return Out;
+	}
+	const vsim::VehicleCondition& C = Sim->Condition();
+	Out.FuelL = static_cast<float>(C.FuelL);
+	Out.Engine = static_cast<float>(C.Engine);
+	Out.Clutch = static_cast<float>(C.Clutch);
+	Out.Gearbox = static_cast<float>(C.Gearbox);
+	Out.Radiator = static_cast<float>(C.Radiator);
+	Out.OdometerKm = static_cast<float>(Sim->GetTelemetry().OdometerKm);
+	for (const vsim::WheelCondition& W : C.Wheels)
+	{
+		Out.TreadMm.Add(static_cast<float>(W.TreadMm));
+		Out.PadMm.Add(static_cast<float>(W.PadMm));
+		Out.Shock.Add(static_cast<float>(W.Shock));
+	}
+	return Out;
+}
+
+void UPeregonVehicleMovementComponent::ApplyCarState(const FPeregonCarState& State)
+{
+	EnsureVehicle();
+	vsim::VehicleCondition& C = Sim->Condition();
+	C.FuelL = FMath::Clamp<double>(State.FuelL, 0.0, Sim->Config().FuelCapacityL);
+	C.Engine = State.Engine;
+	C.Clutch = State.Clutch;
+	C.Gearbox = State.Gearbox;
+	C.Radiator = State.Radiator;
+	Sim->SetOdometer(State.OdometerKm * 1000.0);
+	for (int32 I = 0; I < static_cast<int32>(C.Wheels.size()); ++I)
+	{
+		if (State.TreadMm.IsValidIndex(I)) { C.Wheels[static_cast<size_t>(I)].TreadMm = State.TreadMm[I]; }
+		if (State.PadMm.IsValidIndex(I)) { C.Wheels[static_cast<size_t>(I)].PadMm = State.PadMm[I]; }
+		if (State.Shock.IsValidIndex(I)) { C.Wheels[static_cast<size_t>(I)].Shock = State.Shock[I]; }
+	}
+}

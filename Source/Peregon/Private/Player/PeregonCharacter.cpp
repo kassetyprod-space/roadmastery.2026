@@ -1,5 +1,8 @@
 #include "Player/PeregonCharacter.h"
 
+#include "Art/PeregonArtSubsystem.h"
+#include "Game/PeregonGameUserSettings.h"
+
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -91,19 +94,10 @@ APeregonCharacter::APeregonCharacter()
 void APeregonCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	auto Tint = [](UStaticMeshComponent* Part, const FLinearColor& Color) {
-		if (Part && Part->GetMaterial(0))
-		{
-			if (UMaterialInstanceDynamic* Mid = Part->CreateDynamicMaterialInstance(0))
-			{
-				Mid->SetVectorParameterValue(TEXT("Color"), Color);
-			}
-		}
-	};
-	Tint(TorsoMesh, PeregonWalker::JacketColor);
-	Tint(HeadMesh, PeregonWalker::SkinColor);
+	UPeregonArtSubsystem::ApplyLook(this, TorsoMesh, FPeregonLook(EPeregonTex::Fabric, PeregonWalker::JacketColor * 3.f, 0.95f));
+	UPeregonArtSubsystem::ApplyLook(this, HeadMesh, FPeregonLook(EPeregonTex::White, PeregonWalker::SkinColor, 0.7f));
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-	SetFirstPerson(true);
+	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
 }
 
 void APeregonCharacter::Tick(float DeltaSeconds)
@@ -118,7 +112,10 @@ void APeregonCharacter::Tick(float DeltaSeconds)
 	// Покачивание головы при ходьбе — мягкое, чтобы не укачивало.
 	const float Speed2D = GetVelocity().Size2D();
 	const bool bGrounded = GetCharacterMovement()->IsMovingOnGround();
-	const float BobAmp = bGrounded ? FMath::Clamp(Speed2D / SprintSpeed, 0.f, 1.f) * 1.6f : 0.f;
+	const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
+	FirstPersonCamera->SetFieldOfView(Settings->FieldOfView);
+	ThirdPersonCamera->SetFieldOfView(Settings->FieldOfView);
+	const float BobAmp = bGrounded ? FMath::Clamp(Speed2D / SprintSpeed, 0.f, 1.f) * 1.6f * Settings->HeadMotion : 0.f;
 	const float BobFreq = Speed2D > WalkSpeed + 10.f ? 13.f : 9.f;
 	const float Time = GetWorld()->GetTimeSeconds();
 	FirstPersonCamera->SetRelativeLocation(FVector(0.f, FMath::Cos(Time * BobFreq * 0.5f) * BobAmp * 0.5f,
@@ -264,9 +261,10 @@ void APeregonCharacter::OnMove(const FInputActionValue& Value)
 
 void APeregonCharacter::OnLook(const FInputActionValue& Value)
 {
-	const FVector2D V = Value.Get<FVector2D>();
+	const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
+	const FVector2D V = Value.Get<FVector2D>() * Settings->MouseSensitivity;
 	AddControllerYawInput(V.X);
-	AddControllerPitchInput(V.Y);
+	AddControllerPitchInput(Settings->bInvertY ? -V.Y : V.Y);
 }
 
 void APeregonCharacter::OnJumpPressed(const FInputActionValue&) { Jump(); }

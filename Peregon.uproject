@@ -10,11 +10,17 @@
 			"LoadingPhase": "Default",
 			"AdditionalDependencies": [
 				"Engine",
-				"EnhancedInput"
+				"EnhancedInput",
+				"ProceduralMeshComponent"
 			]
 		},
 		{
 			"Name": "VehicleSimCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "RoadGenCore",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
@@ -22,6 +28,18 @@
 	"Plugins": [
 		{
 			"Name": "EnhancedInput",
+			"Enabled": true
+		},
+		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
+		},
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorScriptingUtilities",
 			"Enabled": true
 		}
 	]

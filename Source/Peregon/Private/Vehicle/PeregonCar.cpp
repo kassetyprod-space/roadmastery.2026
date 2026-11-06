@@ -1,5 +1,8 @@
 #include "Vehicle/PeregonCar.h"
 
+#include "Art/PeregonArtSubsystem.h"
+#include "Game/PeregonGameUserSettings.h"
+
 #include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SpotLightComponent.h"
@@ -378,18 +381,47 @@ void APeregonCar::ToggleMovingPart(FName Tag)
 void APeregonCar::BeginPlay()
 {
 	Super::BeginPlay();
+	using namespace PeregonCarLook;
+	// Текстуры и материалы: цвет детали из конструктора → «вид» поверхности.
+	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
+	LampMaterials.Reset();
 	for (const TPair<UStaticMeshComponent*, FLinearColor>& Entry : PartColors)
 	{
-		if (Entry.Key && Entry.Key->GetMaterial(0))
+		UStaticMeshComponent* Mesh = Entry.Key;
+		const FLinearColor& C = Entry.Value;
+		if (!Mesh)
 		{
-			if (UMaterialInstanceDynamic* Mid = Entry.Key->CreateDynamicMaterialInstance(0))
+			continue;
+		}
+		FPeregonLook Look(EPeregonTex::Plastic, C, 0.75f);
+		if (C.Equals(Paint)) { Look = FPeregonLook(EPeregonTex::Paint, PaintColor, 0.4f); }
+		else if (C.Equals(Seat)) { Look = FPeregonLook(EPeregonTex::Fabric, C * 1.6f, 0.95f); }
+		else if (C.Equals(Chrome)) { Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.9f, 0.9f, 0.88f), 0.25f, 1.f); }
+		else if (C.Equals(TireColor)) { Look = FPeregonLook(EPeregonTex::Rubber, FLinearColor(0.12f, 0.12f, 0.12f), 0.9f); }
+		else if (C.Equals(EngineColor)) { Look = FPeregonLook(EPeregonTex::Plastic, C * 2.f, 0.5f, 0.7f); }
+		else if (C.Equals(GaugeFace) || C.Equals(NeedleColor)) { Look = FPeregonLook(EPeregonTex::White, C, 0.6f); }
+		else if (C.Equals(LampColor) || C.Equals(TailColor)) { Look = FPeregonLook(EPeregonTex::Glass, C * 2.5f, 0.15f); }
+		else if (C.Equals(Interior)) { Look = FPeregonLook(EPeregonTex::Plastic, C * 1.8f, 0.85f); }
+
+		if (Art)
+		{
+			UMaterialInstanceDynamic* Mid = Art->MakeMaterial(Mesh, Look);
+			Mesh->SetMaterial(0, Mid);
+			if (Mid && (C.Equals(LampColor) || C.Equals(TailColor)))
 			{
-				Mid->SetVectorParameterValue(TEXT("Color"), Entry.Value);
+				LampMaterials.Add(Mid);
+			}
+		}
+		else if (Mesh->GetMaterial(0))
+		{
+			if (UMaterialInstanceDynamic* Mid = Mesh->CreateDynamicMaterialInstance(0))
+			{
+				Mid->SetVectorParameterValue(TEXT("Color"), C.Equals(Paint) ? PaintColor : C);
 			}
 		}
 	}
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
-	SetFirstPerson(true);
+	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
 	SetHeadlights(false);
 }
 
@@ -532,13 +564,15 @@ void APeregonCar::UpdateCameras(float DeltaSeconds, const FPeregonTelemetry& T)
 	if (bFirstPerson)
 	{
 		// Голова водителя по инерции: на торможении — вперёд, в повороте — наружу, на кочках — вверх-вниз.
+		const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
+		FirstPersonCamera->SetFieldOfView(Settings->FieldOfView);
 		const FVector A = GetActorTransform().InverseTransformVectorNoScale(SmoothedAccel);
-		FVector Target(-A.X * 0.6f, -A.Y * 0.5f, -A.Z * 0.25f);
+		FVector Target = FVector(-A.X * 0.6f, -A.Y * 0.5f, -A.Z * 0.25f) * Settings->HeadMotion;
 		Target = Target.BoundToBox(FVector(-6.f, -6.f, -4.f), FVector(6.f, 6.f, 4.f));
 		// Мелкая дрожь мотора: на холостых заметнее, на оборотах — частая и мелкая.
 		if (T.bEngineRunning)
 		{
-			const float Amp = 0.06f + 0.04f * FMath::Clamp(T.Rpm / 6000.f, 0.f, 1.f);
+			const float Amp = (0.06f + 0.04f * FMath::Clamp(T.Rpm / 6000.f, 0.f, 1.f)) * Settings->HeadMotion;
 			const float Freq = 15.f + T.Rpm / 200.f;
 			Target += FVector(0.f, FMath::PerlinNoise1D(CockpitTime * Freq), FMath::PerlinNoise1D(CockpitTime * Freq + 17.f)) * Amp;
 		}
@@ -548,6 +582,7 @@ void APeregonCar::UpdateCameras(float DeltaSeconds, const FPeregonTelemetry& T)
 	}
 	else
 	{
+		ChaseCamera->SetFieldOfView(UPeregonGameUserSettings::Get()->FieldOfView);
 		// Камера сама возвращается за машину, если игрок не крутит мышью.
 		TimeSinceLook += Dt;
 		if (Controller && TimeSinceLook > 2.f && FMath::Abs(Movement->GetForwardSpeed()) > 1.f)
@@ -577,6 +612,13 @@ void APeregonCar::SetHeadlights(bool bOn)
 	bHeadlights = bOn;
 	HeadlightL->SetVisibility(bOn);
 	HeadlightR->SetVisibility(bOn);
+	for (UMaterialInstanceDynamic* Mid : LampMaterials)
+	{
+		if (Mid)
+		{
+			Mid->SetScalarParameterValue(TEXT("Emissive"), bOn ? 6.f : 0.f);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -922,7 +964,9 @@ void APeregonCar::OnHandbrakeReleased(const FInputActionValue&) { Movement->SetH
 
 void APeregonCar::OnLook(const FInputActionValue& Value)
 {
-	const FVector2D V = Value.Get<FVector2D>();
+	const UPeregonGameUserSettings* Settings = UPeregonGameUserSettings::Get();
+	const FVector2D V(Value.Get<FVector2D>().X * Settings->MouseSensitivity,
+		Value.Get<FVector2D>().Y * Settings->MouseSensitivity * (Settings->bInvertY ? -1.f : 1.f));
 	if (bFirstPerson)
 	{
 		HeadYaw = FMath::Clamp(HeadYaw + V.X * 0.8f, -140.f, 140.f);

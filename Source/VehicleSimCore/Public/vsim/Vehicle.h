@@ -218,6 +218,8 @@ public:
 
 	// Отладка/тесты: принудительно запустить мотор.
 	void ForceEngineRunning(double Rpm);
+	// Загрузка сохранения.
+	void SetOdometer(double Meters) { OdometerM = Meters; }
 
 private:
 	struct WheelRuntime
