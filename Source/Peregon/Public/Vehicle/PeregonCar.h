@@ -261,6 +261,7 @@ private:
 	vsim::parts::Effects PartsEffects;
 	bool bPartsAssigned = false;
 	bool bPartsDirty = true;
+	uint32 TrunkHash = 0;
 	bool bBodyDirty = true;
 	double LastOdometerKm = -1.0;
 	float PartsToastCooldown = 0.f;

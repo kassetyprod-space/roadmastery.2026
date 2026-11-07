@@ -312,7 +312,7 @@ APeregonCar::APeregonCar()
 		FVector Half;
 	};
 	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 85.5f), FVector(7.f, 5.f, 2.5f)},
-		{TEXT("Heater"), Body.Get(), FVector(74.f, 12.f, 14.f), FVector(2.5f, 3.5f, 3.5f)},
+		{TEXT("Heater"), Body.Get(), FVector(72.4f, 2.f, 24.5f), FVector(1.5f, 8.f, 2.2f)},
 		{TEXT("RadioVol"), Body.Get(), FVector(73.f, -5.f, 30.f), FVector(3.f, 5.f, 4.f)},
 		{TEXT("RadioTune"), Body.Get(), FVector(73.f, 5.f, 30.f), FVector(3.f, 5.f, 4.f)},
 		{TEXT("Horn"), SteeringPivot.Get(), FVector::ZeroVector, FVector(4.f, 7.f, 7.f)}};
@@ -585,11 +585,12 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	case vmodel::Mat::Headlamp: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.9f, 0.88f, 0.78f), 0.12f); break;
 	case vmodel::Mat::Taillamp: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.6f, 0.03f, 0.02f), 0.15f); break;
 	case vmodel::Mat::Indicator: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.9f, 0.42f, 0.04f), 0.15f); break;
-	case vmodel::Mat::Interior: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.2f, 0.19f, 0.17f), 0.8f); break;
-	case vmodel::Mat::InteriorDark: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.055f, 0.052f, 0.05f), 0.7f); break;
-	case vmodel::Mat::Fabric: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.34f, 0.16f, 0.08f), 0.95f); break;
-	case vmodel::Mat::Carpet: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.09f, 0.08f, 0.07f), 1.f); break;
-	case vmodel::Mat::Headliner: Look = FPeregonLook(EPeregonTex::Fabric, FLinearColor(0.6f, 0.58f, 0.52f), 0.95f); break;
+	// Салон «шестёрки»: бежево-коричневый кожзам дверей и торпедо, рыжий велюр сидений, тёмный ковролин, светлый потолок.
+	case vmodel::Mat::Interior: Look = FPeregonLook(EPeregonTex::Vinyl, FLinearColor(0.23f, 0.2f, 0.16f), 0.62f); break;
+	case vmodel::Mat::InteriorDark: Look = FPeregonLook(EPeregonTex::Vinyl, FLinearColor(0.06f, 0.056f, 0.052f), 0.55f); break;
+	case vmodel::Mat::Fabric: Look = FPeregonLook(EPeregonTex::CarFabric, FLinearColor(0.36f, 0.17f, 0.08f), 0.97f); break;
+	case vmodel::Mat::Carpet: Look = FPeregonLook(EPeregonTex::Carpet, FLinearColor(0.085f, 0.075f, 0.065f), 1.f); break;
+	case vmodel::Mat::Headliner: Look = FPeregonLook(EPeregonTex::Headliner, FLinearColor(0.62f, 0.6f, 0.54f), 0.9f); break;
 	case vmodel::Mat::Dome: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(1.f, 0.88f, 0.6f), 0.4f); break;
 	case vmodel::Mat::GaugeFace: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.85f, 0.83f, 0.74f), 0.6f); break;
 	case vmodel::Mat::Needle: Look = FPeregonLook(EPeregonTex::White, FLinearColor(0.95f, 0.3f, 0.05f), 0.5f); break;

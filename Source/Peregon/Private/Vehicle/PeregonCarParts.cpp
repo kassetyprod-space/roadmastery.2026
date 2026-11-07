@@ -27,32 +27,37 @@ using vsim::parts::Slot;
 // Где стоит узел (основание, см, в системе кузова) и какого он размера — для мишени и видимой коробки.
 struct FSlotPlace
 {
-	FVector Base;
-	FVector Size;
-	bool bVisible; // рисовать коробку (то, что внутри салона и фары, уже есть в модели)
+	FVector Base;      // основание модели узла (низ по центру), см кузова
+	float Yaw;         // поворот модели
+	FVector HitCenter; // мишень (центр и полный размер)
+	FVector HitSize;
+	bool bVisible;     // рисовать модель (фары, щиток, магнитола, подвеска — уже есть в кузове)
 };
+// Места выверены по моторному отсеку кузова (vmodel::BuildEngineBay): блок у X 115–165, головка и клапанная
+// крышка до Z 23, выпускной коллектор справа (Y 19–22), вентилятор у X 178, рамка радиатора у X 192,
+// внутренние крылья — Y ±44, низ капота над фильтром — около Z 33.
 const FSlotPlace Places[vsim::parts::SlotCount] = {
-	{FVector(170.f, 48.f, 10.f), FVector(28.f, 17.f, 20.f), true},   // аккумулятор
-	{FVector(130.f, -10.f, 28.f), FVector(14.f, 30.f, 4.f), true},   // свечи
-	{FVector(108.f, 16.f, 20.f), FVector(10.f, 10.f, 16.f), true},   // трамблёр
-	{FVector(120.f, 4.f, 22.f), FVector(18.f, 16.f, 12.f), true},    // карбюратор
-	{FVector(120.f, 4.f, 34.f), FVector(28.f, 28.f, 5.f), true},     // воздушный фильтр
-	{FVector(104.f, 34.f, 24.f), FVector(8.f, 4.f, 4.f), true},      // топливный фильтр
-	{FVector(112.f, -30.f, 0.f), FVector(9.f, 9.f, 12.f), true},     // масляный фильтр
-	{FVector(190.f, 0.f, -5.f), FVector(6.f, 60.f, 40.f), true},     // радиатор
-	{FVector(170.f, 0.f, 8.f), FVector(14.f, 14.f, 12.f), true},     // помпа
-	{FVector(180.f, -25.f, 24.f), FVector(10.f, 36.f, 7.f), true},   // патрубки
-	{FVector(160.f, -34.f, 10.f), FVector(16.f, 16.f, 16.f), true},  // генератор
-	{FVector(98.f, -28.f, -12.f), FVector(26.f, 12.f, 12.f), true},  // стартер
-	{FVector(140.f, -40.f, 14.f), FVector(20.f, 18.f, 18.f), true},  // турбина
-	{FVector(-150.f, -30.f, -32.f), FVector(80.f, 18.f, 12.f), true}, // глушитель
-	{FVector(116.f, -66.f, -24.f), FVector(16.f, 16.f, 30.f), false}, // передняя подвеска (у левого переднего колеса)
-	{FVector(-126.f, -66.f, -24.f), FVector(16.f, 16.f, 30.f), false}, // задняя подвеска
-	{FVector(116.f, 66.f, -24.f), FVector(16.f, 16.f, 30.f), false},  // колодки (у правого переднего)
-	{FVector(201.f, 0.f, 14.f), FVector(6.f, 140.f, 16.f), false},    // фары
-	{FVector(-203.f, 0.f, 17.f), FVector(6.f, 140.f, 16.f), false},   // фонари
-	{FVector(73.f, -35.f, 37.f), FVector(4.f, 20.f, 9.f), false},     // щиток приборов
-	{FVector(73.f, 0.f, 21.f), FVector(6.f, 18.f, 4.f), false},       // магнитола (под корпусом, мишень — нижняя кромка)
+	{FVector(172.f, 31.f, -6.2f), 90.f, FVector(172.f, 31.f, 4.f), FVector(18.f, 28.f, 22.f), true},     // аккумулятор (на полке справа)
+	{FVector(137.f, -16.f, 12.f), 0.f, FVector(137.f, -16.f, 17.f), FVector(32.f, 6.f, 10.f), true},       // свечи (слева в головке)
+	{FVector(110.f, -10.f, 5.f), 0.f, FVector(110.f, -10.f, 11.5f), FVector(12.f, 12.f, 14.f), true},      // трамблёр (сзади слева)
+	{FVector(142.f, 19.f, 8.f), 0.f, FVector(142.f, 19.f, 14.f), FVector(15.f, 14.f, 12.f), true},         // карбюратор (под фильтром справа)
+	{FVector(142.f, 4.f, 24.5f), 0.f, FVector(142.f, 4.f, 28.f), FVector(30.f, 30.f, 7.f), true},         // воздушный фильтр
+	{FVector(126.f, 30.f, 15.f), 0.f, FVector(126.f, 30.f, 17.f), FVector(15.f, 5.f, 5.f), true},          // топливный фильтр
+	{FVector(152.f, -22.f, -16.f), 0.f, FVector(152.f, -22.f, -10.f), FVector(10.f, 10.f, 13.f), true},    // масляный фильтр
+	{FVector(188.f, 0.f, -18.f), 0.f, FVector(188.f, 0.f, 4.f), FVector(7.f, 58.f, 44.f), true},          // радиатор
+	{FVector(168.f, 0.f, -6.f), 0.f, FVector(169.f, 0.f, 0.f), FVector(12.f, 14.f, 14.f), true},           // помпа
+	{FVector::ZeroVector, 0.f, FVector(175.f, -9.f, 19.f), FVector(22.f, 7.f, 7.f), true},                 // патрубки (модель — в координатах кузова)
+	{FVector(160.f, -26.f, -6.f), 0.f, FVector(160.f, -26.f, 2.f), FVector(16.f, 16.f, 16.f), true},       // генератор
+	{FVector(110.f, -21.f, -20.f), 0.f, FVector(110.f, -21.f, -15.f), FVector(24.f, 10.f, 12.f), true},    // стартер
+	{FVector(150.f, 32.f, -8.f), 0.f, FVector(150.f, 32.f, 2.f), FVector(16.f, 24.f, 22.f), true},         // турбина (у коллектора справа)
+	{FVector(-150.f, -30.f, -32.f), 0.f, FVector(-150.f, -30.f, -25.f), FVector(80.f, 18.f, 14.f), true},  // глушитель
+	{FVector(116.f, -66.f, -24.f), 0.f, FVector(116.f, -66.f, -9.f), FVector(16.f, 16.f, 30.f), false},   // передняя подвеска
+	{FVector(-126.f, -66.f, -24.f), 0.f, FVector(-126.f, -66.f, -9.f), FVector(16.f, 16.f, 30.f), false}, // задняя подвеска
+	{FVector(116.f, 66.f, -24.f), 0.f, FVector(116.f, 66.f, -9.f), FVector(16.f, 16.f, 30.f), false},     // колодки
+	{FVector(201.f, 0.f, 14.f), 0.f, FVector(201.f, 0.f, 22.f), FVector(6.f, 140.f, 16.f), false},        // фары
+	{FVector(-203.f, 0.f, 17.f), 0.f, FVector(-203.f, 0.f, 25.f), FVector(6.f, 140.f, 16.f), false},      // фонари
+	{FVector(73.f, -35.f, 37.f), 0.f, FVector(73.f, -35.f, 41.5f), FVector(4.f, 20.f, 9.f), false},       // щиток приборов
+	{FVector(73.f, 0.f, 17.f), 0.f, FVector(73.f, 0.f, 18.f), FVector(6.f, 18.f, 3.f), false},            // магнитола (мишень — под корпусом)
 };
 
 // Мишени панелей, у которых нет своей подвижной детали.
@@ -73,7 +78,8 @@ const FPanelPlace PanelPlaces[] = {
 };
 
 // Масло и антифриз — горловины под капотом.
-const FVector FillPlaces[2] = {FVector(125.f, -12.f, 36.f), FVector(172.f, 40.f, 30.f)};
+// Горловина масла — на клапанной крышке, антифриз — горловина радиатора.
+const FVector FillPlaces[2] = {FVector(128.f, -6.f, 25.f), FVector(188.f, 18.f, 28.5f)};
 constexpr double OilNorm = 3.75;
 constexpr double CoolantNorm = 7.8;
 
@@ -199,8 +205,7 @@ void APeregonCar::BuildPartSlots()
 	for (int32 I = 0; I < vsim::parts::SlotCount; ++I)
 	{
 		const FSlotPlace& P = Places[I];
-		SlotBoxes.Add(MakeBox(FString::Printf(TEXT("PartSlot%d"), I), P.Base + FVector(0.f, 0.f, P.Size.Z * 0.5f), P.Size * 0.5f + FVector(1.5f),
-			FName(TEXT("PartSlot"))));
+		SlotBoxes.Add(MakeBox(FString::Printf(TEXT("PartSlot%d"), I), P.HitCenter, P.HitSize * 0.5f + FVector(1.f), FName(TEXT("PartSlot"))));
 	}
 	PanelBoxes.Reset();
 	for (const FPanelPlace& P : PanelPlaces)
@@ -255,9 +260,49 @@ void APeregonCar::RebuildPartsMesh()
 			continue;
 		}
 		// Настоящая модель узла (PeregonPartMeshes): клеммы, рёбра, шкивы, провода — цвет тускнеет с износом.
-		PeregonPartMeshes::BuildInstalled(I, Buf, FTransform(Places[I].Base), static_cast<float>(R.Part.Condition));
+		PeregonPartMeshes::BuildInstalled(I, Buf, FTransform(FRotator(0.f, Places[I].Yaw, 0.f), Places[I].Base), static_cast<float>(R.Part.Condition));
 	}
-	// Брызговики за задними колёсами и антенна на переднем крыле — всегда.
+	// Что лежит в багажнике — видно, когда его открыть: вещи рядами у спинки заднего сиденья, дальше — ярусами.
+	{
+		float Y = -46.f;
+		float Z = -19.5f;
+		float RowDepth = 0.f;
+		float X = -114.f;
+		for (const FPeregonItemStack& Stack : TrunkStore.Slots)
+		{
+			const FPeregonItemDef* Def = PeregonItems::Find(Stack.Id);
+			if (!Def || Stack.Count <= 0)
+			{
+				continue;
+			}
+			const FVector3f Size(Def->SizeCm);
+			if (Y + Size.Y > 48.f)
+			{
+				// Ряд кончился — следующий ряд ближе к крышке, потом — ярусом выше.
+				Y = -46.f;
+				X -= RowDepth + 2.f;
+				RowDepth = 0.f;
+				if (X < -134.f)
+				{
+					X = -114.f;
+					Z += 14.f;
+				}
+			}
+			const FVector Base(X - Size.X * 0.5f, Y + Size.Y * 0.5f, Z);
+			if (PeregonPartMeshes::Has(Stack.Id))
+			{
+				PeregonPartMeshes::Build(Stack.Id, Buf, FTransform(Base), Stack.Condition);
+			}
+			else
+			{
+				Buf.AddBox(Base, 0.f, FVector(Size), FVector2D(20.f, 20.f), Def->Color.ToFColor(false), true, true);
+			}
+			Y += Size.Y + 2.f;
+			RowDepth = FMath::Max(RowDepth, Size.X);
+		}
+	}
+
+	// Брызговики за задними колёсами — всегда.
 	{
 		const FColor Rubber = FLinearColor(0.035f, 0.035f, 0.04f).ToFColor(false);
 		const FColor Chrome = FLinearColor(0.75f, 0.76f, 0.78f).ToFColor(false);
@@ -266,8 +311,6 @@ void APeregonCar::RebuildPartsMesh()
 			Buf.AddBox(FVector(-160.f, Y, -34.f), 0.f, FVector(0.8f, 20.f, 22.f), FVector2D(20.f, 20.f), Rubber, true, true);
 			Buf.AddBox(FVector(-160.f, Y, -12.5f), 0.f, FVector(1.5f, 22.f, 1.5f), FVector2D(20.f, 20.f), Chrome, true, true);
 		}
-		Buf.AddBox(FVector(165.f, -79.f, 38.f), 0.f, FVector(2.2f, 2.2f, 1.5f), FVector2D(10.f, 10.f), Chrome, true, true);
-		Buf.AddBox(FVector(165.f, -79.f, 39.5f), 0.f, FVector(0.35f, 0.35f, 85.f), FVector2D(10.f, 10.f), Chrome, true, true);
 	}
 	PartsMesh->ClearAllMeshSections();
 	if (Buf.Vertices.Num() > 0)
@@ -730,6 +773,19 @@ void APeregonCar::UpdateParts(float DeltaSeconds, const FPeregonTelemetry& T)
 	}
 
 	PartsEffects = vsim::parts::Evaluate(PartsState);
+	// Багажник поменялся — перерисовать то, что в нём лежит.
+	{
+		uint32 Hash = static_cast<uint32>(TrunkStore.Slots.Num());
+		for (const FPeregonItemStack& Stack : TrunkStore.Slots)
+		{
+			Hash = HashCombine(Hash, HashCombine(GetTypeHash(Stack.Id), GetTypeHash(Stack.Count)));
+		}
+		if (Hash != TrunkHash)
+		{
+			TrunkHash = Hash;
+			bPartsDirty = true;
+		}
+	}
 	// Без масла и антифриза мотор долго не живёт.
 	if (PartsState.OilL < 1.5)
 	{

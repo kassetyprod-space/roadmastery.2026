@@ -137,13 +137,15 @@ void SparkPlugs(FShape& S, bool bInstalled)
 {
 	for (int32 K = 0; K < 4; ++K)
 	{
-		const FVector Base(-6.f + K * 4.f, 0.f, 0.f);
+		// В машине — по цилиндрам (шаг 8 см), в руках и на полке — плотным рядом.
+		const FVector Base(bInstalled ? -12.f + K * 8.f : -6.f + K * 4.f, 0.f, 0.f);
 		SparkPlug(S, Base);
 		if (bInstalled)
 		{
 			// Колпачки и высоковольтные провода к трамблёру.
 			S.Cyl(Base + FVector(0, 0, 6.f), FVector::UpVector, 1.1f, 3.f, Black, 8, true, -1.f, false);
-			S.Tube({Base + FVector(0, 0, 9.f), Base + FVector(0, 4.f, 12.f), FVector(-20.f, 22.f, 8.f) + FVector(K * 1.2f, 0, 0)}, 0.45f,
+			// К крышке трамблёра (он сзади слева, у X 110).
+			S.Tube({Base + FVector(0, 0, 9.f), Base + FVector(-2.f, 3.f, 11.f), FVector(-25.f + K * 0.8f, 6.f, 7.f)}, 0.45f,
 				FLinearColor(0.12f, 0.12f, 0.13f), 6);
 		}
 	}
@@ -547,6 +549,28 @@ namespace PeregonPartMeshes
 void BuildInstalled(int32 SlotIndex, FPeregonMeshBuffers& Out, const FTransform& Where, float Condition)
 {
 	using namespace PeregonPartMeshDetail;
+	if (static_cast<vsim::parts::Slot>(SlotIndex) == vsim::parts::Slot::Hoses)
+	{
+		// Патрубки — по месту в координатах кузова: радиатор → термостат, помпа → радиатор, печка — к щитку.
+		const int32 Start = Out.Vertices.Num();
+		FShape S{Out, FMath::Clamp(1.f - Condition, 0.f, 1.f)};
+		const TArray<FVector> Upper = {FVector(186.f, -12.f, 20.f), FVector(176.f, -11.f, 21.f), FVector(166.f, -7.f, 18.f), FVector(160.f, -4.f, 15.f)};
+		const TArray<FVector> Lower = {FVector(186.f, 14.f, -12.f), FVector(176.f, 14.f, -13.f), FVector(170.f, 8.f, -8.f)};
+		const TArray<FVector> Heater = {FVector(118.f, -8.f, 12.f), FVector(104.f, -10.f, 16.f), FVector(95.f, -10.f, 16.f)};
+		S.Tube(Upper, 1.9f, Rubber, 10);
+		S.Tube(Lower, 1.9f, Rubber, 10);
+		S.Tube(Heater, 0.9f, Rubber, 8);
+		for (const FVector& P : {Upper[0], Upper.Last(), Lower[0], Lower.Last()})
+		{
+			S.Cyl(P - FVector(0.5f, 0, 0), FVector::ForwardVector, 2.2f, 1.f, Steel, 10, false);
+		}
+		for (int32 I = Start; I < Out.Vertices.Num(); ++I)
+		{
+			Out.Vertices[I] = Where.TransformPosition(Out.Vertices[I]);
+			Out.Normals[I] = Where.TransformVectorNoScale(Out.Normals[I]);
+		}
+		return;
+	}
 	if (static_cast<vsim::parts::Slot>(SlotIndex) == vsim::parts::Slot::SparkPlugs)
 	{
 		const int32 Start = Out.Vertices.Num();

@@ -123,6 +123,10 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 	case EPeregonTex::BrickFacade: W = 32; H = 32; break;
 	case EPeregonTex::Clouds: W = H = 128; break;
 	case EPeregonTex::GlassDirt: W = H = 64; break;
+	case EPeregonTex::CarFabric:
+	case EPeregonTex::Carpet:
+	case EPeregonTex::Vinyl:
+	case EPeregonTex::Headliner: W = H = 64; break;
 	default: break;
 	}
 	Px.SetNumUninitialized(W * H);
@@ -146,6 +150,39 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 			case EPeregonTex::Fabric:
 				C = Gray((((X >> 1) + (Y >> 1)) & 1 ? 230.f : 192.f) + (R - 0.5f) * 12.f);
 				break;
+			case EPeregonTex::CarFabric:
+			{
+				// Велюр: продольные «валики» по 16 px (шов тёмный, середина светлее), диагональное плетение, ворс.
+				const int32 InRoll = X % 16;
+				const float Roll = InRoll == 0 ? 0.62f : 0.86f + 0.14f * FMath::Sin(PI * InRoll / 16.f);
+				const float Twill = ((X + Y) % 4) < 2 ? 1.f : 0.94f;
+				const float Pile = 0.9f + 0.1f * TileNoise(X, Y, 4, W, H, 71u) + (R - 0.5f) * 0.08f;
+				C = Gray(225.f * Roll * Twill * Pile);
+				break;
+			}
+			case EPeregonTex::Carpet:
+			{
+				// Ковролин: петли ворса — крупный и мелкий шум, без узора.
+				const float Loops = 0.75f + 0.25f * TileNoise(X, Y, 8, W, H, 73u);
+				C = Gray(200.f * Loops * (0.85f + 0.3f * R));
+				break;
+			}
+			case EPeregonTex::Vinyl:
+			{
+				// Кожзам: «шагрень» — ячейки из двух масштабов шума, тонкие тёмные бороздки между ними.
+				const float A = TileNoise(X, Y, 8, W, H, 79u);
+				const float B = TileNoise(X, Y, 4, W, H, 83u);
+				const float Cells = FMath::Abs(A - B);
+				C = Gray(205.f * (Cells < 0.06f ? 0.82f : 1.f) * (0.95f + 0.05f * R));
+				break;
+			}
+			case EPeregonTex::Headliner:
+			{
+				// Потолок: светлый винил с рядами дырочек.
+				const bool bHole = (X % 6) == 3 && (Y % 6) == 3;
+				C = Gray(bHole ? 150.f : 228.f + (R - 0.5f) * 8.f);
+				break;
+			}
 			case EPeregonTex::Rubber:
 			{
 				const bool bGroove = (Y % 8) < 2 || (X % 16) == 0;
@@ -805,6 +842,10 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeMaterial(UObject* Outer, con
 			case EPeregonTex::Glass:
 			case EPeregonTex::White:
 			case EPeregonTex::Plastic: Relief = 0.06f; break;
+			case EPeregonTex::CarFabric: Relief = 0.35f; break;
+			case EPeregonTex::Carpet: Relief = 0.5f; break;
+			case EPeregonTex::Vinyl: Relief = 0.15f; break;
+			case EPeregonTex::Headliner: Relief = 0.1f; break;
 			case EPeregonTex::BrickFacade:
 			case EPeregonTex::BirchBark:
 			case EPeregonTex::PineBark:

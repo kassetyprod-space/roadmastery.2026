@@ -852,6 +852,13 @@ void BuildInterior(MeshSet& M)
 			RoundedBox(M, Mat::Metal, V3(-6.f, Y + B2, -21.f), V3(24.f, 1.5f, 3.f), 0.5f);
 		}
 		RoundedBox(M, Mat::BlackTrim, V3(-27.f, Y + S * 24.5f, -9.f), V3(4.f, 1.f, 4.f), 1.f);
+		// Ремень: от стойки через плечо к замку у тоннеля, поясная лямка — к порогу; пластиковый кожух замка.
+		const float Out = S * 60.f;
+		const float In = S * 13.f;
+		Tube(M, Mat::BlackTrim, {V3(-16.f, Out, 70.f), V3(-30.f, Y + S * 10.f, 40.f), V3(-24.f, Y - S * 6.f, 12.f), V3(-18.f, In, -4.f)}, 0.5f, 5);
+		Tube(M, Mat::BlackTrim, {V3(-18.f, In, -4.f), V3(-22.f, Y, -2.f), V3(-20.f, Out, -10.f)}, 0.5f, 5);
+		RoundedBox(M, Mat::BlackTrim, V3(-18.f, In, -6.f), V3(2.f, 1.2f, 3.5f), 0.6f);
+		RoundedBox(M, Mat::Chrome, V3(-16.f, Out - S * 0.6f, 70.f), V3(1.5f, 0.6f, 2.f), 0.4f);
 	}
 
 	// Заднее сиденье и полка.
@@ -909,11 +916,9 @@ void BuildEngineBay(MeshSet& M)
 	{
 		RoundedBox(M, Mat::Chrome, V3(X, 0.f, 23.3f), V3(0.6f, 8.f, 0.3f), 0.2f);
 	}
-	Lathe(M, Mat::BlackTrim, V3(142.f, 4.f, 25.5f), Ez, Ex,
-		{{0.f, -1.5f}, {14.5f, -1.5f, true}, {15.f, -0.5f}, {15.f, 4.5f}, {14.5f, 5.2f, true}, {0.f, 5.2f}}, 28);
-	Lathe(M, Mat::Chrome, V3(142.f, 4.f, 30.7f), Ez, Ex, {{0.f, 1.5f}, {1.2f, 1.4f}, {1.2f, 0.f}}, 10, 0.f, 1.f);
+	// Воздушный фильтр, карбюратор, генератор, радиатор, патрубки и аккумулятор — съёмные узлы: их рисует игра
+	// (PeregonPartMeshes) по тому, что стоит в машине. Здесь — только «железо», которое не снимают.
 	Tube(M, Mat::Metal, {V3(158.f, 19.f, 2.f), V3(125.f, 19.f, 2.f), V3(112.f, 22.f, -12.f), V3(104.f, 22.f, -30.f)}, 2.2f, 8);
-	Lathe(M, Mat::Metal, V3(166.f, -15.f, 2.f), Ex, Ez, {{0.f, -3.5f}, {6.f, -3.5f, true}, {6.f, 3.5f, true}, {0.f, 3.5f}}, 16);
 	// Вентилятор, радиатор, патрубки.
 	for (int32_t K = 0; K < 4; ++K)
 	{
@@ -923,16 +928,11 @@ void BuildEngineBay(MeshSet& M)
 		RoundedBox(M, Mat::BlackTrim, V3(178.f, 0.f, 2.f) + Dir * 9.f, V3(0.4f, 2.8f, 8.f), 0.3f, Ex, Tan, Dir, 1);
 	}
 	Lathe(M, Mat::Metal, V3(178.f, 0.f, 2.f), Ex, Ez, {{0.f, -2.f}, {3.f, -2.f}, {3.f, 2.f}, {0.f, 2.f}}, 12);
-	RoundedBox(M, Mat::BlackTrim, V3(188.f, 0.f, 4.f), V3(2.5f, 46.f, 19.f), 0.6f);
-	RoundedBox(M, Mat::Metal, V3(188.f, 0.f, 24.5f), V3(3.f, 40.f, 2.5f), 1.f);
-	Tube(M, Mat::Rubber, {V3(186.f, -12.f, 24.f), V3(175.f, -10.f, 22.f), V3(162.f, -6.f, 16.f)}, 2.f, 10);
-	Tube(M, Mat::Rubber, {V3(186.f, 14.f, -10.f), V3(172.f, 14.f, -12.f), V3(162.f, 10.f, -10.f)}, 2.f, 10);
-	// Аккумулятор, бачок омывателя, главный тормозной цилиндр.
-	RoundedBox(M, Mat::BlackTrim, V3(172.f, 31.f, 4.f), V3(9.f, 10.f, 10.f), 0.6f);
-	for (float Y : {26.f, 36.f})
-	{
-		Lathe(M, Mat::Chrome, V3(166.f, Y, 14.f), Ez, Ex, {{1.f, 0.f}, {0.8f, 1.6f}, {0.f, 1.6f}}, 8);
-	}
+	// Полка аккумулятора (сам аккумулятор — съёмный узел), бачок омывателя, главный тормозной цилиндр.
+	RoundedBox(M, Mat::Metal, V3(172.f, 31.f, -7.f), V3(11.f, 12.f, 0.8f), 0.3f);
+	// Рамка радиатора — сам радиатор съёмный.
+	RoundedBox(M, Mat::Metal, V3(192.f, 0.f, -19.f), V3(1.2f, 44.f, 1.5f), 0.4f);
+	RoundedBox(M, Mat::Metal, V3(192.f, 0.f, 28.f), V3(1.2f, 44.f, 1.5f), 0.4f);
 	Lathe(M, Mat::GaugeFace, V3(176.f, -32.f, -4.f), Ez, Ex,
 		{{0.f, 0.f}, {5.5f, 0.f}, {6.f, 1.f}, {6.f, 16.f}, {5.f, 18.f}, {1.5f, 18.5f, true}, {1.5f, 21.f, true}, {0.f, 21.f}}, 18);
 	Lathe(M, Mat::Metal, V3(96.f, -36.f, 24.f), Ex, Ez, {{0.f, 0.f}, {3.5f, 0.f, true}, {3.5f, 10.f, true}, {0.f, 10.f}}, 14);

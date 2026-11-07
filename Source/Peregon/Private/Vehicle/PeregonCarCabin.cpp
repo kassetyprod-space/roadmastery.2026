@@ -22,7 +22,7 @@
 namespace PeregonCabin
 {
 // Глаза сидящего: водитель, переднее правое, заднее левое, заднее правое.
-const FVector SeatEyes[] = {FVector(-22.f, -35.f, 74.f), FVector(-22.f, 35.f, 74.f), FVector(-98.f, -35.f, 72.f), FVector(-98.f, 35.f, 72.f)};
+const FVector SeatEyes[] = {FVector(-22.f, -35.f, 74.f), FVector(-22.f, 35.f, 74.f), FVector(-78.f, -32.f, 70.f), FVector(-78.f, 32.f, 70.f)};
 const TCHAR* SeatNames[] = {TEXT("за руль"), TEXT("на переднее сиденье"), TEXT("назад, слева"), TEXT("назад, справа")};
 // Плафон — тот, что в модели на потолке (между передними сиденьями).
 const FVector DomeLocation(-10.f, 0.f, 86.f);
@@ -81,8 +81,7 @@ void APeregonCar::BuildCabinExtras()
 	Case.WetMask = 0.f;
 	Case.SnowMask = 0.f;
 	AddPlate(TEXT("RadioCase"), PeregonCabin::RadioLocation, FVector(4.f, 18.f, 6.f), Case);
-	// Ручка печки на консоли под магнитолой.
-	AddPlate(TEXT("HeaterKnob"), FVector(74.5f, 12.f, 14.f), FVector(1.5f, 3.f, 3.f), Case);
+	// Печка управляется рычажками на панели под магнитолой (она уже есть в модели кузова) — отдельной коробки не нужно.
 	FPeregonLook Dial(EPeregonTex::White, FLinearColor(0.95f, 0.6f, 0.2f), 0.4f);
 	Dial.WetMask = 0.f;
 	Dial.SnowMask = 0.f;
