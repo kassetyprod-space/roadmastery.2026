@@ -66,6 +66,7 @@ enum class EPeregonWorldMat : uint8
 	Water,      // река в городе
 	Sidewalk,   // тротуарная плитка
 	Steel,      // перила, арки мостов
+	Yard,       // земля городских дворов: вытоптанный газон с пылью
 	Count UMETA(Hidden)
 };
 

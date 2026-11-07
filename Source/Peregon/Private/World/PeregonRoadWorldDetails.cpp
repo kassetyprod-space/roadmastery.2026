@@ -615,7 +615,7 @@ void APeregonRoadWorld::BuildRealCity()
 		case rgen::CityMat::Marking: return Mat(EPeregonWorldMat::Marking);
 		case rgen::CityMat::Sidewalk: return Mat(EPeregonWorldMat::Sidewalk);
 		case rgen::CityMat::Curb: return Mat(EPeregonWorldMat::Concrete);
-		case rgen::CityMat::Ground: return Mat(EPeregonWorldMat::Grass);
+		case rgen::CityMat::Ground: return Mat(EPeregonWorldMat::Yard);
 		case rgen::CityMat::Grass: return Mat(EPeregonWorldMat::Grass);
 		case rgen::CityMat::Water: return Mat(EPeregonWorldMat::Water);
 		case rgen::CityMat::Concrete: return Mat(EPeregonWorldMat::Concrete);
@@ -837,7 +837,7 @@ void APeregonRoadWorld::BuildRealCity()
 		PeregonLights::Spots().Append(LampSpots);
 	}
 	Scenery.Append(Holder.Components);
-	UE_LOG(LogTemp, Log, TEXT("[Peregon] Город %s построен за %.0f мс: улиц %d, перекрёстков %d, мостов %d, домов %d, светофоров %d, %d треугольников"),
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Город %s построен за %.0f мс: улиц %d, перекрёстков %d, мостов %d, домов %d (убрано с трассы %d), дворовых проездов %d, светофоров %d, %d треугольников"),
 		UTF8_TO_TCHAR(CityMap.Name.c_str()), (FPlatformTime::Seconds() - StartTime) * 1000.0, Res.Edges, Res.Junctions, Res.Bridges, Res.BuildingsBuilt,
-		Lights, static_cast<int32>(Res.TriangleCount()));
+		Res.BuildingsCleared, Res.Driveways, Lights, static_cast<int32>(Res.TriangleCount()));
 }

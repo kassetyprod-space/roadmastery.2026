@@ -188,6 +188,8 @@ struct CityBuildOptions
 	// Землю города не строить рядом с этими точками (там своя земля трассы).
 	std::vector<CityPt> Keepout;
 	double KeepoutRadius = 280.0;
+	double KeepoutClear = 35.0;  // дома ближе этого к точкам Keepout не строятся (там идёт трасса)
+	double ApronWidth = 1.4;     // отмостка и тротуар вокруг многоэтажек, м
 };
 
 struct RGEN_API CityResult
@@ -199,6 +201,8 @@ struct RGEN_API CityResult
 	int Junctions = 0;
 	int Bridges = 0;
 	int BuildingsBuilt = 0;
+	int BuildingsCleared = 0; // убрано с коридора трассы
+	int Driveways = 0;        // асфальтовые проезды у подъездов
 
 	size_t TriangleCount() const;
 	// Высота дорожного полотна в точке (для машин и реквизита): 0 — земля, > 0 — эстакада, NaN — не дорога.

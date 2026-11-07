@@ -1437,14 +1437,370 @@ private:
 	}
 
 	// ---- Дома ----
+	// Дом задевает коридор трассы: точка Keepout внутри контура или ближе KeepoutClear к его стороне.
+	bool OnRouteCorridor(const std::vector<CityPt>& Ring) const
+	{
+		if (O.Keepout.empty() || O.KeepoutClear <= 0.0)
+		{
+			return false;
+		}
+		double X0 = Ring[0].X, X1 = X0, Y0 = Ring[0].Y, Y1 = Y0;
+		for (const CityPt& P : Ring)
+		{
+			X0 = std::min(X0, P.X);
+			X1 = std::max(X1, P.X);
+			Y0 = std::min(Y0, P.Y);
+			Y1 = std::max(Y1, P.Y);
+		}
+		const double Cl = O.KeepoutClear;
+		for (const CityPt& K : O.Keepout)
+		{
+			if (K.X < X0 - Cl || K.X > X1 + Cl || K.Y < Y0 - Cl || K.Y > Y1 + Cl)
+			{
+				continue;
+			}
+			bool Inside = false;
+			for (size_t A = 0, Bk = Ring.size() - 1; A < Ring.size(); Bk = A++)
+			{
+				const CityPt& Pa = Ring[A];
+				const CityPt& Pb = Ring[Bk];
+				if ((Pa.X > K.X) != (Pb.X > K.X) && K.Y < Pa.Y + (K.X - Pa.X) * (Pb.Y - Pa.Y) / (Pb.X - Pa.X))
+				{
+					Inside = !Inside;
+				}
+				const V2 Ab{Pb.X - Pa.X, Pb.Y - Pa.Y};
+				const double L2 = Ab.X * Ab.X + Ab.Y * Ab.Y;
+				const double T = L2 > 1e-9 ? std::clamp(((K.X - Pa.X) * Ab.X + (K.Y - Pa.Y) * Ab.Y) / L2, 0.0, 1.0) : 0.0;
+				const double Dx = Pa.X + Ab.X * T - K.X;
+				const double Dy = Pa.Y + Ab.Y * T - K.Y;
+				if (Dx * Dx + Dy * Dy < Cl * Cl)
+				{
+					return true;
+				}
+			}
+			if (Inside)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Отмостка с тротуаром вокруг дома: полоса Width по контуру, вершины сдвинуты по биссектрисе.
+	void Apron(const std::vector<CityPt>& Ring, double Width)
+	{
+		const size_t N = Ring.size();
+		const double Sign = OutwardSign(Ring);
+		V2 C{0, 0};
+		for (const CityPt& P : Ring)
+		{
+			C = C + V2{P.X, P.Y};
+		}
+		C = C * (1.0 / static_cast<double>(N));
+		CitySection& S = Sec(C.X, C.Y, CityMat::Sidewalk);
+		std::vector<int32_t> In(N), OutV(N);
+		const double Z = 0.07;
+		for (size_t K = 0; K < N; ++K)
+		{
+			const V2 P{Ring[K].X, Ring[K].Y};
+			const V2 Prev{Ring[(K + N - 1) % N].X, Ring[(K + N - 1) % N].Y};
+			const V2 Next{Ring[(K + 1) % N].X, Ring[(K + 1) % N].Y};
+			const V2 N0 = RightOf(Unit(P - Prev)) * Sign;
+			const V2 N1 = RightOf(Unit(Next - P)) * Sign;
+			V2 Bis = N0 + N1;
+			const double Bl = Len(Bis);
+			Bis = Bl > 1e-6 ? Bis * (1.0 / Bl) : N1;
+			const double Cos = std::max(0.35, Bis.X * N1.X + Bis.Y * N1.Y);
+			const V2 Q = P + Bis * (Width / Cos);
+			In[K] = S.Vertex(P.X, P.Y, Z, 0, 0, 1, P.X * 0.5, P.Y * 0.5);
+			OutV[K] = S.Vertex(Q.X, Q.Y, Z, 0, 0, 1, Q.X * 0.5, Q.Y * 0.5);
+		}
+		for (size_t K = 0; K < N; ++K)
+		{
+			const size_t J = (K + 1) % N;
+			S.Tri(In[K], OutV[K], OutV[J], 0, 0, 1);
+			S.Tri(In[K], OutV[J], In[J], 0, 0, 1);
+		}
+	}
+
+	// Точки улиц (через 10 м) в сетке 60 м — для поиска ближайшей улицы от дома.
+	std::map<std::pair<int, int>, std::vector<V2>> RoadGrid;
+
+	void BuildRoadGrid()
+	{
+		const double Cell = 60.0;
+		for (const CityWay& W : D.Ways)
+		{
+			if (W.Class == CityRoadClass::Motorway || W.Bridge || W.Tunnel)
+			{
+				continue;
+			}
+			for (size_t K = 0; K + 1 < W.Nodes.size(); ++K)
+			{
+				const CityNode& A = D.Nodes[static_cast<size_t>(W.Nodes[K])];
+				const CityNode& Bn = D.Nodes[static_cast<size_t>(W.Nodes[K + 1])];
+				const double L = std::hypot(Bn.X - A.X, Bn.Y - A.Y);
+				const int Steps = std::max(1, static_cast<int>(L / 10.0));
+				for (int Si = 0; Si <= Steps; ++Si)
+				{
+					const double T = static_cast<double>(Si) / Steps;
+					const V2 P{A.X + (Bn.X - A.X) * T, A.Y + (Bn.Y - A.Y) * T};
+					RoadGrid[{static_cast<int>(std::floor(P.X / Cell)), static_cast<int>(std::floor(P.Y / Cell))}].push_back(P);
+				}
+			}
+		}
+	}
+
+	// Дома по клеткам 60 м (по их рамкам) — чтобы проезды не шли сквозь соседей.
+	std::map<std::pair<int, int>, std::vector<size_t>> BuildingGrid;
+
+	void BuildBuildingGrid()
+	{
+		const double Cell = 60.0;
+		for (size_t Bi = 0; Bi < D.Buildings.size(); ++Bi)
+		{
+			const auto& Rg = D.Buildings[Bi].Ring;
+			if (Rg.size() < 3)
+			{
+				continue;
+			}
+			double X0 = Rg[0].X, X1 = X0, Y0 = Rg[0].Y, Y1 = Y0;
+			for (const CityPt& P : Rg)
+			{
+				X0 = std::min(X0, P.X);
+				X1 = std::max(X1, P.X);
+				Y0 = std::min(Y0, P.Y);
+				Y1 = std::max(Y1, P.Y);
+			}
+			for (int Cx = static_cast<int>(std::floor(X0 / Cell)); Cx <= static_cast<int>(std::floor(X1 / Cell)); ++Cx)
+			{
+				for (int Cy = static_cast<int>(std::floor(Y0 / Cell)); Cy <= static_cast<int>(std::floor(Y1 / Cell)); ++Cy)
+				{
+					BuildingGrid[{Cx, Cy}].push_back(Bi);
+				}
+			}
+		}
+	}
+
+	bool InsideAnyBuilding(V2 P, size_t Skip) const
+	{
+		const double Cell = 60.0;
+		const auto It = BuildingGrid.find({static_cast<int>(std::floor(P.X / Cell)), static_cast<int>(std::floor(P.Y / Cell))});
+		if (It == BuildingGrid.end())
+		{
+			return false;
+		}
+		for (const size_t Bi : It->second)
+		{
+			if (Bi == Skip)
+			{
+				continue;
+			}
+			const auto& Rg = D.Buildings[Bi].Ring;
+			bool Inside = false;
+			for (size_t A = 0, Bk = Rg.size() - 1; A < Rg.size(); Bk = A++)
+			{
+				if ((Rg[A].X > P.X) != (Rg[Bk].X > P.X) && P.Y < Rg[A].Y + (P.X - Rg[A].X) * (Rg[Bk].Y - Rg[A].Y) / (Rg[Bk].X - Rg[A].X))
+				{
+					Inside = !Inside;
+				}
+			}
+			if (Inside)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	double RoadDistance(V2 P) const
+	{
+		V2 Unused{0, 0};
+		return RoadNearest(P, Unused);
+	}
+
+	double RoadNearest(V2 P, V2& OutQ) const
+	{
+		const double Cell = 60.0;
+		const int Cx = static_cast<int>(std::floor(P.X / Cell));
+		const int Cy = static_cast<int>(std::floor(P.Y / Cell));
+		double Best = 1e9;
+		for (int Dx = -2; Dx <= 2; ++Dx)
+		{
+			for (int Dy = -2; Dy <= 2; ++Dy)
+			{
+				const auto It = RoadGrid.find({Cx + Dx, Cy + Dy});
+				if (It == RoadGrid.end())
+				{
+					continue;
+				}
+				for (const V2& Q : It->second)
+				{
+					const double Dq = Len(Q - P);
+					if (Dq < Best)
+					{
+						Best = Dq;
+						OutQ = Q;
+					}
+				}
+			}
+		}
+		return Best;
+	}
+
+	// Асфальтовый проезд вдоль длинной стороны многоэтажки — с той стороны, откуда ближе улица (там подъезды).
+	void Driveway(const std::vector<CityPt>& Ring, double OutSign, size_t Self)
+	{
+		const size_t N = Ring.size();
+		size_t Longest = 0;
+		double Best = -1.0;
+		for (size_t K = 0; K < N; ++K)
+		{
+			const double L = Len(V2{Ring[(K + 1) % N].X - Ring[K].X, Ring[(K + 1) % N].Y - Ring[K].Y});
+			if (L > Best)
+			{
+				Best = L;
+				Longest = K;
+			}
+		}
+		if (Best < 28.0)
+		{
+			return;
+		}
+		const V2 La{Ring[Longest].X, Ring[Longest].Y};
+		const V2 Lb{Ring[(Longest + 1) % N].X, Ring[(Longest + 1) % N].Y};
+		const V2 Dir = Unit(Lb - La);
+		const V2 Out = RightOf(Dir) * OutSign;
+		// Толщина дома поперёк длинной стороны.
+		double Depth = 0.0;
+		for (const CityPt& P : Ring)
+		{
+			Depth = std::max(Depth, -((P.X - La.X) * Out.X + (P.Y - La.Y) * Out.Y));
+		}
+		const V2 Mid = (La + Lb) * 0.5;
+		const double Gap = 4.5, Width = 5.5;
+		const V2 FrontC = Mid + Out * (Gap + Width * 0.5);
+		const V2 BackC = Mid - Out * (Depth + Gap + Width * 0.5);
+		// Сторона, где ближе улица, но не вплотную (у самой улицы проезд не нужен — подъезды выходят на тротуар).
+		auto Score = [&](V2 Ctr) {
+			const double Dist = RoadDistance(Ctr);
+			return Dist < 12.0 || Dist > 150.0 ? 1e9 : Dist;
+		};
+		const double Df = Score(FrontC);
+		const double Db = Score(BackC);
+		if (std::min(Df, Db) >= 1e9)
+		{
+			return;
+		}
+		const bool Front = Df <= Db;
+		const V2 Side = Front ? Out : Out * -1.0;
+		const V2 Base = Front ? La : La - Out * Depth;
+		const V2 P0 = Base - Dir * 5.0 + Side * Gap;
+		const V2 P1 = Base + Dir * (Best + 5.0) + Side * Gap;
+		const V2 C = (P0 + P1) * 0.5 + Side * (Width * 0.5);
+		if (IsWet(C.X, C.Y) || IsWet(P0.X, P0.Y) || IsWet(P1.X, P1.Y))
+		{
+			return;
+		}
+		// Сквозь соседние дома не прокладываем.
+		for (int Si = 0; Si <= 6; ++Si)
+		{
+			const V2 Q = P0 + (P1 - P0) * (Si / 6.0) + Side * (Width * 0.5);
+			if (InsideAnyBuilding(Q, Self))
+			{
+				return;
+			}
+		}
+		CitySection& S = Sec(C.X, C.Y, CityMat::Asphalt);
+		const V2 Q0 = P0 + Side * Width;
+		const V2 Q1 = P1 + Side * Width;
+		const double Z = 0.04;
+		const double Lr = Best + 10.0;
+		const int32_t A = S.Vertex(P0.X, P0.Y, Z, 0, 0, 1, 0.0, 0.0);
+		const int32_t Bv = S.Vertex(P1.X, P1.Y, Z, 0, 0, 1, Lr / 3.5, 0.0);
+		const int32_t Cv = S.Vertex(Q1.X, Q1.Y, Z, 0, 0, 1, Lr / 3.5, Width / 4.0);
+		const int32_t Dv = S.Vertex(Q0.X, Q0.Y, Z, 0, 0, 1, 0.0, Width / 4.0);
+		S.Tri(A, Bv, Cv, 0, 0, 1);
+		S.Tri(A, Cv, Dv, 0, 0, 1);
+		++R.Driveways;
+		// Въезд: от ближнего к улице конца проезда — к улице, если по пути нет домов.
+		const V2 E0 = (P0 + Q0) * 0.5;
+		const V2 E1 = (P1 + Q1) * 0.5;
+		V2 R0{0, 0}, R1{0, 0};
+		const double D0 = RoadNearest(E0, R0);
+		const double D1 = RoadNearest(E1, R1);
+		const V2 From = D0 <= D1 ? E0 : E1;
+		const V2 To = D0 <= D1 ? R0 : R1;
+		const double Dl = std::min(D0, D1);
+		if (Dl > 3.0 && Dl < 90.0)
+		{
+			for (int Si = 1; Si < 8; ++Si)
+			{
+				const V2 Q = From + (To - From) * (Si / 8.0);
+				if (InsideAnyBuilding(Q, std::numeric_limits<size_t>::max()) || IsWet(Q.X, Q.Y))
+				{
+					return;
+				}
+			}
+			const V2 Dd = Unit(To - From);
+			const V2 Nn = RightOf(Dd) * 2.25;
+			CitySection& Sl = Sec(From.X, From.Y, CityMat::Asphalt);
+			const double Zl = 0.035;
+			const int32_t L0 = Sl.Vertex(From.X - Nn.X, From.Y - Nn.Y, Zl, 0, 0, 1, 0.0, 0.0);
+			const int32_t L1 = Sl.Vertex(From.X + Nn.X, From.Y + Nn.Y, Zl, 0, 0, 1, 1.2, 0.0);
+			const int32_t L2 = Sl.Vertex(To.X + Nn.X, To.Y + Nn.Y, Zl, 0, 0, 1, 1.2, Dl / 4.0);
+			const int32_t L3 = Sl.Vertex(To.X - Nn.X, To.Y - Nn.Y, Zl, 0, 0, 1, 0.0, Dl / 4.0);
+			Sl.Tri(L0, L1, L2, 0, 0, 1);
+			Sl.Tri(L0, L2, L3, 0, 0, 1);
+		}
+	}
+
+	// +1 или −1: множитель к RightOf(направление стороны K), чтобы смотреть наружу контура.
+	static double OutwardSign(const std::vector<CityPt>& Ring)
+	{
+		const size_t N = Ring.size();
+		size_t Longest = 0;
+		double Best = -1.0;
+		for (size_t K = 0; K < N; ++K)
+		{
+			const double L = Len(V2{Ring[(K + 1) % N].X - Ring[K].X, Ring[(K + 1) % N].Y - Ring[K].Y});
+			if (L > Best)
+			{
+				Best = L;
+				Longest = K;
+			}
+		}
+		const V2 La{Ring[Longest].X, Ring[Longest].Y};
+		const V2 Lb{Ring[(Longest + 1) % N].X, Ring[(Longest + 1) % N].Y};
+		const V2 Probe = (La + Lb) * 0.5 + RightOf(Unit(Lb - La)) * 0.5;
+		bool Inside = false;
+		for (size_t A = 0, Bk = N - 1; A < N; Bk = A++)
+		{
+			const CityPt& Pa = Ring[A];
+			const CityPt& Pb = Ring[Bk];
+			if ((Pa.X > Probe.X) != (Pb.X > Probe.X) && Probe.Y < Pa.Y + (Probe.X - Pa.X) * (Pb.Y - Pa.Y) / (Pb.X - Pa.X))
+			{
+				Inside = !Inside;
+			}
+		}
+		return Inside ? -1.0 : 1.0;
+	}
+
 	void Buildings()
 	{
+		BuildRoadGrid();
+		BuildBuildingGrid();
 		for (size_t Bi = 0; Bi < D.Buildings.size(); ++Bi)
 		{
 			const CityBuilding& B = D.Buildings[Bi];
 			std::vector<CityPt> Ring = B.Ring;
 			if (Ring.size() < 3)
 			{
+				continue;
+			}
+			if (OnRouteCorridor(Ring))
+			{
+				++R.BuildingsCleared;
 				continue;
 			}
 			if (SignedArea(Ring) < 0.0)
@@ -1564,6 +1920,14 @@ private:
 						}
 					}
 				}
+			}
+			if (B.Kind != "house" && B.Kind != "garage" && O.ApronWidth > 0.0)
+			{
+				Apron(Ring, O.ApronWidth);
+			}
+			if ((B.Kind == "panel" || B.Kind == "brick" || B.Kind == "stucco") && Levels >= 4)
+			{
+				Driveway(Ring, OutwardSign(Ring), Bi);
 			}
 			// Крыша.
 			const std::vector<int> Tri = Triangulate(Ring);

@@ -521,6 +521,44 @@ int main()
 		Check(Ms < 3000.0, "город строится быстро, мс", Ms);
 	}
 
+	// --- Настоящий Новосибирск (Content/Data/Cities/novosibirsk.city, если он есть в репозитории) ---
+	{
+		std::ifstream F(std::string(PEREGON_TEST_DATA) + "/../../../Content/Data/Cities/novosibirsk.city", std::ios::binary);
+		if (F)
+		{
+			std::printf("\nНовосибирск из OSM\n");
+			std::stringstream Buf;
+			Buf << F.rdbuf();
+			rgen::CityData City;
+			std::string Err;
+			const bool bOk = City.Parse(Buf.str(), &Err);
+			Check(bOk && City.Buildings.size() > 10000 && City.Ways.size() > 1000, "файл читается: домов и улиц тысячи", static_cast<double>(City.Buildings.size()));
+			bool bOktyabrsky = false;
+			for (const rgen::CityWay& W : City.Ways)
+			{
+				bOktyabrsky |= W.Style == "oktyabrsky" && W.Bridge;
+			}
+			Check(bOktyabrsky, "Октябрьский мост найден в данных", bOktyabrsky ? 1.0 : 0.0);
+			rgen::Route Rt;
+			Rt.Build(rgen::NovosibirskKemerovo(1));
+			rgen::CityBuildOptions Opt;
+			for (double S = 30.0; S < 4000.0; S += 25.0)
+			{
+				const rgen::RouteSample Smp = Rt.Sample(S);
+				Opt.Keepout.push_back(rgen::CityPt{Smp.X, Smp.Y});
+			}
+			const auto T0 = std::chrono::steady_clock::now();
+			const rgen::CityResult Res = rgen::BuildCity(City, Opt);
+			const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+			std::printf("  построен за %.0f мс: перекрёстков %d, мостов %d, домов %d (убрано с трассы %d), проездов %d, треугольников %zu\n", Ms,
+				Res.Junctions, Res.Bridges, Res.BuildingsBuilt, Res.BuildingsCleared, Res.Driveways, Res.TriangleCount());
+			Check(Res.Junctions > 500 && Res.Bridges > 10, "развязки и мосты настоящего города", Res.Junctions);
+			Check(Res.Driveways > 500, "дворовые проезды у многоэтажек", Res.Driveways);
+			Check(Res.TriangleCount() < 4000000, "треугольников меньше 4 млн", static_cast<double>(Res.TriangleCount()));
+			Check(Ms < 20000.0, "строится меньше 20 с, мс", Ms);
+		}
+	}
+
 	std::printf("\n%d проверок, %d провалено\n", GChecks, GFailures);
 	return GFailures == 0 ? 0 : 1;
 }

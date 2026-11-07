@@ -266,6 +266,8 @@ void APeregonRoadWorld::SetupAssets()
 	Set(EPeregonWorldMat::Water, FPeregonLook(EPeregonTex::Glass, FLinearColor(0.1f, 0.16f, 0.2f), 0.04f, 0.f));
 	Set(EPeregonWorldMat::Sidewalk, FPeregonLook(EPeregonTex::Concrete, FLinearColor(0.78f, 0.76f, 0.72f), 0.85f));
 	Set(EPeregonWorldMat::Steel, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.34f, 0.42f, 0.5f), 0.35f, 0.6f));
+	// Двор: та же трава, но выгоревшая и пыльная — городская земля не должна выглядеть дачным газоном.
+	Set(EPeregonWorldMat::Yard, FPeregonLook(EPeregonTex::Grass, FLinearColor(0.74f, 0.7f, 0.55f), 0.97f));
 }
 
 UMaterialInterface* APeregonRoadWorld::Mat(EPeregonWorldMat Type) const

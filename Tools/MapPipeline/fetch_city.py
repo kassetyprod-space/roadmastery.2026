@@ -305,12 +305,174 @@ def road_lanes(tags, hw):
     return max(1, min(lanes, 8)), oneway
 
 
+def is_water_tags(tags):
+    return tags.get("natural") == "water" or tags.get("waterway") == "riverbank"
+
+
+def water_rings(el, bbox):
+    """Контуры воды одного объекта (путь или мультиполигон) в широте/долготе.
+
+    Обь в OSM — огромный мультиполигон из десятков линий; рамка города режет их, и за рамкой точки приходят
+    пустыми. Склеиваем куски по общим концам; оставшиеся открытые цепочки замыкаем вдоль рамки. Обходов рамки
+    два (вода «слева» или «справа» от цепочек) — берём тот, что даёт меньшую площадь: река в городе меньше
+    суши вокруг неё. Возвращает (внешние контуры, острова)."""
+    s, w, n, e = bbox
+
+    def pieces(geom):
+        out, cur = [], []
+        for g in geom or []:
+            if isinstance(g, dict) and "lat" in g and "lon" in g:
+                cur.append((g["lat"], g["lon"]))
+            else:
+                if len(cur) >= 2:
+                    out.append(cur)
+                cur = []
+        if len(cur) >= 2:
+            out.append(cur)
+        return out
+
+    outer, inner = [], []
+    if el.get("type") == "way":
+        outer = pieces(el.get("geometry"))
+    else:
+        for m in el.get("members", []):
+            if m.get("type") == "way":
+                (inner if m.get("role") == "inner" else outer).extend(pieces(m.get("geometry")))
+
+    def key(p):
+        return (round(p[0], 7), round(p[1], 7))
+
+    def stitch(segs):
+        chains = [list(c) for c in segs]
+        closed, opened = [], []
+        while chains:
+            c = chains.pop()
+            grown = True
+            while grown and key(c[0]) != key(c[-1]):
+                grown = False
+                for i, d in enumerate(chains):
+                    if key(d[0]) == key(c[-1]):
+                        c += d[1:]
+                    elif key(d[-1]) == key(c[-1]):
+                        c += d[::-1][1:]
+                    elif key(d[-1]) == key(c[0]):
+                        c = d + c[1:]
+                    elif key(d[0]) == key(c[0]):
+                        c = d[::-1] + c[1:]
+                    else:
+                        continue
+                    chains.pop(i)
+                    grown = True
+                    break
+            if len(c) >= 4 and key(c[0]) == key(c[-1]):
+                closed.append(c)
+            elif len(c) >= 2:
+                opened.append(c)
+        return closed, opened
+
+    def per(p):
+        """Точка → (прижатая к рамке точка, параметр по периметру против часовой: юг, восток, север, запад)."""
+        lat = min(max(p[0], s), n)
+        lon = min(max(p[1], w), e)
+        d = {"s": lat - s, "e": e - lon, "n": n - lat, "w": lon - w}
+        side = min(d, key=d.get)
+        H, W = n - s, e - w
+        if side == "s":
+            return (s, lon), lon - w
+        if side == "e":
+            return (lat, e), W + (lat - s)
+        if side == "n":
+            return (n, lon), W + H + (e - lon)
+        return (lat, w), 2 * W + H + (n - lat)
+
+    H, W = n - s, e - w
+    P = 2 * (W + H)
+    corners = [(W, (s, e)), (W + H, (n, e)), (2 * W + H, (n, w)), (P, (s, w))]
+
+    def arc(t0, t1):
+        """Точки рамки строго между параметрами t0 → t1 (против часовой), с углами и шагом ~0.002°."""
+        if t1 < t0:
+            t1 += P
+        pts = []
+        t = t0
+        step = 0.002
+        while True:
+            nxt = t + step
+            # ближайший угол
+            for base in (0.0, P):
+                for tc, c in corners:
+                    if t < base + tc < min(nxt, t1):
+                        nxt = base + tc
+            if nxt >= t1:
+                break
+            pts.append(point_at(nxt % P))
+            t = nxt
+        return pts
+
+    def point_at(t):
+        if t <= W:
+            return (s, w + t)
+        if t <= W + H:
+            return (s + (t - W), e)
+        if t <= 2 * W + H:
+            return (n, e - (t - W - H))
+        return (n - (t - 2 * W - H), w)
+
+    def area(r):
+        a = 0.0
+        for (y0, x0), (y1, x1) in zip(r, r[1:] + r[:1]):
+            a += x0 * y1 - x1 * y0
+        return abs(a) * 0.5
+
+    closed, opened = stitch(outer)
+    rings = [c for c in closed]
+    if opened:
+        ends = []  # (t, индекс цепочки, 0 — начало / 1 — конец, точка на рамке)
+        for i, c in enumerate(opened):
+            for k, p in ((0, c[0]), (1, c[-1])):
+                q, t = per(p)
+                ends.append((t, i, k, q))
+        ends.sort()
+        best = None
+        for shift in (0, 1):
+            # Пары соседних по рамке концов: (1,2),(3,4)… или (0,1),(2,3)…
+            # Соседние по рамке концы соединяются отрезком рамки между ними (против часовой от первого ко второму).
+            partner = {}
+            m = len(ends)
+            for j in range(shift, m + shift, 2):
+                ea, eb = ends[j % m], ends[(j + 1) % m]
+                pts = arc(ea[0], eb[0])
+                partner[(ea[1], ea[2])] = (eb, [ea[3]] + pts + [eb[3]])
+                partner[(eb[1], eb[2])] = (ea, [eb[3]] + pts[::-1] + [ea[3]])
+            used = set()
+            loops = []
+            for i in range(len(opened)):
+                if i in used:
+                    continue
+                ring, ci, k = [], i, 0
+                while ci not in used:
+                    used.add(ci)
+                    ring += opened[ci] if k == 0 else opened[ci][::-1]
+                    nb, link = partner[(ci, 1 - k)]
+                    ring += link
+                    ci, k = nb[1], nb[2]
+                loops.append(ring)
+            total = sum(area(r) for r in loops)
+            if best is None or total < best[0]:
+                best = (total, loops)
+        rings += best[1]
+    isl_closed, _ = stitch(inner)
+    return rings, isl_closed
+
+
 def clean_clipped(els):
     """Геометрия, обрезанная рамкой города, приходит с пустыми точками (null) за рамкой. У дорог оставляем
     самый длинный непрерывный кусок (узлы и точки — в паре), у контуров просто выкидываем пустые точки."""
     def ok(g):
         return isinstance(g, dict) and "lat" in g and "lon" in g
     for el in els:
+        if is_water_tags(el.get("tags", {})):
+            continue  # воду собирает water_rings: ей нужны разрывы, чтобы замкнуть контур по рамке
         geom = el.get("geometry")
         if el.get("type") == "way" and geom and not all(ok(g) for g in geom):
             nodes = el.get("nodes", [])
@@ -536,18 +698,17 @@ def main():
 
     for el in els:
         tags = el.get("tags", {})
-        is_water = tags.get("natural") == "water" or tags.get("waterway") == "riverbank"
+        is_water = is_water_tags(tags)
+        if is_water and el.get("type") in ("way", "relation"):
+            outer_rings, isl = water_rings(el, cfg["bbox"])
+            water += [[warp.game(la, lo) for la, lo in r] for r in outer_rings]
+            islands += [[warp.game(la, lo) for la, lo in r] for r in isl]
+            continue
         if el.get("type") == "way" and el.get("geometry"):
-            if is_water:
-                water.append(ring_of(el["geometry"]))
-            elif tags.get("leisure") in ("park", "garden") or tags.get("landuse") in ("grass", "forest"):
+            if tags.get("leisure") in ("park", "garden") or tags.get("landuse") in ("grass", "forest"):
                 parks.append(ring_of(el["geometry"]))
             elif tags.get("railway") == "rail":
                 rails.append(ring_of(el["geometry"]))
-        elif el.get("type") == "relation" and is_water:
-            for m in el.get("members", []):
-                if m.get("type") == "way" and m.get("geometry"):
-                    (islands if m.get("role") == "inner" else water).append(ring_of(m["geometry"]))
 
     for key, needle, what in cfg["landmarks"]:
         if what == "bridge" and key not in landmark_roads:
