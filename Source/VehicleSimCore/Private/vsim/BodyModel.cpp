@@ -699,12 +699,18 @@ void BuildDoor(Builder& B, Part Id)
 	const float CrankX = bFront ? 22.f : -70.f;
 	const V3 Crank = Card(CrankX, 18.f, 0.f);
 	const V3 Inward(0.f, -S, 0.f);
-	Lathe(M, Mat::Chrome, Crank, Inward, V3(1.f, 0.f, 0.f), {{0.f, 1.4f}, {1.4f, 1.2f}, {1.6f, 0.f}}, 12, 0.f, 1.f);
-	Tube(M, Mat::Chrome, {Crank + Inward * 1.2f, Crank + Inward * 1.4f + V3(-5.f, 0.f, -4.f)}, 0.45f, 6);
-	Lathe(M, Mat::InteriorDark, Crank + Inward * 1.4f + V3(-5.f, 0.f, -4.f), Inward, V3(1.f, 0.f, 0.f), {{0.f, 3.f}, {0.9f, 2.8f}, {1.f, 0.f}}, 10,
-		0.f, 1.f);
-	const float KnobX = bFront ? -6.f : -76.f;
-	Tube(M, Mat::Chrome, {V3(KnobX, S * 67.5f, 37.f), V3(KnobX, S * 67.5f, 41.5f)}, 0.55f, 8);
+	// Ручку стеклоподъёмника рисует и крутит игра (плавно, вместе со стеклом).
+	{
+		const int32_t Door = Id == Part::DoorFL ? 0 : Id == Part::DoorFR ? 1 : Id == Part::DoorRL ? 2 : 3;
+		B.Out.WindowCrank[Door] = Crank;
+		B.Out.WindowCrankAxis[Door] = Inward;
+		B.Out.GlassTumble = kTumble;
+	}
+	// Кнопка замка — в полке двери у стекла, торчит на 3 см (не сквозь обшивку).
+	const float KnobX = bFront ? -4.f : -74.f;
+	const V3 KnobBase = Card(KnobX, kBelt - 1.5f, -4.f);
+	Tube(M, Mat::Chrome, {KnobBase, KnobBase + V3(0.f, 0.f, 3.f)}, 0.5f, 8);
+	Lathe(M, Mat::Chrome, KnobBase + V3(0.f, 0.f, 3.f), V3(0.f, 0.f, 1.f), V3(1.f, 0.f, 0.f), {{0.5f, 0.f}, {0.6f, 0.3f}, {0.f, 0.5f}}, 8);
 
 	// Зеркало заднего вида на водительской двери.
 	if (Id == Part::DoorFL)
@@ -773,8 +779,22 @@ void BuildInterior(MeshSet& M)
 		{18.f, 90.f, true}, {38.f, 90.f, true}};
 	Dash(-64.f, -56.f, Plain);
 	Dash(-56.f, -14.f, Cluster);
-	Dash(-14.f, 64.f, Plain);
-	RoundedBox(M, Mat::Interior, V3(73.2f, 24.f, 29.f), V3(0.4f, 38.f, 7.f), 1.f);
+	// Над бардачком торпедо имеет нишу (глубиной до щита), её стенки — торцы соседних кусков.
+	std::vector<ProfilePoint> Hole;
+	for (const ProfilePoint& P : Plain)
+	{
+		Hole.push_back(P);
+		if (P.A == 37.f && P.B == 73.f)
+		{
+			Hole.push_back({36.6f, 88.f, true});
+			Hole.push_back({21.4f, 88.f, true});
+		}
+	}
+	Dash(-14.f, 15.5f, Plain);
+	Dash(15.5f, 48.5f, Hole);
+	Dash(48.5f, 64.f, Plain);
+	// Дно ниши — ковролином (вещи не гремят).
+	Box(M, Mat::Carpet, V3(80.5f, 32.f, 21.6f), V3(7.4f, 16.4f, 0.15f));
 	Box(M, Mat::BlackTrim, V3(71.93f, -35.f, 41.3f), V3(0.03f, 20.5f, 6.1f));
 
 	// Приборы: спидометр, тахометр, топливо, температура.
@@ -783,13 +803,9 @@ void BuildInterior(MeshSet& M)
 		const V3 Face(-1.f, 0.f, 0.f);
 		Lathe(M, Mat::GaugeFace, C, Face, Ez, {{0.f, 0.f}, {R, 0.f}}, 24, 0.f, 1.f);
 		Lathe(M, Mat::Chrome, C, Face, Ez, {{R, 0.f}, {R + 0.25f, 0.5f}, {R + 0.55f, 0.15f}, {R + 0.55f, -0.2f}}, 24);
-		for (int32_t K = 0; K < Ticks; ++K)
-		{
-			const float Alpha = Rad(Lerpf(-Sweep2, Sweep2, static_cast<float>(K) / static_cast<float>(Ticks - 1)));
-			const V3 Dir(0.f, std::sin(Alpha), std::cos(Alpha));
-			const V3 Tan(0.f, std::cos(Alpha), -std::sin(Alpha));
-			Box(M, Mat::BlackTrim, C + V3(-0.06f, 0.f, 0.f) + Dir * (R * 0.82f), V3(0.04f, R * 0.025f + 0.05f, R * 0.09f), Ex, Tan, Dir);
-		}
+		// Шкалы с цифрами — текстурой поверх (игра рисует циферблаты), здесь только чаша и ободок.
+		(void)Ticks;
+		(void)Sweep2;
 	};
 	Gauge(-42.5f, kBigGauge, 10, 125.f);
 	Gauge(-27.5f, kBigGauge, 9, 125.f);
@@ -797,16 +813,23 @@ void BuildInterior(MeshSet& M)
 	Gauge(-18.4f, kSmallGauge, 3, 60.f);
 
 	// Центральная консоль: приёмник, отопитель, дефлекторы, замок зажигания.
-	RoundedBox(M, Mat::BlackTrim, V3(72.6f, 2.f, 30.f), V3(0.6f, 9.f, 2.4f), 0.6f);
-	Box(M, Mat::GaugeFace, V3(71.95f, 2.f, 30.6f), V3(0.06f, 5.f, 0.9f));
-	for (float Y : {-5.5f, 9.5f})
+	// Магнитолу (корпус, шкалу, ручки) рисует игра — она светится и крутится. Ниже — пульт отопителя:
+	// три прорези с рычажками (заслонка, кран печки, вентилятор), под ним — монетница с парой монет.
+	RoundedBox(M, Mat::InteriorDark, V3(72.9f, 2.f, 24.f), V3(0.4f, 9.f, 2.6f), 0.4f);
+	for (int32_t K = 0; K < 3; ++K)
 	{
-		Lathe(M, Mat::Chrome, V3(72.f, Y, 29.6f), V3(-1.f, 0.f, 0.f), Ez, {{0.f, 1.6f}, {1.1f, 1.5f}, {1.1f, 0.f}}, 14, 0.f, 1.f);
+		const float Z = 25.6f - 1.6f * static_cast<float>(K);
+		Box(M, Mat::BlackTrim, V3(72.45f, 2.f, Z), V3(0.05f, 6.5f, 0.22f));
+		RoundedBox(M, Mat::Chrome, V3(72.2f, -3.f + 3.5f * static_cast<float>(K), Z), V3(0.35f, 0.5f, 0.45f), 0.15f);
 	}
-	RoundedBox(M, Mat::BlackTrim, V3(72.6f, 2.f, 24.5f), V3(0.5f, 8.f, 2.2f), 0.5f);
-	for (float Y : {-3.f, 2.f, 7.f})
+	// Консоль под торпедо до тоннеля.
+	RoundedBox(M, Mat::InteriorDark, V3(79.f, 2.f, 13.f), V3(6.f, 10.f, 7.f), 1.2f);
+	// Монетница: ниша в лицевой панели консоли.
+	Box(M, Mat::BlackTrim, V3(73.6f, 2.f, 15.8f), V3(1.6f, 6.f, 1.4f));
+	RoundedBox(M, Mat::Chrome, V3(72.95f, 2.f, 17.3f), V3(0.08f, 6.4f, 0.12f), 0.05f);
+	for (float Y : {-1.5f, 1.8f, 4.6f})
 	{
-		RoundedBox(M, Mat::Chrome, V3(71.9f, Y, 24.5f), V3(0.4f, 0.6f, 1.2f), 0.3f);
+		Lathe(M, Mat::Chrome, V3(73.4f + 0.3f * Y * 0.1f, Y, 14.5f), Ez, Ex, {{1.1f, 0.f}, {1.1f, 0.25f}, {0.f, 0.25f}}, 12);
 	}
 	for (float Y : {-4.f, 8.f})
 	{
@@ -827,15 +850,17 @@ void BuildInterior(MeshSet& M)
 	for (float S : {-1.f, 1.f})
 	{
 		const float Y = S * 35.f;
-		RoundedBox(M, Mat::Fabric, V3(-6.f, Y, -11.5f), V3(25.f, 24.f, 5.5f), 4.5f);
+		// Передние сиденья — на 12 см вперёд: между спинкой и задним диваном остаётся место для колен.
+		const float Fx = 6.f;
+		RoundedBox(M, Mat::Fabric, V3(Fx - 6.f, Y, -11.5f), V3(25.f, 24.f, 5.5f), 4.5f);
 		for (float B2 : {-20.5f, 20.5f})
 		{
-			RoundedBox(M, Mat::Fabric, V3(-7.f, Y + B2, -5.6f), V3(22.f, 3.5f, 2.2f), 2.f);
+			RoundedBox(M, Mat::Fabric, V3(Fx - 7.f, Y + B2, -5.6f), V3(22.f, 3.5f, 2.2f), 2.f);
 		}
 		const float Tilt = Rad(12.f);
 		const V3 BackZ(-std::sin(Tilt), 0.f, std::cos(Tilt));
 		const V3 BackX(std::cos(Tilt), 0.f, std::sin(Tilt));
-		const V3 BackC(-35.f, Y, 18.f);
+		const V3 BackC(Fx - 35.f, Y, 18.f);
 		RoundedBox(M, Mat::Fabric, BackC, V3(5.f, 23.5f, 27.f), 4.5f, BackX, Ey, BackZ);
 		for (float B2 : {-19.5f, 19.5f})
 		{
@@ -849,23 +874,32 @@ void BuildInterior(MeshSet& M)
 		}
 		for (float B2 : {-18.f, 18.f})
 		{
-			RoundedBox(M, Mat::Metal, V3(-6.f, Y + B2, -21.f), V3(24.f, 1.5f, 3.f), 0.5f);
+			// Салазки: от пола до подушки, по длине — с запасом на регулировку.
+			RoundedBox(M, Mat::Metal, V3(Fx - 6.f, Y + B2, -22.5f), V3(26.f, 1.5f, 3.5f), 0.5f);
+			RoundedBox(M, Mat::BlackTrim, V3(Fx - 6.f, Y + B2, -18.f), V3(22.f, 1.2f, 1.5f), 0.4f);
 		}
-		RoundedBox(M, Mat::BlackTrim, V3(-27.f, Y + S * 24.5f, -9.f), V3(4.f, 1.f, 4.f), 1.f);
+		RoundedBox(M, Mat::BlackTrim, V3(Fx - 27.f, Y + S * 24.5f, -9.f), V3(4.f, 1.f, 4.f), 1.f);
 		// Ремень: от стойки через плечо к замку у тоннеля, поясная лямка — к порогу; пластиковый кожух замка.
-		const float Out = S * 60.f;
-		const float In = S * 13.f;
-		Tube(M, Mat::BlackTrim, {V3(-16.f, Out, 70.f), V3(-30.f, Y + S * 10.f, 40.f), V3(-24.f, Y - S * 6.f, 12.f), V3(-18.f, In, -4.f)}, 0.5f, 5);
-		Tube(M, Mat::BlackTrim, {V3(-18.f, In, -4.f), V3(-22.f, Y, -2.f), V3(-20.f, Out, -10.f)}, 0.5f, 5);
-		RoundedBox(M, Mat::BlackTrim, V3(-18.f, In, -6.f), V3(2.f, 1.2f, 3.5f), 0.6f);
-		RoundedBox(M, Mat::Chrome, V3(-16.f, Out - S * 0.6f, 70.f), V3(1.5f, 0.6f, 2.f), 0.4f);
+		// Ремень: верхнее крепление — на средней стойке (по её внутренней поверхности), замок — у тоннеля, лямка — к порогу.
+		const float Pillar = -15.f;
+		const float OutTop = S * (HalfW(Pillar, 68.f) - 3.2f);
+		const float OutLow = S * (HalfW(Pillar, -8.f) - 9.f);
+		const float In = S * 12.f;
+		const float Bx = Fx - 18.f;
+		Tube(M, Mat::BlackTrim, {V3(Pillar, OutTop, 68.f), V3(Fx - 30.f, Y + S * 11.f, 40.f), V3(Fx - 26.f, Y - S * 5.f, 12.f), V3(Bx, In, -3.f)}, 0.45f, 5);
+		Tube(M, Mat::BlackTrim, {V3(Bx, In, -3.f), V3(Fx - 22.f, Y, -1.5f), V3(Pillar - 4.f, OutLow, -12.f)}, 0.45f, 5);
+		RoundedBox(M, Mat::BlackTrim, V3(Bx, In, -6.5f), V3(2.f, 1.2f, 4.f), 0.6f);
+		RoundedBox(M, Mat::Chrome, V3(Pillar, OutTop - S * 0.5f, 68.f), V3(1.6f, 0.5f, 2.2f), 0.4f);
+		RoundedBox(M, Mat::Chrome, V3(Pillar - 4.f, OutLow - S * 0.4f, -12.f), V3(1.4f, 0.5f, 1.8f), 0.4f);
 	}
 
 	// Заднее сиденье и полка.
-	RoundedBox(M, Mat::Fabric, V3(-76.f, 0.f, -13.f), V3(21.f, 56.f, 6.f), 5.f);
+	// Задний диван — от борта до борта (внутренние боковины на ±62), подушка лежит на полу без щелей.
+	RoundedBox(M, Mat::Fabric, V3(-76.f, 0.f, -14.f), V3(22.f, 60.f, 7.f), 5.f);
+	RoundedBox(M, Mat::InteriorDark, V3(-76.f, 0.f, -23.f), V3(20.f, 58.f, 3.f), 1.f);
 	{
 		const float Tilt = Rad(15.f);
-		RoundedBox(M, Mat::Fabric, V3(-97.f, 0.f, 13.f), V3(4.5f, 56.f, 24.f), 5.f, V3(std::cos(Tilt), 0.f, std::sin(Tilt)), Ey,
+		RoundedBox(M, Mat::Fabric, V3(-98.f, 0.f, 13.f), V3(5.5f, 60.f, 25.f), 5.f, V3(std::cos(Tilt), 0.f, std::sin(Tilt)), Ey,
 			V3(-std::sin(Tilt), 0.f, std::cos(Tilt)));
 	}
 	RoundedBox(M, Mat::InteriorDark, V3(-106.f, 0.f, 38.f), V3(3.f, 62.f, 0.6f), 0.5f);
@@ -943,17 +977,24 @@ void BuildEngineBay(MeshSet& M)
 void BuildTrunkInside(MeshSet& M)
 {
 	const V3 Ez(0.f, 0.f, 1.f);
+	// Багажник — от борта до борта: пол, боковины по внутренней стороне кузова (с нишами над арками), перегородка за диваном.
+	const float TW = 70.f;
 	EmitGrid(M, Mat::Carpet,
-		SampleGrid(Range(-196.f, -107.f, 15.f), Range(-54.f, 54.f, 18.f), [](float X, float Y) { return V3(X, Y, -20.f); }, Constant(Ez), 0.05f));
+		SampleGrid(Range(-200.f, -108.f, 8.f), Range(-TW, TW, 10.f), [](float X, float Y) { return V3(X, Y, -20.f); }, Constant(Ez), 0.05f));
 	for (float S : {-1.f, 1.f})
 	{
 		EmitGrid(M, Mat::Carpet,
-			SampleGrid(Range(-196.f, -107.f, 15.f), Range(-20.f, 36.f, 14.f), [S](float X, float Z) { return V3(X, S * 54.f, Z); },
-				Constant(V3(0.f, -S, 0.f)), 0.05f));
+			SampleGrid(Range(-200.f, -108.f, 8.f), Range(-20.f, 38.f, 8.f),
+				[S](float X, float Z) { return V3(X, S * std::min(70.f, HalfW(X, Z) - 4.f), Z); }, Constant(V3(0.f, -S, 0.f)), 0.05f));
+		// Арка колеса в багажнике — короб.
+		RoundedBox(M, Mat::Carpet, V3(kWheelXR, S * 60.f, -6.f), V3(26.f, 10.f, 14.f), 4.f);
 	}
 	EmitGrid(M, Mat::Carpet,
-		SampleGrid(Range(-54.f, 54.f, 18.f), Range(-20.f, 36.f, 14.f), [](float Y, float Z) { return V3(-107.5f, Y, Z); },
-			Constant(V3(-1.f, 0.f, 0.f)), 0.05f));
+		SampleGrid(Range(-TW, TW, 10.f), Range(-20.f, 38.f, 8.f), [](float Y, float Z) { return V3(-108.f, Y, Z); }, Constant(V3(-1.f, 0.f, 0.f)),
+			0.05f));
+	EmitGrid(M, Mat::Carpet,
+		SampleGrid(Range(-TW, TW, 10.f), Range(-20.f, 30.f, 10.f), [](float Y, float Z) { return V3(-200.f, Y, Z); }, Constant(V3(1.f, 0.f, 0.f)),
+			0.05f));
 	BuildWheel(M, V3(-165.f, -20.f, -10.f), Ez, V3(1.f, 0.f, 0.f));
 	RoundedBox(M, Mat::Metal, V3(-150.f, 32.f, -8.f), V3(14.f, 18.f, 11.f), 3.f);
 	Lathe(M, Mat::BlackTrim, V3(-150.f, 32.f, 3.f), Ez, V3(1.f, 0.f, 0.f), {{0.f, 2.f}, {2.5f, 2.f, true}, {2.5f, 0.f}}, 12);

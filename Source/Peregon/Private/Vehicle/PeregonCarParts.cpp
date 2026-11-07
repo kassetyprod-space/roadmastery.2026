@@ -19,6 +19,11 @@
 #include "World/PeregonKit.h"
 #include "World/PeregonSky.h"
 
+#include "vsim/BodyModel.h"
+
+// Модель кузова (строится один раз, PeregonCar.cpp).
+const vmodel::Model& PeregonCarModelData();
+
 namespace PeregonCarParts
 {
 using vsim::parts::Panel;
@@ -241,6 +246,43 @@ void APeregonCar::BuildPartSlots()
 		PartsMaterial = Art->MakeMaterial(this, FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.6f, 0.3f));
 	}
 	bPartsDirty = true;
+
+	// Ручки стеклоподъёмников: розетка, рычаг и вращающаяся рукоятка; крутятся вместе со стеклом.
+	Cranks.Reset();
+	const vmodel::Model& CarModel = PeregonCarModelData();
+	for (int32 K = 0; K < 4; ++K)
+	{
+		FPeregonMovingPart* Door = FindMovingPart(SeatDoor(K));
+		if (!Door || !Door->Pivot)
+		{
+			Cranks.Add(nullptr);
+			continue;
+		}
+		const FVector Center(CarModel.WindowCrank[K].X, CarModel.WindowCrank[K].Y, CarModel.WindowCrank[K].Z);
+		const FVector Axis(CarModel.WindowCrankAxis[K].X, CarModel.WindowCrankAxis[K].Y, CarModel.WindowCrankAxis[K].Z);
+		FPeregonMeshBuffers Crank;
+		const FColor Chrome = FLinearColor(0.8f, 0.8f, 0.82f).ToFColor(false);
+		const FColor Dark = FLinearColor(0.05f, 0.048f, 0.045f).ToFColor(false);
+		// Локально: ось вращения — +X (смотрит в салон), рычаг — вдоль +Y.
+		Crank.AddBox(FVector(0.f, 0.f, -1.5f), 0.f, FVector(0.8f, 3.f, 3.f), FVector2D(5.f, 5.f), Chrome, true, true);   // розетка
+		Crank.AddBox(FVector(0.7f, 2.6f, -0.45f), 0.f, FVector(0.5f, 6.f, 0.9f), FVector2D(5.f, 5.f), Chrome, true, true); // рычаг
+		Crank.AddBox(FVector(2.1f, 5.4f, -0.9f), 0.f, FVector(2.8f, 1.8f, 1.8f), FVector2D(5.f, 5.f), Dark, true, true);   // рукоятка
+		UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this, *FString::Printf(TEXT("Crank%d"), K));
+		Mesh->SetupAttachment(Door->Pivot);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->RegisterComponent();
+		Mesh->CreateMeshSection(0, Crank.Vertices, Crank.Triangles, Crank.Normals, Crank.UVs, Crank.Colors, TArray<FProcMeshTangent>(), false);
+		if (PartsMaterial)
+		{
+			Mesh->SetMaterial(0, PartsMaterial);
+		}
+		// Дверь — в своей системе (от петли), стоит закрытой: переводим точку кузова в систему двери.
+		const FTransform DoorRest = Door->Pivot->GetRelativeTransform();
+		Mesh->SetRelativeLocation(DoorRest.InverseTransformPosition(Center));
+		CrankBase[K] = DoorRest.GetRotation().Inverse() * FRotationMatrix::MakeFromX(Axis).ToQuat();
+		Mesh->SetRelativeRotation(CrankBase[K]);
+		Cranks.Add(Mesh);
+	}
 }
 
 void APeregonCar::RebuildPartsMesh()

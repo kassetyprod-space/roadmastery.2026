@@ -22,11 +22,11 @@
 namespace PeregonCabin
 {
 // Глаза сидящего: водитель, переднее правое, заднее левое, заднее правое.
-const FVector SeatEyes[] = {FVector(-22.f, -35.f, 74.f), FVector(-22.f, 35.f, 74.f), FVector(-78.f, -32.f, 70.f), FVector(-78.f, 32.f, 70.f)};
+const FVector SeatEyes[] = {FVector(-10.f, -35.f, 74.f), FVector(-10.f, 35.f, 74.f), FVector(-78.f, -32.f, 70.f), FVector(-78.f, 32.f, 70.f)};
 const TCHAR* SeatNames[] = {TEXT("за руль"), TEXT("на переднее сиденье"), TEXT("назад, слева"), TEXT("назад, справа")};
 // Плафон — тот, что в модели на потолке (между передними сиденьями).
 const FVector DomeLocation(-10.f, 0.f, 86.f);
-const FVector RadioLocation(74.f, 0.f, 30.f);
+const FVector RadioLocation(73.6f, 2.f, 30.f); // «Урал»: корпус в нише торпедо, лицо — заподлицо с панелью
 } // namespace PeregonCabin
 
 FVector APeregonCar::SeatEye(int32 InSeat) const
@@ -80,12 +80,18 @@ void APeregonCar::BuildCabinExtras()
 	FPeregonLook Case(EPeregonTex::Plastic, FLinearColor(0.08f, 0.08f, 0.09f), 0.6f);
 	Case.WetMask = 0.f;
 	Case.SnowMask = 0.f;
-	AddPlate(TEXT("RadioCase"), PeregonCabin::RadioLocation, FVector(4.f, 18.f, 6.f), Case);
+	AddPlate(TEXT("RadioCase"), PeregonCabin::RadioLocation, FVector(2.4f, 18.f, 5.f), Case);
+	// Ручки: громкость слева, настройка справа.
+	FPeregonLook KnobLook(EPeregonTex::Chrome, FLinearColor(0.7f, 0.7f, 0.72f), 0.3f, 1.f);
+	KnobLook.WetMask = 0.f;
+	KnobLook.SnowMask = 0.f;
+	AddPlate(TEXT("RadioKnobL"), PeregonCabin::RadioLocation + FVector(-1.9f, -6.f, -0.4f), FVector(1.4f, 2.f, 2.f), KnobLook);
+	AddPlate(TEXT("RadioKnobR"), PeregonCabin::RadioLocation + FVector(-1.9f, 6.f, -0.4f), FVector(1.4f, 2.f, 2.f), KnobLook);
 	// Печка управляется рычажками на панели под магнитолой (она уже есть в модели кузова) — отдельной коробки не нужно.
 	FPeregonLook Dial(EPeregonTex::White, FLinearColor(0.95f, 0.6f, 0.2f), 0.4f);
 	Dial.WetMask = 0.f;
 	Dial.SnowMask = 0.f;
-	RadioDialMaterial = AddPlate(TEXT("RadioDial"), PeregonCabin::RadioLocation + FVector(-2.1f, 0.f, 1.2f), FVector(0.3f, 12.f, 1.6f), Dial);
+	RadioDialMaterial = AddPlate(TEXT("RadioDial"), PeregonCabin::RadioLocation + FVector(-1.25f, 0.f, 0.9f), FVector(0.2f, 8.f, 1.3f), Dial);
 
 	Radio = NewObject<UPeregonRadio>(this, TEXT("Radio"));
 	Radio->SetupAttachment(Body);
@@ -392,7 +398,16 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 	{
 		if (UProceduralMeshComponent* Win = WindowGlass[K])
 		{
-			Win->SetRelativeLocation(FVector(0.f, 0.f, -36.f * WindowOpen[K]));
+			// Вдоль своей плоскости: вниз и наружу (стекло наклонено) — в полость двери, а не сквозь карту.
+			// Ручку крутят — стекло едет плавно (около 3 с на весь ход), ручка вертится вместе с ним: 4 оборота.
+			WindowShown[K] = FMath::FInterpConstantTo(WindowShown[K], WindowOpen[K], DeltaSeconds, 0.35f);
+			const float Drop = 38.f * WindowShown[K];
+			if (Cranks.IsValidIndex(K) && Cranks[K])
+			{
+				Cranks[K]->SetRelativeRotation(CrankBase[K] * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-1440.f * WindowShown[K])));
+			}
+			const float Side = (K == 0 || K == 2) ? -1.f : 1.f;
+			Win->SetRelativeLocation(FVector(0.f, Side * 0.26f * Drop, -Drop));
 		}
 	}
 	const FPeregonTelemetry T = Movement->GetTelemetry();
@@ -543,4 +558,5 @@ void APeregonCar::OnHornReleased(const FInputActionValue&) { bHorn = false; }
 void APeregonCar::OnBlinkLeft(const FInputActionValue&) { SetBlinkers(BlinkMode == 1 ? 0 : 1); }
 void APeregonCar::OnBlinkRight(const FInputActionValue&) { SetBlinkers(BlinkMode == 2 ? 0 : 2); }
 void APeregonCar::OnHazard(const FInputActionValue&) { SetBlinkers(BlinkMode == 3 ? 0 : 3); }
-void APeregonCar::OnNextSeat(const FInputActionValue&) { SwitchSeat((Seat + 1) % 4); }
+// Пересесть можно только в своём ряду (вперёд-назад — через улицу).
+void APeregonCar::OnNextSeat(const FInputActionValue&) { SwitchSeat(Seat < 2 ? 1 - Seat : 5 - Seat); }

@@ -13,6 +13,7 @@
 
 class APeregonCharacter;
 class UBoxComponent;
+class UTexture2D;
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -82,7 +83,10 @@ public:
 	bool HasDriver() const { return Driver != nullptr; }
 
 	void EnterCar(APeregonCharacter* Character, int32 InSeat = 0);
-	void ExitCar();
+	// Выйти через дверь места ThroughSeat (−1 — своего).
+	void ExitCar(int32 ThroughSeat = -1);
+	static int32 DoorSeatIndex(FName Tag);
+	bool IsInDoorway(FName Tag, const APawn* User) const;
 	APeregonCharacter* GetDriver() const { return Driver; }
 
 	// Поставить машину на землю: физика выключается, по лучу ищется земля, машина ставится на колёса
@@ -235,6 +239,10 @@ private:
 	void ApplyDirt();
 	int32 WindowIndex(const UPrimitiveComponent* Part) const;
 
+	// Циферблаты с цифрами (PeregonGauges.cpp).
+	void BuildGaugeFaces();
+	UPROPERTY(Transient) TArray<TObjectPtr<UTexture2D>> GaugeTextures;
+
 	// Узлы и кузов.
 	void BuildPartSlots();
 	void UpdateParts(float DeltaSeconds, const FPeregonTelemetry& T);
@@ -305,6 +313,9 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UProceduralMeshComponent>> WindowGlass;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> GlassMaterial;
 	float WindowOpen[4] = {0.f, 0.f, 0.f, 0.f};
+	float WindowShown[4] = {0.f, 0.f, 0.f, 0.f}; // где стекло сейчас (догоняет WindowOpen плавно)
+	UPROPERTY(Transient) TArray<TObjectPtr<UProceduralMeshComponent>> Cranks;
+	FQuat CrankBase[4] = {FQuat::Identity, FQuat::Identity, FQuat::Identity, FQuat::Identity};
 	float FogLevel = 0.f;     // 0..1 запотевание изнутри
 	float DirtLevel = 0.f;    // 0..1 грязь на кузове
 	float AppliedDirt = -1.f;

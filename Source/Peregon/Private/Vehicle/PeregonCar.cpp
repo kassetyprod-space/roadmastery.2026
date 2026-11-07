@@ -41,6 +41,8 @@ const vmodel::Model& Get()
 FVector ToVector(const vmodel::V3& V) { return FVector(V.X, V.Y, V.Z); }
 } // namespace PeregonCarModel
 
+const vmodel::Model& PeregonCarModelData() { return PeregonCarModel::Get(); }
+
 namespace PeregonCarLook
 {
 const FName DoorFL(TEXT("DoorFL"));
@@ -312,9 +314,9 @@ APeregonCar::APeregonCar()
 		FVector Half;
 	};
 	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 85.5f), FVector(7.f, 5.f, 2.5f)},
-		{TEXT("Heater"), Body.Get(), FVector(72.4f, 2.f, 24.5f), FVector(1.5f, 8.f, 2.2f)},
-		{TEXT("RadioVol"), Body.Get(), FVector(73.f, -5.f, 30.f), FVector(3.f, 5.f, 4.f)},
-		{TEXT("RadioTune"), Body.Get(), FVector(73.f, 5.f, 30.f), FVector(3.f, 5.f, 4.f)},
+		{TEXT("Heater"), Body.Get(), FVector(72.4f, 2.f, 24.f), FVector(1.2f, 8.f, 2.4f)},
+		{TEXT("RadioVol"), Body.Get(), FVector(72.f, -4.f, 29.6f), FVector(2.f, 1.8f, 1.8f)},
+		{TEXT("RadioTune"), Body.Get(), FVector(72.f, 8.f, 29.6f), FVector(2.f, 1.8f, 1.8f)},
 		{TEXT("Horn"), SteeringPivot.Get(), FVector::ZeroVector, FVector(4.f, 7.f, 7.f)}};
 	for (const FExtraHit& E : Extras)
 	{
@@ -529,6 +531,7 @@ void APeregonCar::BeginPlay()
 	BuildModelMeshes();
 	BuildSounds();
 	BuildCabinExtras();
+	BuildGaugeFaces();
 	BuildPartSlots();
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
 	SetFirstPerson(UPeregonGameUserSettings::Get()->bStartFirstPerson);
@@ -1148,27 +1151,24 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 		}
 	}
 
-	if (Part->ComponentHasTag(DoorFL))
-	{
-		if (bOnFoot)
-		{
-			return Driver ? FString() : FString(TEXT("Сесть за руль"));
-		}
-		if (bInside)
-		{
-			return FMath::Abs(Movement->GetForwardSpeed()) < MaxExitSpeed ? FString(TEXT("Выйти из машины")) : FString(TEXT("Сначала остановитесь"));
-		}
-	}
-	for (const FName& Tag : {DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
+	// Двери: снаружи — открыть; из открытой двери (стоя в проёме) — сесть на это место, сбоку — закрыть.
+	// Изнутри — открыть/закрыть любую; через открытую — выйти. Сами двери не закрываются.
+	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
 	{
 		if (Part->ComponentHasTag(Tag))
 		{
 			const FPeregonMovingPart* Moving = FindMovingPart(Tag);
 			const bool bOpen = Moving && Moving->Target > 0.5f;
-			// В открытую дверь можно сесть на это место.
-			if (bOnFoot && bOpen && !Driver && (Tag == DoorFR || Tag == DoorRL || Tag == DoorRR))
+			const int32 DoorSeat = DoorSeatIndex(Tag);
+			if (bOnFoot && bOpen && !Driver && DoorSeat >= 0 && IsInDoorway(Tag, User))
 			{
-				return Tag == DoorFR ? FString(TEXT("Сесть на переднее сиденье")) : FString(TEXT("Сесть на заднее сиденье"));
+				static const TCHAR* Places[] = {TEXT("Сесть за руль"), TEXT("Сесть на переднее сиденье"), TEXT("Сесть назад слева"), TEXT("Сесть назад справа")};
+				return Places[DoorSeat];
+			}
+			if (bInside && bOpen && DoorSeat >= 0)
+			{
+				return FMath::Abs(Movement->GetForwardSpeed()) < MaxExitSpeed ? FString(TEXT("Закрыть дверь  ·  F — выйти через неё"))
+																			   : FString(TEXT("Закрыть дверь"));
 			}
 			return FString(bOpen ? TEXT("Закрыть ") : TEXT("Открыть ")) + PartNoun(Tag);
 		}
@@ -1258,26 +1258,16 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		return;
 	}
 
-	if (Part->ComponentHasTag(DoorFL))
-	{
-		if (Walker && !Driver)
-		{
-			EnterCar(Walker);
-		}
-		else if (bInside && FMath::Abs(Movement->GetForwardSpeed()) < MaxExitSpeed)
-		{
-			ExitCar();
-		}
-		return;
-	}
-	for (const FName& Tag : {DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
+	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
 	{
 		if (Part->ComponentHasTag(Tag))
 		{
 			const FPeregonMovingPart* Moving = FindMovingPart(Tag);
-			if (Walker && !Driver && Moving && Moving->Target > 0.5f && (Tag == DoorFR || Tag == DoorRL || Tag == DoorRR))
+			const bool bOpen = Moving && Moving->Target > 0.5f;
+			const int32 DoorSeat = DoorSeatIndex(Tag);
+			if (Walker && !Driver && bOpen && DoorSeat >= 0 && IsInDoorway(Tag, User))
 			{
-				EnterCar(Walker, Tag == DoorFR ? 1 : (Tag == DoorRL ? 2 : 3));
+				EnterCar(Walker, DoorSeat);
 				return;
 			}
 			ToggleMovingPart(Tag);
@@ -1388,11 +1378,7 @@ void APeregonCar::EnterCar(APeregonCharacter* Character, int32 InSeat)
 	Seat = FMath::Clamp(InSeat, 0, 3);
 	HeadBaseLocation = SeatEye(Seat);
 	HeadPivot->SetRelativeLocation(HeadBaseLocation);
-	if (FPeregonMovingPart* Door = FindMovingPart(SeatDoor(Seat)))
-	{
-		Door->Target = 1.f;
-		Door->AutoCloseTimer = 0.9f;
-	}
+	// Дверь остаётся, как была: закрывают её сами (изнутри — ЛКМ по двери).
 	PC->Possess(this);
 	PC->SetControlRotation(FRotator(-12.f, GetActorRotation().Yaw, 0.f));
 	HeadYaw = 0.f;
@@ -1400,7 +1386,7 @@ void APeregonCar::EnterCar(APeregonCharacter* Character, int32 InSeat)
 	SetFirstPerson(true);
 }
 
-void APeregonCar::ExitCar()
+void APeregonCar::ExitCar(int32 ThroughSeat)
 {
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!Driver || !PC)
@@ -1409,13 +1395,15 @@ void APeregonCar::ExitCar()
 	}
 	APeregonCharacter* Walker = Driver;
 	Driver = nullptr;
-	if (FPeregonMovingPart* Door = FindMovingPart(SeatDoor(Seat)))
+	// Выходим через выбранную дверь (по умолчанию — свою): она открывается и так и остаётся.
+	const int32 ExitSeat = ThroughSeat >= 0 ? ThroughSeat : Seat;
+	if (FPeregonMovingPart* Door = FindMovingPart(SeatDoor(ExitSeat)))
 	{
 		Door->Target = 1.f;
-		Door->AutoCloseTimer = 0.9f;
+		Door->AutoCloseTimer = 0.f;
 	}
-	// Выходим у своей двери, лицом по ходу машины.
-	const FVector Eye = SeatEye(Seat);
+	// Встаём сбоку у этой двери, лицом по ходу машины.
+	const FVector Eye = SeatEye(ExitSeat);
 	const FVector ExitLocation = GetActorTransform().TransformPosition(FVector(Eye.X - 3.f, Eye.Y < 0.f ? -150.f : 150.f, 60.f));
 	Seat = 0;
 	HeadBaseLocation = SeatEye(0);
@@ -1805,7 +1793,21 @@ void APeregonCar::OnExit(const FInputActionValue&)
 {
 	if (FMath::Abs(Movement->GetForwardSpeed()) < PeregonCarLook::MaxExitSpeed)
 	{
-		ExitCar();
+		// Смотрим на открытую дверь — выходим через неё (хоть через соседнюю), иначе — через свою.
+		int32 Through = -1;
+		if (const UPrimitiveComponent* Looked = Focus.Part.Get())
+		{
+			for (const FName& Tag : Looked->ComponentTags)
+			{
+				const int32 DoorSeat = DoorSeatIndex(Tag);
+				const FPeregonMovingPart* Moving = DoorSeat >= 0 ? FindMovingPart(Tag) : nullptr;
+				if (Moving && Moving->Target > 0.5f)
+				{
+					Through = DoorSeat;
+				}
+			}
+		}
+		ExitCar(Through);
 	}
 }
 
@@ -1883,4 +1885,31 @@ bool APeregonCar::IsWiped(const FVector& BodyPoint) const
 		}
 	}
 	return false;
+}
+
+int32 APeregonCar::DoorSeatIndex(FName Tag)
+{
+	return Tag == FName(TEXT("DoorFL")) ? 0 : Tag == FName(TEXT("DoorFR")) ? 1 : Tag == FName(TEXT("DoorRL")) ? 2 : Tag == FName(TEXT("DoorRR")) ? 3 : -1;
+}
+
+bool APeregonCar::IsInDoorway(FName Tag, const APawn* User) const
+{
+	// Стоит ли пешеход в проёме открытой двери: со стороны салона от плоскости двери (а не снаружи у её края).
+	const FPeregonMovingPart* Moving = FindMovingPart(Tag);
+	if (!Moving || !Moving->Pivot || !User)
+	{
+		return false;
+	}
+	const FVector Local = GetActorTransform().InverseTransformPosition(User->GetActorLocation());
+	const int32 DoorSeat = DoorSeatIndex(Tag);
+	const FVector Eye = SeatEye(FMath::Max(0, DoorSeat));
+	// Проём — полоса вдоль кузова у этой двери: по X — у сиденья, по Y — до ~1.4 м от борта.
+	const bool bAlong = FMath::Abs(Local.X - Eye.X) < 75.f;
+	const bool bSide = Local.Y * FMath::Sign(Eye.Y) > 60.f && Local.Y * FMath::Sign(Eye.Y) < 150.f;
+	// За дверью (с её наружной стороны) — нет: проверяем, по какую сторону открытой створки стоим.
+	const FVector Hinge = GetActorTransform().InverseTransformPosition(Moving->Pivot->GetComponentLocation());
+	const FVector DoorDir = (GetActorTransform().InverseTransformVector(Moving->Pivot->GetForwardVector() * -1.f)).GetSafeNormal2D();
+	const FVector ToUser = (Local - Hinge).GetSafeNormal2D();
+	const float Cross = static_cast<float>(DoorDir.X * ToUser.Y - DoorDir.Y * ToUser.X) * FMath::Sign(Eye.Y);
+	return bAlong && bSide && Cross < 0.35f;
 }
