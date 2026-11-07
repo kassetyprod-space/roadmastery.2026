@@ -157,6 +157,23 @@ void APeregonProvingGround::BuildShowcase()
 	Add(rgen::BuildingKind::Shop, 170.0, Row + 45.0, 16.0, 9.0, 0, 10);
 	Add(rgen::BuildingKind::Shop, 200.0, Row + 45.0, 14.0, 9.0, 1, 11);
 	Add(rgen::BuildingKind::Playground, 260.0, Row + 50.0, 22.0, 18.0, 1, 12);
+	// Третий ряд: общественные здания и мелочи города.
+	Add(rgen::BuildingKind::School, 30.0, Row + 95.0, 46.0, 30.0, 3, 13);
+	Add(rgen::BuildingKind::Kindergarten, 90.0, Row + 95.0, 36.0, 26.0, 2, 14);
+	Add(rgen::BuildingKind::CultureHouse, 145.0, Row + 95.0, 40.0, 26.0, 1, 15);
+	Add(rgen::BuildingKind::Admin, 200.0, Row + 95.0, 40.0, 16.0, 4, 16);
+	Add(rgen::BuildingKind::Clinic, 255.0, Row + 95.0, 42.0, 14.0, 3, 17);
+	Add(rgen::BuildingKind::Monument, 310.0, Row + 95.0, 30.0, 26.0, 1, 18);
+	Add(rgen::BuildingKind::WaterTower, 355.0, Row + 95.0, 9.0, 9.0, 1, 19);
+	Add(rgen::BuildingKind::Market, 30.0, Row + 140.0, 30.0, 20.0, 1, 20);
+	for (int32 K = 0; K < 7; ++K)
+	{
+		Add(rgen::BuildingKind::Kiosk, 70.0 + K * 8.0, Row + 140.0, 4.0, 3.0, K, 21u + static_cast<uint32>(K));
+	}
+	for (int32 K = 0; K < 5; ++K)
+	{
+		Add(rgen::BuildingKind::Shop, 140.0 + K * 22.0, Row + 140.0, 16.0, 9.0, 3 + K * 5, 40u + static_cast<uint32>(K) * 16u);
+	}
 	Kit.Buildings(City);
 	// Дворовый проезд вдоль ряда домов и поперечный — к гаражам.
 	std::vector<rgen::Street> Lanes;

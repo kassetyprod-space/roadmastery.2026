@@ -82,8 +82,25 @@ struct PEREGON_API FPeregonKitMaterials
 	UMaterialInterface* Asphalt = nullptr;
 	UMaterialInterface* Dirt = nullptr;
 	UMaterialInterface* Paint = nullptr;      // белая краска — оттенок задаёт цвет вершин
+	// Фасады (оттенок — цвет вершин): плитка, лоджии, силикатный кирпич, штукатурка, ленточные окна.
+	UMaterialInterface* PanelTile = nullptr;
+	UMaterialInterface* PanelLoggia = nullptr;
+	UMaterialInterface* Silicate = nullptr;
+	UMaterialInterface* Stucco = nullptr;
+	UMaterialInterface* Ribbon = nullptr;
 
 	static FPeregonKitMaterials Create(UObject* Outer);
+	// Фасадные материалы (общие для дороги и полигона).
+	static void AddFacades(FPeregonKitMaterials& M, UObject* Outer);
+};
+
+// Буферы городской застройки: всё одного материала — одним мешем на город.
+struct FPeregonTownBuffers
+{
+	FPeregonMeshBuffers Panel, PanelTile, PanelLoggia, Brick, Silicate, Stucco, Ribbon;
+	FPeregonMeshBuffers Roofs, MetalRoofs, Windows, Props, Wheels, Concrete, Glass, Wood, Lamps;
+	TArray<FPeregonLightSpot> WindowSpots;
+	TArray<FPeregonLightSpot> LampSpots;
 };
 
 class PEREGON_API FPeregonKit
@@ -96,8 +113,9 @@ public:
 	// Куб с размерами в метрах, центр — в Center (см), поворот Rot.
 	UStaticMeshComponent* Box(const FVector& Center, const FRotator& Rot, const FVector& SizeM, UMaterialInterface* Material, bool bCollision);
 	// Надпись на плоском квадрате (лицом по +X поворота).
+	// WidthPx — ширина текстуры (мелкие таблички — 128–256, чтобы сотни номеров домов не ели память).
 	void Label(const FTransform& Transform, const FString& Text, float WidthCm, float HeightCm, int32 FontPx, const FLinearColor& Ink,
-		const FLinearColor& Paper);
+		const FLinearColor& Paper, int32 WidthPx = 512);
 
 	// Город: многоэтажки (со светом в окнах), цеха, трубы, храм, мачта.
 	void Buildings(const std::vector<rgen::Building>& List);
@@ -112,8 +130,11 @@ public:
 	void CityStele(const FVector& Base, const FRotator& Rot, const FString& Name, int32 Size, const FString& Year, bool bLeaving);
 	// Стела на границе областей: спереди — After, сзади — Before.
 	void RegionStele(const FVector& Base, const FRotator& Rot, const FString& Before, const FString& After);
-	// Остановка: бетонный павильон с лавкой, мозаичной стенкой и табличкой «А» с названием.
-	void BusStop(const FVector& Base, const FRotator& Rot, const FString& Name);
+	// Остановка: павильон одного из видов (Variant: бетон с мозаикой, металл со стеклом, кирпичный под
+	// двускатной крышей, деревянный сельский), лавка, урна, табличка «А» с названием и расписанием.
+	void BusStop(const FVector& Base, const FRotator& Rot, const FString& Name, int32 Variant = 0);
+	// Рекламный щит у трассы на двух опорах (лицом по +X).
+	void Billboard(const FVector& Base, const FRotator& Rot, const FString& Text, const FLinearColor& Paper, const FLinearColor& Ink);
 	// Дворовое: колодец-журавль/сруб, лавка, поленница, сарай, штакетник от A до B.
 	void Well(const FVector& Base, const FRotator& Rot);
 	void Bench(const FVector& Base, const FRotator& Rot);
@@ -136,6 +157,22 @@ private:
 	class UInstancedStaticMeshComponent* Instanced(UStaticMesh* Mesh, UMaterialInterface* Material, bool bCollision, bool bShadow = true);
 	// Двор многоэтажки: машины у подъездов, лавочки, мусорные баки, берёзы.
 	void Yard(const rgen::Building& B, FPeregonMeshBuffers& Props, FPeregonMeshBuffers& Wheels);
+	// Здания по видам (PeregonKitTown.cpp).
+	void Housing(const rgen::Building& B, FPeregonTownBuffers& T);
+	void ShopBuilding(const rgen::Building& B, FPeregonTownBuffers& T);
+	void GarageRow(const rgen::Building& B, FPeregonTownBuffers& T);
+	void Factory(const rgen::Building& B, FPeregonTownBuffers& T);
+	void School(const rgen::Building& B, FPeregonTownBuffers& T, bool bKindergarten);
+	void CultureHouse(const rgen::Building& B, FPeregonTownBuffers& T);
+	void Office(const rgen::Building& B, FPeregonTownBuffers& T, bool bClinic);
+	void Monument(const rgen::Building& B, FPeregonTownBuffers& T);
+	void WaterTower(const rgen::Building& B, FPeregonTownBuffers& T);
+	void Kiosk(const rgen::Building& B, FPeregonTownBuffers& T);
+	void Market(const rgen::Building& B, FPeregonTownBuffers& T);
+	// Окна, которые вечером горят: на фасаде пролётами 3 × 2.8 м (как в текстуре).
+	void LitWindows(const rgen::Building& B, FPeregonTownBuffers& T, float WinU0, float WinU1, float WinZ0, float WinZ1, float Share);
+	// Табличка с адресом на углу дома.
+	void HouseNumber(const rgen::Building& B, const FVector& At, const FVector& Outward);
 	// Деревья во дворах — инстансами (сотни штук на город).
 	class UInstancedStaticMeshComponent* YardTrunks = nullptr;
 	class UInstancedStaticMeshComponent* YardCrowns = nullptr;

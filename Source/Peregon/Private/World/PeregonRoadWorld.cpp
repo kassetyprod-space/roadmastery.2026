@@ -254,6 +254,15 @@ void APeregonRoadWorld::SetupAssets()
 	FPeregonLook Needles(EPeregonTex::Needles, FLinearColor::White, 0.95f);
 	Needles.Sway = 0.12f;
 	Set(EPeregonWorldMat::Needles, Needles);
+	Set(EPeregonWorldMat::PanelTile, FPeregonLook(EPeregonTex::PanelTile, FLinearColor::White, 0.8f));
+	Set(EPeregonWorldMat::PanelLoggia, FPeregonLook(EPeregonTex::PanelLoggia, FLinearColor::White, 0.85f));
+	Set(EPeregonWorldMat::Silicate, FPeregonLook(EPeregonTex::SilicateBrick, FLinearColor::White, 0.9f));
+	Set(EPeregonWorldMat::Stucco, FPeregonLook(EPeregonTex::Stucco, FLinearColor::White, 0.85f));
+	Set(EPeregonWorldMat::Ribbon, FPeregonLook(EPeregonTex::Ribbon, FLinearColor::White, 0.7f));
+	Set(EPeregonWorldMat::Marking, FPeregonLook(EPeregonTex::RoadPaint, FLinearColor(0.92f, 0.92f, 0.9f), 0.55f));
+	Set(EPeregonWorldMat::RoofGreen, FPeregonLook(EPeregonTex::RoofMetal, FLinearColor(0.25f, 0.42f, 0.3f), 0.5f, 0.5f));
+	Set(EPeregonWorldMat::RoofRed, FPeregonLook(EPeregonTex::RoofMetal, FLinearColor(0.55f, 0.18f, 0.14f), 0.5f, 0.5f));
+	Set(EPeregonWorldMat::RoofBlue, FPeregonLook(EPeregonTex::RoofMetal, FLinearColor(0.2f, 0.32f, 0.55f), 0.5f, 0.5f));
 }
 
 UMaterialInterface* APeregonRoadWorld::Mat(EPeregonWorldMat Type) const
@@ -838,6 +847,8 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		}
 	}
 
+	BuildMarkings(Chunk, S0, S1);
+	BuildRoadsideSigns(Chunk, S0, S1);
 	BuildTrees(Chunk, Index, S0, S1);
 	BuildFoliage(Chunk, Index, S0, S1);
 }
@@ -980,7 +991,8 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 			const rgen::RouteSample Smp = Route.Sample(StopS);
 			const FVector Base = RouteToWorld(StopS, Side * (Half + 4.2), 0.0);
 			// Лицом к дороге.
-			Kit.BusStop(Base, FRotator(0.0, FMath::RadiansToDegrees(Smp.Heading) + (Side > 0 ? -90.0 : 90.0), 0.0), Name);
+			const int32 Variant = static_cast<int32>(rgen::Hash(static_cast<uint32>(Poi.S), static_cast<uint32>(Side + 3)) % 4u);
+			Kit.BusStop(Base, FRotator(0.0, FMath::RadiansToDegrees(Smp.Heading) + (Side > 0 ? -90.0 : 90.0), 0.0), Name, Variant);
 		}
 	}
 	// Магазин «Продукты» на въезде (до первых домов) и грунтовка в поля в конце села.
@@ -997,8 +1009,8 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 		Store.Yaw = Smp.Heading;
 		Store.Length = 14.0;
 		Store.Width = 9.0;
-		Store.Floors = 0;
 		Store.Seed = rgen::Hash(static_cast<uint32_t>(Poi.S), 77u);
+		Store.Floors = 1000 + static_cast<int>(Store.Seed % 6u); // сельская вывеска: «Магазин», «Сельпо», «Хлеб · Продукты»…
 		Kit.Buildings({Store});
 	}
 	const double TrackS = Poi.S + 200.0;
@@ -1020,8 +1032,9 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 		Kit.Bench(RouteToWorld(Poi.S + 31.0, 12.4, 0.0), Along + FRotator(0.0, -90.0, 0.0));
 	}
 
-	UInstancedStaticMeshComponent* Roofs = nullptr;
+	TArray<UInstancedStaticMeshComponent*> Roofs;
 	UInstancedStaticMeshComponent* Fence = nullptr;
+	FPeregonMeshBuffers Props;
 	rgen::Rng Rand(rgen::Hash(static_cast<uint32_t>(Poi.S), Route.Params().Seed));
 	for (double S = Poi.S - 180.0; S < Poi.S + 180.0; S += Rand.Range(26.0, 38.0))
 	{
@@ -1033,12 +1046,15 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 			{
 				continue;
 			}
-			if (!Roofs)
+			if (Roofs.Num() == 0)
 			{
-				Roofs = AddInstanced(Chunk, CubeMesh, EPeregonWorldMat::Roof, false);
+				for (EPeregonWorldMat RoofMat : {EPeregonWorldMat::Roof, EPeregonWorldMat::RoofGreen, EPeregonWorldMat::RoofRed, EPeregonWorldMat::RoofBlue})
+				{
+					Roofs.Add(AddInstanced(Chunk, CubeMesh, RoofMat, false));
+				}
 				Fence = AddInstanced(Chunk, CubeMesh, EPeregonWorldMat::Wood, false);
 			}
-			BuildHouse(Chunk, S, Side, HouseSeed, Roofs);
+			BuildHouse(Chunk, S, Side, HouseSeed, Roofs, Props);
 			// Двор: сарай, поленница, иногда лавка у калитки.
 			{
 				const rgen::RouteSample Smp = Route.Sample(S);
@@ -1073,29 +1089,62 @@ void APeregonRoadWorld::BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double
 				}
 			}
 
-			// Штакетник вдоль улицы перед домом.
+			// Забор вдоль улицы: деревянный штакетник, крашеный штакетник или профлист на столбах.
+			const uint32 FenceKind = rgen::Hash(HouseSeed, 57u) % 4u;
+			static const FLinearColor FencePaint[] = {FLinearColor(0.25f, 0.45f, 0.3f), FLinearColor(0.2f, 0.35f, 0.6f), FLinearColor(0.55f, 0.35f, 0.2f),
+				FLinearColor(0.6f, 0.62f, 0.6f)};
+			const FColor Paint = FencePaint[rgen::Hash(HouseSeed, 59u) % 4u].ToFColor(false);
 			for (double Fs = S - 12.0; Fs < S + 12.0; Fs += 2.0)
 			{
 				const FVector P = RouteToWorld(Fs, Side * 14.0, 0.0);
-				Fence->AddInstance(FTransform(FRotator::ZeroRotator, P + FVector(0, 0, 60), FVector(0.1, 0.1, 1.2)));
 				const FVector Q = RouteToWorld(Fs + 2.0, Side * 14.0, 0.0);
-				for (double H : {35.0, 95.0})
+				const float Yaw = static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2((Q - P).Y, (Q - P).X)));
+				if (FenceKind == 0)
 				{
-					Fence->AddInstance(FTransform(FRotationMatrix::MakeFromX(Q - P).Rotator(), (P + Q) * 0.5 + FVector(0, 0, H),
-						FVector((Q - P).Size() / 100.0, 0.04, 0.12)));
+					Fence->AddInstance(FTransform(FRotator::ZeroRotator, P + FVector(0, 0, 60), FVector(0.1, 0.1, 1.2)));
+					for (double H : {35.0, 95.0})
+					{
+						Fence->AddInstance(FTransform(FRotationMatrix::MakeFromX(Q - P).Rotator(), (P + Q) * 0.5 + FVector(0, 0, H),
+							FVector((Q - P).Size() / 100.0, 0.04, 0.12)));
+					}
+				}
+				else if (FenceKind == 3)
+				{
+					// Профлист 1.8 м на трубах.
+					Props.AddBox(P, Yaw, FVector(8.f, 8.f, 190.f), FVector2D(100.f, 100.f), FColor(70, 70, 72), true, false);
+					Props.AddBox((P + Q) * 0.5 + FVector(0, 0, 10), Yaw, FVector(static_cast<float>((Q - P).Size()), 3.f, 170.f), FVector2D(100.f, 100.f), Paint, true, false);
+				}
+				else
+				{
+					// Крашеный штакетник: столб и пять штакетин на пролёт.
+					Props.AddBox(P, Yaw, FVector(10.f, 10.f, 125.f), FVector2D(100.f, 100.f), Paint, true, false);
+					for (int32 K = 1; K < 6; ++K)
+					{
+						const FVector Picket = FMath::Lerp(P, Q, K / 6.0);
+						Props.AddBox(Picket + FVector(0, 0, 10), Yaw, FVector(8.f, 2.5f, 105.f + (K % 2) * 6.f), FVector2D(100.f, 100.f), Paint, true, false);
+					}
+					Props.AddBox((P + Q) * 0.5 + FVector(0, 0, 40), Yaw, FVector(static_cast<float>((Q - P).Size()), 4.f, 8.f), FVector2D(100.f, 100.f), Paint, true, true);
+					Props.AddBox((P + Q) * 0.5 + FVector(0, 0, 95), Yaw, FVector(static_cast<float>((Q - P).Size()), 4.f, 8.f), FVector2D(100.f, 100.f), Paint, true, true);
 				}
 			}
 		}
 	}
+	if (Props.Vertices.Num() > 0)
+	{
+		AddProc(Chunk.Components, Props, Mat(EPeregonWorldMat::VertexPaint), true);
+	}
 }
 
-void APeregonRoadWorld::BuildHouse(FChunk& Chunk, double S, int32 Side, uint32 Seed, UInstancedStaticMeshComponent* Roofs)
+void APeregonRoadWorld::BuildHouse(FChunk& Chunk, double S, int32 Side, uint32 Seed, const TArray<UInstancedStaticMeshComponent*>& Roofs,
+	FPeregonMeshBuffers& Props)
 {
 	rgen::Rng Rand(Seed);
 	const double Length = Rand.Range(7.0, 11.0);  // вдоль улицы
 	const double Depth = Rand.Range(6.0, 8.0);    // поперёк
 	const double Wall = Rand.Range(2.6, 3.1);
 	const double T = Side * (Rand.Range(20.0, 26.0) + Depth * 0.5);
+	// Вид дома: 0 — сруб под краской, 1 — кирпичный, 2 — сруб с мансардой, 3 — обшитый сайдингом «финский».
+	const uint32 Kind = rgen::Hash(Seed, 3u) % 4u;
 
 	double Ground = 1e9;
 	for (double Ds : {-Length * 0.5, Length * 0.5})
@@ -1112,29 +1161,88 @@ void APeregonRoadWorld::BuildHouse(FChunk& Chunk, double S, int32 Side, uint32 S
 	const FTransform House(FRotator(0.0, Yaw, 0.0), FVector(X, Y, Ground - 0.25) * PeregonRoad::M);
 	auto At = [&House](double Lx, double Ly, double Lz) { return House.TransformPosition(FVector(Lx, Ly, Lz) * PeregonRoad::M); };
 	const FRotator Rot = House.Rotator();
+	const float YawF = static_cast<float>(Yaw);
+	auto PBox = [&](double Lx, double Ly, double Lz, const FVector& SizeM, const FColor& C) {
+		Props.AddBox(At(Lx, Ly, Lz), YawF, SizeM * PeregonRoad::M, FVector2D(100.f, 100.f), C, true, true);
+	};
 
 	const FLinearColor Color = PeregonRoad::HouseColors[Seed % UE_ARRAY_COUNT(PeregonRoad::HouseColors)];
 	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(this);
-	UMaterialInterface* WallMat = Art ? Art->MakeMaterial(this, FPeregonLook(EPeregonTex::WoodPlanks, Color, 0.9f)) : nullptr;
-
-	// Сруб + фронтон (ромб, нижняя половина спрятана в стенах).
-	AddMesh(Chunk, CubeMesh, FTransform(Rot, At(0, 0, (Wall + 0.25) * 0.5), FVector(Length, Depth, Wall + 0.25)), WallMat, true);
-	AddMesh(Chunk, CubeMesh, FTransform(FRotator(0.0, Yaw, 45.0), At(0, 0, Wall + 0.25), FVector(Length - 0.05, Depth / FMath::Sqrt(2.0), Depth / FMath::Sqrt(2.0))), WallMat, false);
-	// Двускатная крыша из профлиста.
-	const double SlabWidth = Depth * 0.5 * FMath::Sqrt(2.0) + 0.5;
-	for (int32 Slope : {-1, 1})
+	UMaterialInterface* WallMat = nullptr;
+	if (Kind == 1)
 	{
-		Roofs->AddInstance(FTransform(FRotator(0.0, Yaw, 45.0 * Slope), At(0, Slope * Depth * 0.25, Wall + 0.25 + Depth * 0.25 + 0.08),
-			FVector(Length + 0.6, SlabWidth, 0.1)));
+		WallMat = Mat(EPeregonWorldMat::Brick);
 	}
-	// Окна в наличниках на улицу.
-	const double FaceY = -Side * (Depth * 0.5 + 0.03);
-	for (double Wx : {-Length * 0.25, Length * 0.25})
+	else if (Art)
 	{
-		AddMesh(Chunk, CubeMesh, FTransform(Rot, At(Wx, FaceY, 1.55), FVector(1.25, 0.06, 1.35)), Mat(EPeregonWorldMat::WhitePaint), false);
-		const bool bLit = rgen::HashToUnit(rgen::Hash(Seed, static_cast<uint32>(Wx * 10.0 + 50.0))) < 0.55;
-		AddMesh(Chunk, CubeMesh, FTransform(Rot, At(Wx, FaceY - Side * 0.02, 1.55), FVector(0.95, 0.06, 1.05)),
+		WallMat = Art->MakeMaterial(this, FPeregonLook(Kind == 3 ? EPeregonTex::Plaster : EPeregonTex::WoodPlanks, Kind == 3 ? FLinearColor(0.92f, 0.9f, 0.82f) : Color, 0.9f));
+	}
+
+	// Стены + фронтон (ромб, нижняя половина спрятана в стенах). У кирпичного — без окон текстуры (дом маленький).
+	AddMesh(Chunk, CubeMesh, FTransform(Rot, At(0, 0, (Wall + 0.25) * 0.5), FVector(Length, Depth, Wall + 0.25)), WallMat, true);
+	const double Pitch = Kind == 2 ? 60.0 : 45.0;
+	const double Rise = Depth * 0.5 * FMath::Tan(FMath::DegreesToRadians(Pitch));
+	AddMesh(Chunk, CubeMesh, FTransform(FRotator(0.0, Yaw, 45.0), At(0, 0, Wall + 0.25), FVector(Length - 0.05, Depth / FMath::Sqrt(2.0), Depth / FMath::Sqrt(2.0))),
+		WallMat, false);
+	if (Kind == 2)
+	{
+		// Мансарда: высокие фронтоны — треугольники в цвет дома на обоих торцах.
+		const FColor Gable = Color.ToFColor(false);
+		for (double Ex : {-Length * 0.5 + 0.02, Length * 0.5 - 0.02})
+		{
+			const FVector N = House.TransformVector(FVector(Ex > 0.0 ? 1.0 : -1.0, 0.0, 0.0));
+			Props.AddQuad(At(Ex, -Depth * 0.5, Wall + 0.25), At(Ex, Depth * 0.5, Wall + 0.25), At(Ex, 0, Wall + 0.25 + Rise), At(Ex, 0, Wall + 0.25 + Rise), N,
+				FVector2D(0.f, 1.f), FVector2D(1.f, 0.f), Gable, 0);
+		}
+	}
+	// Крыша — одного из цветов.
+	UInstancedStaticMeshComponent* RoofComp = Roofs.Num() > 0 ? Roofs[static_cast<int32>(rgen::Hash(Seed, 11u) % static_cast<uint32>(Roofs.Num()))] : nullptr;
+	if (RoofComp)
+	{
+		const double SlabWidth = (Kind == 2 ? Depth * 0.5 / FMath::Cos(FMath::DegreesToRadians(Pitch)) : Depth * 0.5 * FMath::Sqrt(2.0)) + 0.5;
+		const double Ridge = Kind == 2 ? Rise : Depth * 0.5;
+		for (int32 Slope : {-1, 1})
+		{
+			RoofComp->AddInstance(FTransform(FRotator(0.0, Yaw, Pitch * Slope), At(0, Slope * Depth * 0.25, Wall + 0.25 + Ridge * 0.5 + 0.08),
+				FVector(Length + 0.6, SlabWidth, 0.1)));
+		}
+	}
+	// Окна в резных наличниках на улицу (цвет наличников — свой у каждого дома), ставни у срубов.
+	static const FLinearColor Trim[] = {FLinearColor(0.92f, 0.92f, 0.9f), FLinearColor(0.2f, 0.4f, 0.75f), FLinearColor(0.25f, 0.55f, 0.35f),
+		FLinearColor(0.85f, 0.75f, 0.3f)};
+	const FColor TrimC = Trim[rgen::Hash(Seed, 13u) % 4u].ToFColor(false);
+	const double FaceY = -Side * (Depth * 0.5 + 0.03);
+	const int32 Windows = Length > 9.0 ? 3 : 2;
+	for (int32 K = 0; K < Windows; ++K)
+	{
+		const double Wx = -Length * 0.5 + Length * (K + 0.5) / Windows;
+		PBox(Wx, FaceY, 0.85, FVector(1.25, 0.06, 1.35), TrimC);
+		PBox(Wx, FaceY - Side * 0.02, 2.25, FVector(1.5, 0.08, 0.18), TrimC); // резной кокошник
+		const bool bLit = rgen::HashToUnit(rgen::Hash(Seed, static_cast<uint32>(K * 10 + 50))) < 0.55;
+		AddMesh(Chunk, CubeMesh, FTransform(Rot, At(Wx, FaceY - Side * 0.03, 1.55), FVector(0.95, 0.06, 1.05)),
 			Mat(bLit ? EPeregonWorldMat::LitWindow : EPeregonWorldMat::Glass), false);
+		PBox(Wx, FaceY - Side * 0.04, 1.5, FVector(0.95, 0.03, 0.06), TrimC); // переплёт
+		if (Kind == 0 && (Seed >> K) % 2 == 0)
+		{
+			for (double Sh : {-0.75, 0.75})
+			{
+				PBox(Wx + Sh, FaceY - Side * 0.02, 0.95, FVector(0.5, 0.04, 1.15), TrimC); // ставни
+			}
+		}
+	}
+	// Слуховое окно во фронтоне торца, труба, крыльцо с навесом, тарелка антенны.
+	PBox(Length * 0.5 + 0.03, 0, Wall + 0.6, FVector(0.06, 0.7, 0.6), TrimC);
+	const FColor BrickC(140, 70, 50);
+	PBox(-Length * 0.2, Side * Depth * 0.15, Wall, FVector(0.5, 0.5, (Kind == 2 ? Rise : Depth * 0.5) + 0.9), BrickC);
+	const double PorchX = Length * 0.5 - 1.0;
+	PBox(PorchX, FaceY - Side * 0.9, 0.0, FVector(1.6, 1.6, 0.45), FColor(110, 85, 60));
+	PBox(PorchX, FaceY - Side * 0.9, 2.3, FVector(1.9, 1.9, 0.08), FColor(90, 90, 92));
+	for (double Px : {-0.7, 0.7})
+	{
+		PBox(PorchX + Px, FaceY - Side * 1.7, 0.45, FVector(0.1, 0.1, 1.85), TrimC);
+	}
+	if (rgen::HashToUnit(rgen::Hash(Seed, 17u)) < 0.3)
+	{
+		PBox(Length * 0.3, FaceY, Wall - 0.3, FVector(0.08, 0.6, 0.6), FColor(225, 225, 222)); // тарелка
 	}
 }
-

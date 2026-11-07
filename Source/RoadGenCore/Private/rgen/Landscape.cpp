@@ -50,6 +50,15 @@ double Building::Height() const
 	case BuildingKind::Garages: return 2.6;
 	case BuildingKind::Shop: return 3.6;
 	case BuildingKind::Playground: return 2.4;
+	case BuildingKind::School: return static_cast<double>(Floors) * 3.3 + 1.2;
+	case BuildingKind::Kindergarten: return static_cast<double>(Floors) * 3.2 + 1.0;
+	case BuildingKind::CultureHouse: return 12.0;
+	case BuildingKind::Admin: return static_cast<double>(Floors) * 3.3 + 1.5;
+	case BuildingKind::Clinic: return static_cast<double>(Floors) * 3.1 + 1.2;
+	case BuildingKind::Monument: return 14.0;
+	case BuildingKind::WaterTower: return 22.0;
+	case BuildingKind::Kiosk: return 2.6;
+	case BuildingKind::Market: return 3.2;
 	default: return static_cast<double>(Floors) * 2.8 + 1.2;
 	}
 }
@@ -409,6 +418,43 @@ void Landscape::BuildCity(Settlement& Town)
 		B.Seed = Rand.Next();
 		Out.push_back(B);
 	};
+	auto TryPlace = [&](BuildingKind Kind, double Dist, double Angle, double L, double W, int Floors) {
+		for (int Attempt = 0; Attempt < 24; ++Attempt)
+		{
+			const double A = Angle + Rand.Range(-0.4, 0.4) * Attempt / 6.0;
+			const double Dd = Dist * (1.0 + 0.04 * Attempt);
+			Building B;
+			B.Kind = Kind;
+			const double Lx = std::cos(A) * Dd;
+			const double Ly = std::sin(A) * Dd;
+			B.X = Town.X + Cx * Lx - Cy * Ly;
+			B.Y = Town.Y + Cy * Lx + Cx * Ly;
+			B.Yaw = Heading;
+			B.Length = L;
+			B.Width = W;
+			B.Floors = Floors;
+			if (!Blocked(B.X, B.Y, 0.5 * std::hypot(L, W), Out))
+			{
+				Place(B);
+				return;
+			}
+		}
+	};
+
+	// Центр: администрация с флагом, дом культуры, мемориал — до жилой застройки, чтобы им нашлось место.
+	{
+		const double Center = IndustrialAz + kPi;
+		const double Scale = Town.Size == 0 ? 0.35 : 0.14;
+		TryPlace(BuildingKind::Church, Town.Size == 0 ? 60.0 : Town.Radius * 0.2, Center, 26.0, 18.0, 1);
+		TryPlace(BuildingKind::Monument, Town.Radius * Scale, Center + 0.3, 30.0, 26.0, 1);
+		TryPlace(BuildingKind::Admin, Town.Radius * Scale * 1.6, Center + 1.0, 40.0, 16.0, Town.Size == 0 ? 2 : 4);
+		TryPlace(BuildingKind::CultureHouse, Town.Radius * Scale * 1.8, Center - 0.6, 40.0, 26.0, 1);
+		TryPlace(BuildingKind::WaterTower, Town.Radius * 0.85, IndustrialAz - 0.9, 9.0, 9.0, 1);
+		if (Town.Size == 0)
+		{
+			TryPlace(BuildingKind::School, Town.Radius * 0.55, Center + 2.2, 46.0, 30.0, 2);
+		}
+	}
 
 	for (int I = -N; I <= N; ++I)
 	{
@@ -510,13 +556,48 @@ void Landscape::BuildCity(Settlement& Town)
 					B.Kind = BuildingKind::Shop;
 					B.Length = Fill.Range(12.0, 20.0);
 					B.Width = 9.0;
-					B.Floors = static_cast<int>(Fill.Range(0.0, 3.0)); // вывеска: 0 продукты, 1 аптека, 2 хозтовары
+					B.Floors = static_cast<int>(Fill.Next() % 1000u); // номер вывески — игра берёт по модулю своего списка
 				}
 				else if (Town.Size > 0 && Pick < 0.36)
 				{
 					B.Kind = BuildingKind::Playground;
 					B.Length = 22.0;
 					B.Width = 18.0;
+					B.Floors = 1;
+				}
+				else if (Town.Size > 0 && Rn < 0.85 && Pick < 0.39)
+				{
+					B.Kind = BuildingKind::School;
+					B.Length = 46.0;
+					B.Width = 30.0;
+					B.Floors = Fill.Chance(0.6) ? 3 : 4;
+				}
+				else if (Town.Size > 0 && Rn < 0.85 && Pick < 0.415)
+				{
+					B.Kind = BuildingKind::Kindergarten;
+					B.Length = 36.0;
+					B.Width = 26.0;
+					B.Floors = 2;
+				}
+				else if (Town.Size > 0 && Rn < 0.75 && Pick < 0.435)
+				{
+					B.Kind = BuildingKind::Clinic;
+					B.Length = 42.0;
+					B.Width = 14.0;
+					B.Floors = Fill.Chance(0.5) ? 3 : 4;
+				}
+				else if (Pick < 0.5)
+				{
+					B.Kind = BuildingKind::Kiosk;
+					B.Length = 4.0;
+					B.Width = 3.0;
+					B.Floors = static_cast<int>(Fill.Next() % 1000u);
+				}
+				else if (Town.Size > 0 && Rn < 0.55 && Pick < 0.515)
+				{
+					B.Kind = BuildingKind::Market;
+					B.Length = 30.0;
+					B.Width = 20.0;
 					B.Floors = 1;
 				}
 				else
@@ -592,28 +673,6 @@ void Landscape::BuildCity(Settlement& Town)
 	}
 
 	// Ориентиры: трубы в промзоне, храм у центра, мачта связи на окраине.
-	auto TryPlace = [&](BuildingKind Kind, double Dist, double Angle, double L, double W, int Floors) {
-		for (int Attempt = 0; Attempt < 24; ++Attempt)
-		{
-			const double A = Angle + Rand.Range(-0.4, 0.4) * Attempt / 6.0;
-			const double Dd = Dist * (1.0 + 0.04 * Attempt);
-			Building B;
-			B.Kind = Kind;
-			const double Lx = std::cos(A) * Dd;
-			const double Ly = std::sin(A) * Dd;
-			B.X = Town.X + Cx * Lx - Cy * Ly;
-			B.Y = Town.Y + Cy * Lx + Cx * Ly;
-			B.Yaw = Heading;
-			B.Length = L;
-			B.Width = W;
-			B.Floors = Floors;
-			if (!Blocked(B.X, B.Y, 0.5 * std::hypot(L, W), Out))
-			{
-				Place(B);
-				return;
-			}
-		}
-	};
 	if (Town.Size > 0)
 	{
 		const int Chimneys = Town.Size == 2 ? 4 : 2;
@@ -623,6 +682,5 @@ void Landscape::BuildCity(Settlement& Town)
 		}
 		TryPlace(BuildingKind::Mast, Town.Radius * 0.8, IndustrialAz + kPi * 0.6, 12.0, 12.0, Town.Size);
 	}
-	TryPlace(BuildingKind::Church, Town.Size == 0 ? 60.0 : Town.Radius * 0.2, IndustrialAz + kPi, 26.0, 18.0, 1);
 }
 } // namespace rgen

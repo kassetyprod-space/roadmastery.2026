@@ -120,7 +120,13 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 	case EPeregonTex::GrassTuft: W = 32; H = 32; break;
 	case EPeregonTex::Leaf: W = H = 8; break;
 	case EPeregonTex::PanelFacade:
-	case EPeregonTex::BrickFacade: W = 32; H = 32; break;
+	case EPeregonTex::BrickFacade:
+	case EPeregonTex::PanelTile:
+	case EPeregonTex::PanelLoggia:
+	case EPeregonTex::SilicateBrick:
+	case EPeregonTex::Stucco:
+	case EPeregonTex::Ribbon:
+	case EPeregonTex::RoadPaint: W = 32; H = 32; break;
 	case EPeregonTex::Clouds: W = H = 128; break;
 	case EPeregonTex::GlassDirt: W = H = 64; break;
 	case EPeregonTex::CarFabric:
@@ -207,11 +213,15 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 						C = Scale(C, 0.9f);
 					}
 				}
-				const bool bCenter = (X == 31 || X == 32) && Y < 32;
-				const bool bEdge = X == 2 || X == 3 || X == 60 || X == 61;
-				if ((bCenter || bEdge) && R > 0.12f) // краска местами стёрлась
+				// Разметка — отдельной геометрией (сплошные, прерывистые, «зебры» — по месту), здесь только тёмные
+				// пятна масла по оси полосы и заплатки.
+				if (FMath::Abs(X - 16) <= 3 || FMath::Abs(X - 48) <= 3)
 				{
-					C = Gray(222.f + (R - 0.5f) * 16.f);
+					C = Scale(C, 0.92f + 0.08f * TileNoise(X, Y, 8, W, H, 17));
+				}
+				if (TileNoise(X, Y, 32, W, H, 19) > 0.78f)
+				{
+					C = Scale(C, 0.82f); // заплатка свежего асфальта
 				}
 				break;
 			}
@@ -426,6 +436,126 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 				{
 					C = Gray(150.f); // отлив
 				}
+				break;
+			}
+			case EPeregonTex::PanelTile:
+			{
+				// Панель, облицованная мелкой плиткой: светлая сетка, цветной (тёмный) пояс под окнами, окно-«тройник».
+				const bool bGrout = (X % 2 == 0) || (Y % 2 == 0);
+				C = Gray((bGrout ? 205.f : 228.f) + (R - 0.5f) * 10.f);
+				if (Y >= 23 && Y <= 30)
+				{
+					C = Gray((bGrout ? 120.f : 140.f) + (R - 0.5f) * 8.f); // пояс — оттеняется цветом здания
+				}
+				if (X == 0 || Y == 0)
+				{
+					C = Gray(110.f);
+				}
+				const bool bWindow = X >= 6 && X <= 26 && Y >= 7 && Y <= 20;
+				if (bWindow)
+				{
+					const bool bFrame = X == 6 || X == 26 || Y == 7 || Y == 20 || X == 13 || X == 19 || (Y == 11 && X > 19);
+					C = bFrame ? Gray(232.f) : (Y < 11 ? Rgb(100.f, 118.f, 134.f) : Rgb(48.f, 58.f, 68.f));
+				}
+				if (Y == 21 && X >= 5 && X <= 27)
+				{
+					C = Gray(165.f);
+				}
+				break;
+			}
+			case EPeregonTex::PanelLoggia:
+			{
+				// Лоджия: тёмная ниша на всю ширину пролёта, в ней окно и балконная дверь; спереди — рифлёный экран.
+				const float Panel = 200.f + (TileNoise(X, Y, 8, W, H, 241) - 0.5f) * 14.f + (R - 0.5f) * 8.f;
+				C = Gray(Panel);
+				const bool bNiche = X >= 3 && X <= 29 && Y >= 3 && Y <= 24;
+				if (bNiche)
+				{
+					C = Gray(70.f + (R - 0.5f) * 8.f);
+					const bool bDoor = X >= 6 && X <= 11 && Y >= 5 && Y <= 24;
+					const bool bWin = X >= 14 && X <= 26 && Y >= 6 && Y <= 16;
+					if (bDoor || bWin)
+					{
+						const bool bFrame = X == 6 || X == 11 || X == 14 || X == 26 || X == 20 || Y == 5 || Y == 6 || Y == 16;
+						C = bFrame ? Gray(210.f) : (Y < 10 ? Rgb(92.f, 108.f, 122.f) : Rgb(44.f, 52.f, 60.f));
+					}
+				}
+				if (X >= 2 && X <= 30 && Y >= 17 && Y <= 27)
+				{
+					C = Gray(((X % 3) == 0 ? 160.f : 215.f) + (R - 0.5f) * 8.f); // экран лоджии — рифлёный
+				}
+				if (X == 0 || Y == 0)
+				{
+					C = Gray(115.f);
+				}
+				break;
+			}
+			case EPeregonTex::SilicateBrick:
+			{
+				const int32 Row = Y / 3;
+				const int32 Brick = (X + (Row & 1) * 3) / 6;
+				const float Tone = 0.9f + 0.16f * Rand(Brick, Row, 251);
+				C = Rgb(226.f * Tone, 224.f * Tone, 216.f * Tone);
+				if (Y % 3 == 0 || (X + (Row & 1) * 3) % 6 == 0)
+				{
+					C = Gray(170.f);
+				}
+				const bool bWindow = X >= 10 && X <= 22 && Y >= 7 && Y <= 22;
+				if (bWindow)
+				{
+					C = (X == 10 || X == 22 || Y == 7 || Y == 22 || X == 16 || Y == 12) ? Gray(238.f) : Rgb(46.f, 56.f, 64.f);
+				}
+				if (Y == 6 && X >= 9 && X <= 23)
+				{
+					C = Gray(190.f);
+				}
+				break;
+			}
+			case EPeregonTex::Stucco:
+			{
+				// «Сталинка»: штукатурка, высокое узкое окно с сандриком и подоконной тягой, горизонтальные тяги.
+				C = Gray(214.f + (TileNoise(X, Y, 8, W, H, 261) - 0.5f) * 18.f + (R - 0.5f) * 8.f);
+				const bool bWindow = X >= 11 && X <= 21 && Y >= 6 && Y <= 25;
+				if (bWindow)
+				{
+					const bool bFrame = X == 11 || X == 21 || Y == 6 || Y == 25 || X == 16 || Y == 11;
+					C = bFrame ? Gray(240.f) : (Y < 11 ? Rgb(98.f, 112.f, 124.f) : Rgb(42.f, 50.f, 58.f));
+				}
+				if ((Y == 4 || Y == 3) && X >= 9 && X <= 23)
+				{
+					C = Gray(Y == 3 ? 240.f : 150.f); // сандрик и тень под ним
+				}
+				if (Y == 27 && X >= 9 && X <= 23)
+				{
+					C = Gray(150.f);
+				}
+				if (Y == 31)
+				{
+					C = Gray(175.f); // межэтажная тяга
+				}
+				break;
+			}
+			case EPeregonTex::Ribbon:
+			{
+				// Ленточное окно на всю ширину пролёта (импосты через 8 px), под ним — облицованный пояс.
+				C = Gray(222.f + (R - 0.5f) * 8.f);
+				const bool bWindow = Y >= 6 && Y <= 21;
+				if (bWindow)
+				{
+					const bool bFrame = X % 8 == 0 || Y == 6 || Y == 21 || Y == 11;
+					C = bFrame ? Gray(236.f) : (Y < 11 ? Rgb(104.f, 120.f, 134.f) : Rgb(46.f, 55.f, 64.f));
+				}
+				if (Y >= 24)
+				{
+					C = Gray((((X + Y) % 4) == 0 ? 150.f : 172.f) + (R - 0.5f) * 8.f);
+				}
+				break;
+			}
+			case EPeregonTex::RoadPaint:
+			{
+				// Краска: белая, с вкраплениями асфальта там, где стёрлась колёсами.
+				const float Wear = TileNoise(X, Y, 8, W, H, 271) * 0.7f + R * 0.3f;
+				C = Wear > 0.72f ? Gray(120.f + R * 30.f) : Gray(236.f + (R - 0.5f) * 14.f);
 				break;
 			}
 			case EPeregonTex::BrickFacade:
@@ -847,6 +977,7 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeMaterial(UObject* Outer, con
 			case EPeregonTex::Vinyl: Relief = 0.15f; break;
 			case EPeregonTex::Headliner: Relief = 0.1f; break;
 			case EPeregonTex::BrickFacade:
+			case EPeregonTex::SilicateBrick:
 			case EPeregonTex::BirchBark:
 			case EPeregonTex::PineBark:
 			case EPeregonTex::Gravel: Relief = 1.6f; break;
@@ -877,7 +1008,13 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeMaterial(UObject* Outer, con
 			case EPeregonTex::Concrete:
 			case EPeregonTex::Plaster:
 			case EPeregonTex::PanelFacade:
+			case EPeregonTex::PanelTile:
+			case EPeregonTex::PanelLoggia:
+			case EPeregonTex::SilicateBrick:
+			case EPeregonTex::Stucco:
+			case EPeregonTex::Ribbon:
 			case EPeregonTex::BrickFacade: Wet = 0.7f; SnowCover = 0.85f; break;
+			case EPeregonTex::RoadPaint: Wet = 0.9f; SnowCover = 0.6f; break;
 			case EPeregonTex::RoofMetal: Wet = 1.f; SnowCover = 1.f; break;
 			case EPeregonTex::WoodPlanks: Wet = 0.6f; SnowCover = 0.8f; break;
 			case EPeregonTex::Needles:

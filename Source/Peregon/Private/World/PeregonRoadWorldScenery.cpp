@@ -345,6 +345,11 @@ FPeregonKitMaterials APeregonRoadWorld::KitMaterials() const
 	K.Asphalt = Mat(EPeregonWorldMat::Pad);
 	K.Dirt = Mat(EPeregonWorldMat::Shoulder);
 	K.Paint = Mat(EPeregonWorldMat::VertexPaint);
+	K.PanelTile = Mat(EPeregonWorldMat::PanelTile);
+	K.PanelLoggia = Mat(EPeregonWorldMat::PanelLoggia);
+	K.Silicate = Mat(EPeregonWorldMat::Silicate);
+	K.Stucco = Mat(EPeregonWorldMat::Stucco);
+	K.Ribbon = Mat(EPeregonWorldMat::Ribbon);
 	return K;
 }
 

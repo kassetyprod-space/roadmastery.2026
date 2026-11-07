@@ -162,7 +162,23 @@ FPeregonKitMaterials FPeregonKitMaterials::Create(UObject* Outer)
 	M.Asphalt = Make(FPeregonLook(EPeregonTex::Asphalt, FLinearColor(0.95f, 0.95f, 0.95f), 0.85f));
 	M.Dirt = Make(FPeregonLook(EPeregonTex::Dirt, FLinearColor::White, 0.95f));
 	M.Paint = Make(FPeregonLook(EPeregonTex::Paint, FLinearColor::White, 0.6f));
+	AddFacades(M, Outer);
 	return M;
+}
+
+void FPeregonKitMaterials::AddFacades(FPeregonKitMaterials& M, UObject* Outer)
+{
+	UPeregonArtSubsystem* Art = UPeregonArtSubsystem::Get(Outer);
+	if (!Art)
+	{
+		return;
+	}
+	auto Make = [&](EPeregonTex Tex, float Roughness) { return static_cast<UMaterialInterface*>(Art->MakeMaterial(Outer, FPeregonLook(Tex, FLinearColor::White, Roughness))); };
+	M.PanelTile = Make(EPeregonTex::PanelTile, 0.8f);
+	M.PanelLoggia = Make(EPeregonTex::PanelLoggia, 0.85f);
+	M.Silicate = Make(EPeregonTex::SilicateBrick, 0.9f);
+	M.Stucco = Make(EPeregonTex::Stucco, 0.85f);
+	M.Ribbon = Make(EPeregonTex::Ribbon, 0.7f);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -267,15 +283,16 @@ UStaticMeshComponent* FPeregonKit::Box(const FVector& Center, const FRotator& Ro
 }
 
 void FPeregonKit::Label(const FTransform& Transform, const FString& Text, float WidthCm, float HeightCm, int32 FontPx, const FLinearColor& Ink,
-	const FLinearColor& Paper)
+	const FLinearColor& Paper, int32 WidthPx)
 {
 	UPeregonArtSubsystem* Art = Owner ? UPeregonArtSubsystem::Get(Owner) : nullptr;
 	if (!Art)
 	{
 		return;
 	}
-	const int32 HeightPx = FMath::Max(64, FMath::RoundToInt(512.f * HeightCm / FMath::Max(1.f, WidthCm)));
-	UMaterialInstanceDynamic* LabelMat = Art->MakeLabelMaterial(Owner, Text, Ink, Paper, 512, HeightPx, FontPx, EPeregonFont::Display);
+	const int32 Px = FMath::Clamp(WidthPx, 64, 1024);
+	const int32 HeightPx = FMath::Max(Px / 8, FMath::RoundToInt(static_cast<float>(Px) * HeightCm / FMath::Max(1.f, WidthCm)));
+	UMaterialInstanceDynamic* LabelMat = Art->MakeLabelMaterial(Owner, Text, Ink, Paper, Px, HeightPx, FontPx, EPeregonFont::Display);
 	if (UProceduralMeshComponent* Quad = UPeregonArtSubsystem::AddLabelQuad(Owner, Root, Transform, WidthCm, HeightCm, LabelMat))
 	{
 		Out.Add(Quad);
@@ -298,15 +315,11 @@ void PeregonLights::Prune()
 
 void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 {
-	TArray<FPeregonLightSpot> WindowSpots;
 	using namespace PeregonKitDetail;
 	constexpr double M = 100.0;
-	FPeregonMeshBuffers PanelWalls;
-	FPeregonMeshBuffers BrickWalls;
-	FPeregonMeshBuffers Roofs;
-	FPeregonMeshBuffers Windows;
-	FPeregonMeshBuffers Plant;
-	FPeregonMeshBuffers PlantRoof;
+	FPeregonTownBuffers Town;
+	FPeregonMeshBuffers& Props = Town.Props;   // окрашено цветом вершин
+	FPeregonMeshBuffers& Wheels = Town.Wheels; // тёмное: колёса, шины-клумбы
 	UInstancedStaticMeshComponent* RedBands = nullptr;
 	UInstancedStaticMeshComponent* WhiteBands = nullptr;
 	auto Stripes = [&]() {
@@ -329,120 +342,34 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 		WhiteBands = MakeIsm(Mats.White);
 	};
 
-	FPeregonMeshBuffers Props;   // окрашено цветом вершин (машины, лавки, баки, площадки, гаражные ворота)
-	FPeregonMeshBuffers Wheels;  // тёмное: колёса, шины-клумбы
-	FPeregonMeshBuffers ShopWalls;
-	FPeregonMeshBuffers GarageBlocks;
 	for (const rgen::Building& B : List)
 	{
 		const FVector Base = FVector(B.X, B.Y, B.Z) * M;
 		const float Yaw = FMath::RadiansToDegrees(static_cast<float>(B.Yaw));
 		const float H = static_cast<float>(B.Height() * M);
-		const FVector Size(B.Length * M, B.Width * M, H);
 		rgen::Rng Rand(B.Seed);
+		(void)Rand;
 		switch (B.Kind)
 		{
 		case rgen::BuildingKind::Panel5:
 		case rgen::BuildingKind::Panel9:
 		case rgen::BuildingKind::Tower:
 		case rgen::BuildingKind::Brick:
-		{
-			const bool bBrick = B.Kind == rgen::BuildingKind::Brick;
-			const FLinearColor Tint = bBrick ? FLinearColor::White : PanelColors[B.Seed % UE_ARRAY_COUNT(PanelColors)];
-			(bBrick ? BrickWalls : PanelWalls).AddBox(Base, Yaw, Size, FVector2D(300.f, 280.f), ToColor(Tint), false, false);
-			Roofs.AddBox(Base + FVector(0.f, 0.f, H), Yaw, FVector(Size.X, Size.Y, 45.f), FVector2D(400.f, 400.f), FColor::White, true, false);
-			// Козырьки подъездов на длинной стороне.
-			const FRotator Rot(0.f, Yaw, 0.f);
-			const FVector Ax = Rot.RotateVector(FVector::ForwardVector);
-			const FVector Ay = Rot.RotateVector(FVector::RightVector);
-			if (!bBrick && B.Kind != rgen::BuildingKind::Tower)
-			{
-				for (float Entrance = -0.5f * static_cast<float>(Size.X) + 1500.f; Entrance < 0.5f * static_cast<float>(Size.X) - 600.f; Entrance += 1500.f)
-				{
-					Roofs.AddBox(Base + Ax * Entrance - Ay * (Size.Y * 0.5 + 75.0) + FVector(0.f, 0.f, 260.f), Yaw, FVector(220.f, 150.f, 15.f), FVector2D(400.f, 400.f),
-						FColor::White, true, true);
-				}
-			}
+			Housing(B, Town);
 			Yard(B, Props, Wheels);
-			// Свет в окнах вечером: на месте окон текстуры (пролёт 3 м, этаж 2.8 м от верха стены).
-			const int32 Floors = FMath::FloorToInt(H / 280.f);
-			const float LitShare = 0.1f + 0.1f * static_cast<float>(Rand.Unit());
-			for (int32 Face = 0; Face < 4; ++Face)
-			{
-				const bool bLong = Face % 2 == 0;
-				const FVector Outward = Face == 0 ? -Ay : (Face == 1 ? Ax : (Face == 2 ? Ay : -Ax));
-				const FVector Along = Face == 0 ? Ax : (Face == 1 ? Ay : (Face == 2 ? -Ax : -Ay));
-				const float Width = static_cast<float>(bLong ? Size.X : Size.Y);
-				const float Depth = static_cast<float>(bLong ? Size.Y : Size.X);
-				const FVector Corner = Base + Outward * (Depth * 0.5f + 4.f) - Along * Width * 0.5f;
-				const int32 Bays = FMath::FloorToInt(Width / 300.f);
-				for (int32 Bay = 0; Bay < Bays; ++Bay)
-				{
-					for (int32 Floor = 0; Floor < Floors; ++Floor)
-					{
-						if (static_cast<float>(Rand.Unit()) > LitShare)
-						{
-							continue;
-						}
-						const float U0 = Bay * 300.f + (bBrick ? 94.f : 84.f);
-						const float U1 = Bay * 300.f + (bBrick ? 206.f : 216.f);
-						const float Z1 = H - Floor * 280.f - (bBrick ? 56.f : 61.f);
-						const float Z0 = H - Floor * 280.f - (bBrick ? 206.f : 184.f);
-						Windows.AddQuad(Corner + Along * U0 + FVector(0, 0, Z0), Corner + Along * U1 + FVector(0, 0, Z0), Corner + Along * U1 + FVector(0, 0, Z1),
-							Corner + Along * U0 + FVector(0, 0, Z1), Outward, FVector2D(0, 1), FVector2D(1, 0), FColor::White, 0);
-						FPeregonLightSpot Spot;
-						Spot.Location = Corner + Along * (0.5f * (U0 + U1)) + FVector(0, 0, 0.5f * (Z0 + Z1)) + Outward * 6.0;
-						Spot.Direction = Outward;
-						Spot.SizeCm = FVector2D(U1 - U0, Z1 - Z0);
-						Spot.bWindow = true;
-						Spot.Seed = B.Seed * 131u + static_cast<uint32>(Bay * 17 + Floor * 3 + Face);
-						WindowSpots.Add(Spot);
-					}
-				}
-			}
 			break;
-		}
-		case rgen::BuildingKind::Garages:
-		{
-			// Ряд кирпичных боксов 3.5 × 7 м с воротами разного цвета и общей плоской крышей.
-			const FRotator Rot(0.f, Yaw, 0.f);
-			const FVector Ax = Rot.RotateVector(FVector::ForwardVector);
-			const FVector Ay = Rot.RotateVector(FVector::RightVector);
-			GarageBlocks.AddBox(Base, Yaw, Size, FVector2D(300.f, 280.f), ToColor(FLinearColor(0.85f, 0.78f, 0.7f)), false, false);
-			Roofs.AddBox(Base + FVector(0.f, 0.f, H), Yaw, FVector(Size.X + 40.f, Size.Y + 60.f, 20.f), FVector2D(400.f, 400.f), FColor::White, true, true);
-			static const FLinearColor Doors[] = {FLinearColor(0.25f, 0.4f, 0.25f), FLinearColor(0.45f, 0.28f, 0.15f), FLinearColor(0.2f, 0.3f, 0.5f),
-				FLinearColor(0.5f, 0.5f, 0.5f), FLinearColor(0.55f, 0.18f, 0.12f)};
-			const int32 Boxes = FMath::Max(1, FMath::FloorToInt(static_cast<float>(Size.X) / 350.f));
-			const FVector Front = Base - Ay * (Size.Y * 0.5 + 2.0);
-			for (int32 K = 0; K < Boxes; ++K)
-			{
-				const FVector C = Front + Ax * (-Size.X * 0.5 + 175.0 + K * 350.0);
-				const FColor Tint = ToColor(Doors[(B.Seed + K * 7) % UE_ARRAY_COUNT(Doors)]);
-				Props.AddQuad(C - Ax * 130.f, C + Ax * 130.f, C + Ax * 130.f + FVector(0, 0, 220.f), C - Ax * 130.f + FVector(0, 0, 220.f), -Ay, FVector2D(0, 1),
-					FVector2D(1, 0), Tint, 0);
-			}
-			break;
-		}
-		case rgen::BuildingKind::Shop:
-		{
-			// Магазинчик: оштукатуренный короб, витрина (вечером горит), вывеска.
-			const FRotator Rot(0.f, Yaw, 0.f);
-			const FVector Ay = Rot.RotateVector(FVector::RightVector);
-			const FVector Ax = Rot.RotateVector(FVector::ForwardVector);
-			static const FLinearColor Walls[] = {FLinearColor(0.9f, 0.85f, 0.7f), FLinearColor(0.8f, 0.85f, 0.9f), FLinearColor(0.85f, 0.9f, 0.8f)};
-			ShopWalls.AddBox(Base, Yaw, Size, FVector2D(300.f, 280.f), ToColor(Walls[B.Seed % 3]), false, false);
-			Roofs.AddBox(Base + FVector(0.f, 0.f, H), Yaw, FVector(Size.X + 30.f, Size.Y + 30.f, 25.f), FVector2D(400.f, 400.f), FColor::White, true, false);
-			const FVector Face = Base - Ay * (Size.Y * 0.5 + 3.0);
-			Windows.AddQuad(Face - Ax * (Size.X * 0.35) + FVector(0, 0, 80.f), Face + Ax * (Size.X * 0.35) + FVector(0, 0, 80.f),
-				Face + Ax * (Size.X * 0.35) + FVector(0, 0, 230.f), Face - Ax * (Size.X * 0.35) + FVector(0, 0, 230.f), -Ay, FVector2D(0, 1), FVector2D(1, 0),
-				FColor::White, 0);
-			static const TCHAR* Signs[] = {TEXT("ПРОДУКТЫ"), TEXT("АПТЕКА"), TEXT("ХОЗТОВАРЫ")};
-			static const FLinearColor Paper[] = {FLinearColor(0.6f, 0.08f, 0.06f), FLinearColor(0.1f, 0.45f, 0.25f), FLinearColor(0.12f, 0.25f, 0.5f)};
-			const int32 Sign = FMath::Clamp(B.Floors, 0, 2);
-			Label(FTransform((-Ay).Rotation(), Face - Ay * 2.0 + FVector(0, 0, 290.f)), Signs[Sign], static_cast<float>(Size.X) * 0.6f, 70.f, 64,
-				FLinearColor(0.95f, 0.95f, 0.9f), Paper[Sign]);
-			break;
-		}
+		case rgen::BuildingKind::Garages: GarageRow(B, Town); break;
+		case rgen::BuildingKind::Shop: ShopBuilding(B, Town); break;
+		case rgen::BuildingKind::Industrial: Factory(B, Town); break;
+		case rgen::BuildingKind::School: School(B, Town, false); break;
+		case rgen::BuildingKind::Kindergarten: School(B, Town, true); break;
+		case rgen::BuildingKind::CultureHouse: CultureHouse(B, Town); break;
+		case rgen::BuildingKind::Admin: Office(B, Town, false); break;
+		case rgen::BuildingKind::Clinic: Office(B, Town, true); break;
+		case rgen::BuildingKind::Monument: Monument(B, Town); break;
+		case rgen::BuildingKind::WaterTower: WaterTower(B, Town); break;
+		case rgen::BuildingKind::Kiosk: Kiosk(B, Town); break;
+		case rgen::BuildingKind::Market: Market(B, Town); break;
 		case rgen::BuildingKind::Playground:
 		{
 			// Детская площадка: качели, горка-лесенка, песочница, лавки — всё в одном меше с цветом вершин.
@@ -479,10 +406,6 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 			}
 			break;
 		}
-		case rgen::BuildingKind::Industrial:
-			Plant.AddBox(Base, Yaw, Size, FVector2D(400.f, 400.f), ToColor(FLinearColor(0.75f, 0.73f, 0.7f)), false, false);
-			PlantRoof.AddBox(Base + FVector(0.f, 0.f, H), Yaw, FVector(Size.X, Size.Y, 60.f), FVector2D(400.f, 400.f), FColor::White, true, false);
-			break;
 		case rgen::BuildingKind::Chimney:
 		case rgen::BuildingKind::Mast:
 		{
@@ -535,23 +458,39 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 			break;
 		}
 	}
-	AddProc(PanelWalls, Mats.Panel, true);
-	AddProc(BrickWalls, Mats.Brick, true);
-	AddProc(Roofs, Mats.Roof, false);
-	if (UProceduralMeshComponent* Lit = AddProc(Windows, Mats.LitWindow, false, false))
+	auto Emit = [&](const FPeregonMeshBuffers& Data, UMaterialInterface* Material, UMaterialInterface* Fallback, bool bCollision, bool bShadow = true) {
+		return AddProc(Data, Material ? Material : Fallback, bCollision, bShadow);
+	};
+	Emit(Town.Panel, Mats.Panel, nullptr, true);
+	Emit(Town.PanelTile, Mats.PanelTile, Mats.Panel, true);
+	Emit(Town.PanelLoggia, Mats.PanelLoggia, Mats.Panel, true);
+	Emit(Town.Brick, Mats.Brick, nullptr, true);
+	Emit(Town.Silicate, Mats.Silicate, Mats.Brick, true);
+	Emit(Town.Stucco, Mats.Stucco, Mats.Concrete, true);
+	Emit(Town.Ribbon, Mats.Ribbon, Mats.Panel, true);
+	Emit(Town.Roofs, Mats.Roof, nullptr, false);
+	Emit(Town.MetalRoofs, Mats.MetalRoof, Mats.Roof, false);
+	Emit(Town.Concrete, Mats.Concrete, nullptr, true);
+	Emit(Town.Glass, Mats.Glass, nullptr, false);
+	Emit(Town.Wood, Mats.Wood, nullptr, true);
+	Emit(Props, Mats.Paint, nullptr, true);
+	Emit(Wheels, Mats.Pole, nullptr, false);
+	if (UProceduralMeshComponent* Lit = AddProc(Town.Windows, Mats.LitWindow, false, false))
 	{
-		for (FPeregonLightSpot& Spot : WindowSpots)
+		for (FPeregonLightSpot& Spot : Town.WindowSpots)
 		{
 			Spot.Anchor = Lit;
 		}
-		PeregonLights::Spots().Append(WindowSpots);
+		PeregonLights::Spots().Append(Town.WindowSpots);
 	}
-	AddProc(Plant, Mats.Concrete, true);
-	AddProc(PlantRoof, Mats.MetalRoof, false);
-	AddProc(GarageBlocks, Mats.Concrete, true);
-	AddProc(ShopWalls, Mats.Concrete, true);
-	AddProc(Props, Mats.Paint, true);
-	AddProc(Wheels, Mats.Pole, false);
+	if (UProceduralMeshComponent* Glow = AddProc(Town.Lamps, Mats.Lamp, false, false))
+	{
+		for (FPeregonLightSpot& Spot : Town.LampSpots)
+		{
+			Spot.Anchor = Glow;
+		}
+		PeregonLights::Spots().Append(Town.LampSpots);
+	}
 }
 
 UInstancedStaticMeshComponent* FPeregonKit::Instanced(UStaticMesh* InMesh, UMaterialInterface* Material, bool bCollision, bool bShadow)
@@ -744,7 +683,29 @@ void FPeregonKit::CityStele(const FVector& Base, const FRotator& Rot, const FStr
 	const FLinearColor Blue(0.08f, 0.22f, 0.5f);
 	const FLinearColor Dark(0.05f, 0.05f, 0.06f);
 	const FLinearColor Light(0.9f, 0.9f, 0.87f);
-	if (Size >= 2)
+	// Вид стелы — по названию: одинаковые для одного города, разные у разных.
+	const uint32 Variant = GetTypeHash(Name) % 3u;
+	if (Size >= 2 && Variant == 1)
+	{
+		// Областной центр: широкая изогнутая стенка-«волна» с названием и гербовым щитом, флагштоки.
+		for (int32 K = -3; K <= 3; ++K)
+		{
+			const double Ang = K * 0.09;
+			Box(At(-FMath::Abs(K) * 0.35, K * 2.0, 2.4), FRotator(0.0, Rot.Yaw + FMath::RadiansToDegrees(Ang), 0.0), FVector(0.8, 2.05, 4.8 - FMath::Abs(K) * 0.45),
+				Mats.Stele, true);
+		}
+		Box(At(0.42, 0, 3.6), Rot, FVector(0.05, 9.0, 1.3), Mats.Accent, false);
+		Write(Name.ToUpper(), 0.46, 0, 3.6, 880.f, 120.f, 96, WhiteInk, Blue, false);
+		Box(At(0.45, 0, 5.4), Rot, FVector(0.1, 1.2, 1.4), Mats.Gold, false);
+		Box(At(0.5, 0, 5.4), Rot, FVector(0.1, 1.0, 1.2), Mats.Red, false);
+		for (double Y : {-8.5, -7.5, 7.5, 8.5})
+		{
+			AddMesh(Cylinder(), FTransform(Rot, At(0.5, Y, 4.0), FVector(0.1, 0.1, 8.0)), Mats.White, false);
+		}
+		Write(bLeaving ? FString(TEXT("Счастливого пути!")) : Year, 0.46, 0, 1.2, 600.f, 60.f, 44, Dark, Light, false);
+		Write(TEXT("Счастливого пути!"), 0.46, 0, 3.6, 880.f, 120.f, 80, WhiteInk, Blue, true);
+	}
+	else if (Size >= 2)
 	{
 		// Областной центр: широкий цоколь, два пилона и ригель с названием, год — на цоколе.
 		Box(At(0, 0, 0.4), Rot, FVector(1.6, 15.0, 0.8), Mats.Stele, true);
@@ -757,6 +718,22 @@ void FPeregonKit::CityStele(const FVector& Base, const FRotator& Rot, const FStr
 		Write(bLeaving ? FString(TEXT("Счастливого пути!")) : Year, 0.82, 0, 0.4, bLeaving ? 900.f : 360.f, 60.f, 44, Dark, Light, false);
 		Write(TEXT("Счастливого пути!"), 0.52, 0, 7.6, 1080.f, 190.f, 80, WhiteInk, Blue, true);
 	}
+	else if (Size == 1 && Variant != 0)
+	{
+		// Город: объёмные буквы на кирпичном основании (или на бетонной «книжке»), под ними — год.
+		Box(At(0, 0, 0.6), Rot, FVector(1.2, 9.0, 1.2), Variant == 1 ? Mats.Red : Mats.Stele, true);
+		Box(At(0, 0, 1.25), Rot, FVector(1.4, 9.3, 0.12), Mats.Stele, false);
+		if (Variant == 2)
+		{
+			Box(At(-0.2, -2.5, 3.0), FRotator(0.0, Rot.Yaw - 12.0, 0.0), FVector(0.4, 4.0, 3.4), Mats.Stele, true);
+			Box(At(-0.2, 2.5, 3.0), FRotator(0.0, Rot.Yaw + 12.0, 0.0), FVector(0.4, 4.0, 3.4), Mats.Accent, true);
+		}
+		Write(Name.ToUpper(), 0.75, 0, 2.0, 820.f, 140.f, 96, Variant == 1 ? Light : Blue, Variant == 1 ? FLinearColor(0.55f, 0.06f, 0.04f) : Light, false);
+		if (!Year.IsEmpty())
+		{
+			Write(Year, 0.62, 0, 0.6, 220.f, 50.f, 44, Dark, Light, false);
+		}
+	}
 	else if (Size == 1)
 	{
 		// Город: высокая плита с цветной вставкой, название крупно, год под ним.
@@ -767,6 +744,31 @@ void FPeregonKit::CityStele(const FVector& Base, const FRotator& Rot, const FStr
 		if (!Year.IsEmpty())
 		{
 			Write(Year, 0.47, -0.25, 4.6, 200.f, 60.f, 48, Dark, Light, false);
+		}
+	}
+	else if (Variant == 1)
+	{
+		// Посёлок: деревянный щит под двускатной крышей, «Добро пожаловать».
+		for (double Y : {-2.6, 2.6})
+		{
+			Box(At(0, Y, 1.6), Rot, FVector(0.25, 0.25, 3.2), Mats.DarkWood, true);
+		}
+		Box(At(0, 0, 2.0), Rot, FVector(0.12, 5.0, 1.6), Mats.Wood, true);
+		Box(At(0.1, 0, 3.35), FRotator(0.0, Rot.Yaw, 25.0), FVector(0.9, 3.0, 0.06), Mats.DarkWood, false);
+		Box(At(0.1, 0, 3.35), FRotator(0.0, Rot.Yaw + 180.0, 25.0), FVector(0.9, 3.0, 0.06), Mats.DarkWood, false);
+		Write(Name.ToUpper(), 0.07, 0, 2.3, 460.f, 70.f, 64, FLinearColor(0.3f, 0.15f, 0.05f), FLinearColor(0.85f, 0.72f, 0.5f), false);
+		Write(TEXT("Добро пожаловать!"), 0.07, 0, 1.55, 400.f, 40.f, 36, FLinearColor(0.3f, 0.15f, 0.05f), FLinearColor(0.85f, 0.72f, 0.5f), false);
+	}
+	else if (Variant == 2)
+	{
+		// Посёлок: бетонная плита-«парус» на ножке и табличка с годом.
+		Box(At(0, 0, 1.0), Rot, FVector(0.5, 0.5, 2.0), Mats.Stele, true);
+		Box(At(0, 0, 2.6), FRotator(0.0, Rot.Yaw, 6.0), FVector(0.25, 5.4, 1.4), Mats.Stele, true);
+		Box(At(0.14, 1.6, 2.6), FRotator(0.0, Rot.Yaw, 6.0), FVector(0.05, 1.6, 1.2), Mats.Accent, false);
+		Write(Name.ToUpper(), 0.15, -0.8, 2.6, 360.f, 80.f, 64, Dark, Light, false);
+		if (!Year.IsEmpty())
+		{
+			Write(Year, 0.27, 0, 0.9, 140.f, 36.f, 36, Dark, Light, false);
 		}
 	}
 	else
@@ -807,32 +809,117 @@ void FPeregonKit::RegionStele(const FVector& Base, const FRotator& Rot, const FS
 // ---------------------------------------------------------------------------------------------
 // Остановка и двор
 // ---------------------------------------------------------------------------------------------
-void FPeregonKit::BusStop(const FVector& Base, const FRotator& Rot, const FString& Name)
+void FPeregonKit::BusStop(const FVector& Base, const FRotator& Rot, const FString& Name, int32 Variant)
 {
-	// Бетонный павильон: задняя стенка с «мозаикой», боковины, плоская крыша-козырёк, лавка внутри.
-	// Лицом (+X) к дороге.
+	// Лицом (+X) к дороге. Общее: платформа, лавка, урна, столб со знаком «А», название и расписание.
 	auto At = [&](double Lx, double Ly, double Lz) { return Base + Rot.RotateVector(FVector(Lx, Ly, Lz) * 100.0); };
-	Box(At(0, 0, 0.08), Rot, FVector(2.6, 5.4, 0.16), Mats.Concrete, true);              // платформа
-	Box(At(-0.9, 0, 1.35), Rot, FVector(0.18, 4.6, 2.5), Mats.Stele, true);               // задняя стенка
-	Box(At(-0.8, 0, 1.4), Rot, FVector(0.04, 3.6, 1.2), Mats.Accent, false);              // мозаика
-	Box(At(-0.78, -0.9, 1.4), Rot, FVector(0.04, 1.0, 0.7), Mats.Red, false);
-	Box(At(-0.78, 1.0, 1.7), Rot, FVector(0.04, 0.8, 0.5), Mats.White, false);
-	for (double Y : {-2.25, 2.25})
+	const double Yaw = Rot.Yaw;
+	switch (Variant % 4)
 	{
-		Box(At(-0.25, Y, 1.35), Rot, FVector(1.3, 0.14, 2.5), Mats.Stele, true);          // боковины
-	}
-	Box(At(-0.1, 0, 2.68), Rot, FVector(2.2, 5.0, 0.16), Mats.Stele, false);              // крыша
-	Box(At(-0.55, 0, 0.45), Rot, FVector(0.4, 3.6, 0.06), Mats.DarkWood, true);           // лавка
-	for (double Y : {-1.5, 1.5})
+	case 1:
 	{
-		Box(At(-0.55, Y, 0.22), Rot, FVector(0.3, 0.08, 0.44), Mats.Concrete, false);
+		// Металл и стекло: синий каркас, стеклянные стенки, крыша из поликарбоната.
+		UPeregonArtSubsystem* Art = Owner ? UPeregonArtSubsystem::Get(Owner) : nullptr;
+		UMaterialInterface* Frame = Art ? Art->MakeMaterial(Owner, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.12f, 0.3f, 0.6f), 0.4f, 0.4f)) : Mats.Accent;
+		Box(At(0, 0, 0.08), Rot, FVector(2.4, 5.0, 0.16), Mats.Concrete, true);
+		for (double X : {-0.9, 0.6})
+		{
+			for (double Y : {-2.1, 2.1})
+			{
+				Box(At(X, Y, 1.3), Rot, FVector(0.08, 0.08, 2.4), Frame, true);
+			}
+		}
+		Box(At(-0.9, 0, 1.25), Rot, FVector(0.03, 4.1, 2.0), Mats.Glass, true);
+		for (double Y : {-2.1, 2.1})
+		{
+			Box(At(-0.15, Y, 1.25), Rot, FVector(1.4, 0.03, 2.0), Mats.Glass, true);
+		}
+		Box(At(-0.15, 0, 2.55), FRotator(-4.0, Yaw, 0.0), FVector(2.0, 4.6, 0.06), Frame, false);
+		Box(At(-0.15, 0, 2.5), Rot, FVector(1.6, 4.2, 0.03), Mats.Glass, false);
+		Box(At(-0.6, 0, 0.45), Rot, FVector(0.35, 3.4, 0.05), Frame, true);
+		break;
 	}
-	// Знак «А» на столбе у края и табличка с названием.
+	case 2:
+	{
+		// Кирпичная будка под двускатной крышей (на въезде в сёла).
+		Box(At(0, 0, 0.08), Rot, FVector(2.8, 5.0, 0.16), Mats.Concrete, true);
+		Box(At(-1.0, 0, 1.2), Rot, FVector(0.25, 4.4, 2.2), Mats.Red, true);
+		for (double Y : {-2.1, 2.1})
+		{
+			Box(At(-0.35, Y, 1.2), Rot, FVector(1.5, 0.25, 2.2), Mats.Red, true);
+		}
+		Box(At(-0.3, 0, 2.55), Rot, FVector(1.9, 4.6, 0.1), Mats.Stele, false);
+		Box(At(0.15, 0, 2.95), FRotator(-28.0, Yaw, 0.0), FVector(1.2, 4.9, 0.06), Mats.MetalRoof, false);
+		Box(At(-0.75, 0, 2.95), FRotator(28.0, Yaw, 0.0), FVector(1.2, 4.9, 0.06), Mats.MetalRoof, false);
+		Box(At(-0.6, 0, 0.45), Rot, FVector(0.4, 3.6, 0.06), Mats.Wood, true);
+		break;
+	}
+	case 3:
+	{
+		// Деревянный навес: столбы, дощатые стенки, крыша из профлиста.
+		Box(At(0, 0, 0.05), Rot, FVector(2.4, 4.4, 0.1), Mats.Wood, true);
+		for (double X : {-0.9, 0.7})
+		{
+			for (double Y : {-1.9, 1.9})
+			{
+				Box(At(X, Y, 1.2), Rot, FVector(0.14, 0.14, 2.4), Mats.DarkWood, true);
+			}
+		}
+		Box(At(-0.9, 0, 1.0), Rot, FVector(0.05, 3.8, 1.6), Mats.Wood, true);
+		Box(At(-0.1, 0, 2.5), FRotator(-8.0, Yaw, 0.0), FVector(2.2, 4.4, 0.06), Mats.MetalRoof, false);
+		Box(At(-0.6, 0, 0.45), Rot, FVector(0.35, 3.2, 0.06), Mats.Wood, true);
+		break;
+	}
+	default:
+	{
+		// Бетонный павильон с «мозаикой» на задней стенке.
+		Box(At(0, 0, 0.08), Rot, FVector(2.6, 5.4, 0.16), Mats.Concrete, true);
+		Box(At(-0.9, 0, 1.35), Rot, FVector(0.18, 4.6, 2.5), Mats.Stele, true);
+		Box(At(-0.8, 0, 1.4), Rot, FVector(0.04, 3.6, 1.2), Mats.Accent, false);
+		Box(At(-0.78, -0.9, 1.4), Rot, FVector(0.04, 1.0, 0.7), Mats.Red, false);
+		Box(At(-0.78, 1.0, 1.7), Rot, FVector(0.04, 0.8, 0.5), Mats.White, false);
+		Box(At(-0.77, 0.2, 1.1), Rot, FVector(0.04, 0.5, 0.5), Mats.Gold, false);
+		for (double Y : {-2.25, 2.25})
+		{
+			Box(At(-0.25, Y, 1.35), Rot, FVector(1.3, 0.14, 2.5), Mats.Stele, true);
+		}
+		Box(At(-0.1, 0, 2.68), Rot, FVector(2.2, 5.0, 0.16), Mats.Stele, false);
+		Box(At(-0.55, 0, 0.45), Rot, FVector(0.4, 3.6, 0.06), Mats.DarkWood, true);
+		for (double Y : {-1.5, 1.5})
+		{
+			Box(At(-0.55, Y, 0.22), Rot, FVector(0.3, 0.08, 0.44), Mats.Concrete, false);
+		}
+		break;
+	}
+	}
+	// Знак «А» на столбе у края, название и расписание.
 	Box(At(0.9, 2.9, 1.3), Rot, FVector(0.08, 0.08, 2.6), Mats.Pole, false);
-	Label(FTransform(Rot, At(0.95, 2.9, 2.3)), TEXT("А"), 50.f, 50.f, 90, FLinearColor(0.05f, 0.05f, 0.08f), FLinearColor(0.95f, 0.85f, 0.15f));
-	Label(FTransform(Rot, At(0.95, 2.9, 1.85)), Name, 120.f, 30.f, 40, FLinearColor(0.05f, 0.05f, 0.06f), FLinearColor(0.9f, 0.9f, 0.87f));
-	// Урна.
+	Label(FTransform(Rot, At(0.95, 2.9, 2.3)), TEXT("А"), 50.f, 50.f, 90, FLinearColor(0.05f, 0.05f, 0.08f), FLinearColor(0.95f, 0.85f, 0.15f), 128);
+	Label(FTransform(Rot, At(0.95, 2.9, 1.85)), Name, 120.f, 30.f, 40, FLinearColor(0.05f, 0.05f, 0.06f), FLinearColor(0.9f, 0.9f, 0.87f), 256);
+	Label(FTransform(Rot, At(0.95, 2.9, 1.45)), TEXT("Кемерово  7:20  12:40  17:55\nНовосибирск  8:05  14:10  19:30"), 110.f, 34.f, 22,
+		FLinearColor(0.05f, 0.05f, 0.06f), FLinearColor(0.95f, 0.95f, 0.93f), 256);
 	AddMesh(Cylinder(), FTransform(Rot, At(0.5, -2.6, 0.35), FVector(0.4, 0.4, 0.55)), Mats.Concrete, true);
+}
+
+void FPeregonKit::Billboard(const FVector& Base, const FRotator& Rot, const FString& Text, const FLinearColor& Paper, const FLinearColor& Ink)
+{
+	// Щит 6 × 3 м на двух трубах, подсветка сверху, мостик обслуживания.
+	auto At = [&](double Lx, double Ly, double Lz) { return Base + Rot.RotateVector(FVector(Lx, Ly, Lz) * 100.0); };
+	for (double Y : {-1.8, 1.8})
+	{
+		AddMesh(Cylinder(), FTransform(Rot, At(-0.2, Y, 2.2), FVector(0.3, 0.3, 4.4)), Mats.Pole, true);
+	}
+	Box(At(-0.15, 0, 5.9), Rot, FVector(0.2, 6.3, 3.3), Mats.Concrete, false);
+	Box(At(0.25, 0, 4.25), Rot, FVector(0.6, 6.0, 0.05), Mats.Concrete, false);
+	Label(FTransform(Rot, At(-0.03, 0, 5.9)), Text, 600.f, 300.f, 64, Ink, Paper, 512);
+	for (double Y : {-2.0, 0.0, 2.0})
+	{
+		Box(At(0.5, Y, 7.65), Rot, FVector(0.6, 0.06, 0.06), Mats.Pole, false);
+		if (UStaticMeshComponent* Head = Box(At(0.8, Y, 7.6), Rot, FVector(0.2, 0.35, 0.1), Mats.Lamp, false))
+		{
+			Head->SetCastShadow(false);
+		}
+	}
 }
 
 void FPeregonKit::Well(const FVector& Base, const FRotator& Rot)

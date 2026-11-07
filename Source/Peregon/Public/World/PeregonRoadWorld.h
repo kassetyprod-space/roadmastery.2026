@@ -53,6 +53,15 @@ enum class EPeregonWorldMat : uint8
 	Stele,
 	SteleAccent,
 	VertexPaint,
+	PanelTile,
+	PanelLoggia,
+	Silicate,
+	Stucco,
+	Ribbon,
+	Marking,    // дорожная разметка
+	RoofGreen,  // кровля сельских домов разных цветов
+	RoofRed,
+	RoofBlue,
 	Count UMETA(Hidden)
 };
 
@@ -123,7 +132,15 @@ private:
 	void AddSign(FChunk& Chunk, double S, double T, const FString& Text, bool bCrossed, bool bFacingDriver = true);
 
 	void BuildVillage(FChunk& Chunk, const rgen::Poi& Poi, double S0, double S1);
-	void BuildHouse(FChunk& Chunk, double S, int32 Side, uint32 Seed, UInstancedStaticMeshComponent* Roofs);
+	// Дом в селе: сруб, кирпичный или дом с мансардой; крыша одного из цветов (Roofs — по материалу), наличники,
+	// крыльцо, труба, иногда тарелка антенны. Цветные мелочи — в Props (краска по цвету вершин).
+	void BuildHouse(FChunk& Chunk, double S, int32 Side, uint32 Seed, const TArray<UInstancedStaticMeshComponent*>& Roofs, FPeregonMeshBuffers& Props);
+	// Разметка (PeregonRoadWorldDetails.cpp): осевая сплошная/прерывистая/приближения, края, «зебры».
+	void BuildMarkings(FChunk& Chunk, double S0, double S1);
+	// Знаки у дороги: «опасный поворот», ограничения, указатели расстояний, переходы; рекламные щиты.
+	void BuildRoadsideSigns(FChunk& Chunk, double S0, double S1);
+	// Где «зебры»: у остановок сёл и в городах.
+	void CrosswalksIn(double S0, double S1, TArray<double>& Out) const;
 	void BuildTrees(FChunk& Chunk, int32 Index, double S0, double S1);
 	bool IsClearZone(double S, double T) const;
 
