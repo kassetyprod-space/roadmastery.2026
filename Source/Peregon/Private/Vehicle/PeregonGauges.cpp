@@ -151,29 +151,29 @@ UTexture2D* Draw(int32 Kind)
 			C.Line(Polar(Ang(V / 180.f), ROut), Polar(Ang(V / 180.f), ROut - (bMajor ? 20.f : (bMid ? 13.f : 8.f))), bMajor ? 4.f : 2.f, Ink);
 			if (bMajor)
 			{
-				const FVector2f P = Polar(Ang(V / 180.f), ROut - 40.f);
-				C.Text(FString::FromInt(V), P.X, P.Y, 3, Ink);
+				const FVector2f P = Polar(Ang(V / 180.f), ROut - 34.f);
+				C.Text(FString::FromInt(V), P.X, P.Y, 2, Ink);
 			}
 		}
-		C.Text(TEXT("км/ч"), Size * 0.5f, Size * 0.36f, 3, Ink);
+		C.Text(TEXT("км/ч"), Size * 0.5f, Size * 0.64f, 2, Ink);
 		// Одометр.
 		for (int32 K = 0; K < 6; ++K)
 		{
-			const float X = Size * 0.5f - 45.f + K * 18.f;
-			for (int32 Y = 0; Y < 26; ++Y)
+			const float X = Size * 0.5f - 32.5f + K * 13.f;
+			for (int32 Y = 0; Y < 18; ++Y)
 			{
-				for (int32 Dx = 0; Dx < 16; ++Dx)
+				for (int32 Dx = 0; Dx < 12; ++Dx)
 				{
-					C.Put(FMath::RoundToInt(X) + Dx - 8, FMath::RoundToInt(Size * 0.66f) + Y - 13, K == 5 ? FColor(220, 215, 200, 255) : FColor(8, 8, 8, 255));
+					C.Put(FMath::RoundToInt(X) + Dx - 6, FMath::RoundToInt(Size * 0.75f) + Y - 9, K == 5 ? FColor(220, 215, 200, 255) : FColor(8, 8, 8, 255));
 				}
 			}
-			C.Text(K == 5 ? TEXT("5") : (K == 1 ? TEXT("8") : (K == 2 ? TEXT("1") : (K == 3 ? TEXT("2") : TEXT("0")))), X, Size * 0.66f, 3,
+			C.Text(K == 5 ? TEXT("5") : (K == 1 ? TEXT("8") : (K == 2 ? TEXT("1") : (K == 3 ? TEXT("2") : TEXT("0")))), X, Size * 0.75f, 2,
 				K == 5 ? FColor(10, 10, 10, 255) : Ink);
 		}
 		// Лампы: габариты, поворотники (зелёные), дальний (синий).
-		C.Disc(Size * 0.36f, Size * 0.84f, 7.f, FColor(40, 110, 40, 255));
-		C.Disc(Size * 0.5f, Size * 0.86f, 7.f, FColor(40, 120, 50, 255));
-		C.Disc(Size * 0.64f, Size * 0.84f, 7.f, FColor(40, 60, 150, 255));
+		C.Disc(Size * 0.38f, Size * 0.88f, 5.f, FColor(40, 110, 40, 255));
+		C.Disc(Size * 0.5f, Size * 0.89f, 5.f, FColor(40, 120, 50, 255));
+		C.Disc(Size * 0.62f, Size * 0.88f, 5.f, FColor(40, 60, 150, 255));
 	}
 	else if (Kind == 1)
 	{
@@ -184,15 +184,15 @@ UTexture2D* Draw(int32 Kind)
 			C.Line(Polar(Ang(V / 80.f), ROut), Polar(Ang(V / 80.f), ROut - (bMajor ? 20.f : 10.f)), bMajor ? 4.f : 2.f, V >= 60 ? Red : Ink);
 			if (bMajor && V > 0)
 			{
-				const FVector2f P = Polar(Ang(V / 80.f), ROut - 40.f);
-				C.Text(FString::FromInt(V), P.X, P.Y, 3, V >= 60 ? Red : Ink);
+				const FVector2f P = Polar(Ang(V / 80.f), ROut - 34.f);
+				C.Text(FString::FromInt(V), P.X, P.Y, 2, V >= 60 ? Red : Ink);
 			}
 		}
-		C.Text(TEXT("x100"), Size * 0.5f, Size * 0.36f, 3, Ink);
+		C.Text(TEXT("x100"), Size * 0.5f, Size * 0.66f, 2, Ink);
 		// Лампы: ручник, зарядка (красные), давление масла (жёлтая).
-		C.Disc(Size * 0.36f, Size * 0.84f, 7.f, FColor(130, 25, 20, 255));
-		C.Disc(Size * 0.5f, Size * 0.86f, 7.f, FColor(130, 25, 20, 255));
-		C.Disc(Size * 0.64f, Size * 0.84f, 7.f, FColor(150, 120, 20, 255));
+		C.Disc(Size * 0.38f, Size * 0.86f, 5.f, FColor(130, 25, 20, 255));
+		C.Disc(Size * 0.5f, Size * 0.88f, 5.f, FColor(130, 25, 20, 255));
+		C.Disc(Size * 0.62f, Size * 0.86f, 5.f, FColor(150, 120, 20, 255));
 	}
 	else
 	{
@@ -214,22 +214,24 @@ UTexture2D* Draw(int32 Kind)
 		const TCHAR* L0 = bFuel ? TEXT("0") : TEXT("50");
 		const TCHAR* L1 = bFuel ? TEXT("1/2") : TEXT("90");
 		const TCHAR* L2 = bFuel ? TEXT("1") : TEXT("130");
-		const float LabelR = ROut - 62.f;
+		const float LabelR = ROut - 66.f;
 		const FVector2f P0 = Polar(Ang(bFuel ? 0.f : 10.f / 90.f), LabelR);
 		const FVector2f P1 = Polar(Ang(bFuel ? 0.5f : 50.f / 90.f), LabelR);
 		const FVector2f P2 = Polar(Ang(1.f), LabelR);
-		C.Text(L0, P0.X, P0.Y, 6, Ink);
-		C.Text(L1, P1.X, P1.Y, 5, Ink);
-		C.Text(L2, P2.X, P2.Y, 6, bFuel ? Ink : Red);
-		C.Text(bFuel ? TEXT("") : TEXT("°С"), Size * 0.5f, Size * 0.74f, 6, Ink);
+		// Подписи в углах шкалы (дальше от центра, где стрелка), значок — внизу по центру.
+		const int32 Big = bFuel ? 5 : 3;
+		C.Text(L0, P0.X + 8.f, P0.Y + 10.f, Big, Ink);
+		C.Text(L1, P1.X, P1.Y, 3, Ink);
+		C.Text(L2, P2.X - 8.f, P2.Y + 10.f, Big, bFuel ? Ink : Red);
+		C.Text(bFuel ? TEXT("") : TEXT("°С"), Size * 0.5f, Size * 0.8f, 4, Ink);
 		if (bFuel)
 		{
 			// Значок колонки — квадратик с носиком.
-			for (int32 Y = 0; Y < 30; ++Y)
+			for (int32 Y = 0; Y < 22; ++Y)
 			{
-				for (int32 X = 0; X < 22; ++X)
+				for (int32 X = 0; X < 16; ++X)
 				{
-					C.Put(Size / 2 - 11 + X, static_cast<int32>(Size * 0.7f) + Y - 15, Ink);
+					C.Put(Size / 2 - 8 + X, static_cast<int32>(Size * 0.8f) + Y - 11, Ink);
 				}
 			}
 		}

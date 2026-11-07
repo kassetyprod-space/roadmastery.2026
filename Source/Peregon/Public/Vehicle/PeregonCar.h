@@ -86,6 +86,7 @@ public:
 	// Выйти через дверь места ThroughSeat (−1 — своего).
 	void ExitCar(int32 ThroughSeat = -1);
 	static int32 DoorSeatIndex(FName Tag);
+	static int32 SeatHitIndex(const UPrimitiveComponent* Part);
 	bool IsInDoorway(FName Tag, const APawn* User) const;
 	APeregonCharacter* GetDriver() const { return Driver; }
 

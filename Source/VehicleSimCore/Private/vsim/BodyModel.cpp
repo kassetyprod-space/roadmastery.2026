@@ -56,7 +56,7 @@ const V3 kHoodHinge(93.f, 0.f, 39.f);
 const V3 kTrunkHinge(-110.5f, 0.f, 38.5f);
 const V3 kGloveHinge(72.4f, 32.f, 21.6f);
 const V3 kSteeringCenter(60.f, -35.f, 40.f);
-const V3 kKeyPos(72.6f, -15.5f, 30.f);
+const V3 kKeyPos(72.6f, -10.5f, 30.f); // правее щитка, в ровной части торпедо (а не в выступе приборов)
 const V3 kKnobPos(72.8f, -60.f, 31.f);
 const V3 kGearPos(34.f, 0.f, -13.5f);
 const V3 kHandbrakePos(-4.f, 0.f, -13.3f);
@@ -708,7 +708,8 @@ void BuildDoor(Builder& B, Part Id)
 	}
 	// Кнопка замка — в полке двери у стекла, торчит на 3 см (не сквозь обшивку).
 	const float KnobX = bFront ? -4.f : -74.f;
-	const V3 KnobBase = Card(KnobX, kBelt - 1.5f, -4.f);
+	// Изнутри, на полке двери у самого стекла: снаружи её видно через стекло.
+	const V3 KnobBase = Card(KnobX, kBelt - 1.5f, 1.2f);
 	Tube(M, Mat::Chrome, {KnobBase, KnobBase + V3(0.f, 0.f, 3.f)}, 0.5f, 8);
 	Lathe(M, Mat::Chrome, KnobBase + V3(0.f, 0.f, 3.f), V3(0.f, 0.f, 1.f), V3(1.f, 0.f, 0.f), {{0.5f, 0.f}, {0.6f, 0.3f}, {0.f, 0.5f}}, 8);
 
@@ -879,18 +880,18 @@ void BuildInterior(MeshSet& M)
 			RoundedBox(M, Mat::BlackTrim, V3(Fx - 6.f, Y + B2, -18.f), V3(22.f, 1.2f, 1.5f), 0.4f);
 		}
 		RoundedBox(M, Mat::BlackTrim, V3(Fx - 27.f, Y + S * 24.5f, -9.f), V3(4.f, 1.f, 4.f), 1.f);
-		// Ремень: от стойки через плечо к замку у тоннеля, поясная лямка — к порогу; пластиковый кожух замка.
-		// Ремень: верхнее крепление — на средней стойке (по её внутренней поверхности), замок — у тоннеля, лямка — к порогу.
+		// Ремень не пристёгнут: висит вдоль средней стойки — от петли наверху до катушки на пороге (всё на стойке,
+		// не в проёме двери). Замок — на коротком стебле у тоннеля.
 		const float Pillar = -15.f;
-		const float OutTop = S * (HalfW(Pillar, 68.f) - 3.2f);
-		const float OutLow = S * (HalfW(Pillar, -8.f) - 9.f);
+		const float PillarIn = S * (HalfW(Pillar, 62.f) - 4.5f);
+		const float SillIn = S * 61.5f;
+		Tube(M, Mat::BlackTrim, {V3(Pillar - 0.8f, PillarIn, 62.f), V3(Pillar - 1.f, S * 64.f, 30.f), V3(Pillar - 1.f, SillIn, -9.f)}, 0.45f, 5);
+		RoundedBox(M, Mat::Chrome, V3(Pillar - 0.5f, PillarIn + S * 0.2f, 62.f), V3(1.6f, 0.5f, 2.2f), 0.4f);
+		RoundedBox(M, Mat::BlackTrim, V3(Pillar, SillIn + S * 0.5f, -14.f), V3(3.f, 2.f, 5.f), 0.8f);
 		const float In = S * 12.f;
-		const float Bx = Fx - 18.f;
-		Tube(M, Mat::BlackTrim, {V3(Pillar, OutTop, 68.f), V3(Fx - 30.f, Y + S * 11.f, 40.f), V3(Fx - 26.f, Y - S * 5.f, 12.f), V3(Bx, In, -3.f)}, 0.45f, 5);
-		Tube(M, Mat::BlackTrim, {V3(Bx, In, -3.f), V3(Fx - 22.f, Y, -1.5f), V3(Pillar - 4.f, OutLow, -12.f)}, 0.45f, 5);
-		RoundedBox(M, Mat::BlackTrim, V3(Bx, In, -6.5f), V3(2.f, 1.2f, 4.f), 0.6f);
-		RoundedBox(M, Mat::Chrome, V3(Pillar, OutTop - S * 0.5f, 68.f), V3(1.6f, 0.5f, 2.2f), 0.4f);
-		RoundedBox(M, Mat::Chrome, V3(Pillar - 4.f, OutLow - S * 0.4f, -12.f), V3(1.4f, 0.5f, 1.8f), 0.4f);
+		const float Bx = Fx - 20.f;
+		Tube(M, Mat::Metal, {V3(Bx, In, -18.f), V3(Bx + 1.f, In, -6.f)}, 0.5f, 6);
+		RoundedBox(M, Mat::BlackTrim, V3(Bx + 1.f, In, -4.f), V3(2.f, 1.2f, 3.f), 0.6f);
 	}
 
 	// Заднее сиденье и полка.

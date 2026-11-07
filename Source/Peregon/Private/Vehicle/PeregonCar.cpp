@@ -315,6 +315,11 @@ APeregonCar::APeregonCar()
 	};
 	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 85.5f), FVector(7.f, 5.f, 2.5f)},
 		{TEXT("Heater"), Body.Get(), FVector(72.4f, 2.f, 24.f), FVector(1.2f, 8.f, 2.4f)},
+		// Сиденья: навести и нажать — сесть (снаружи — через открытую дверь этого места, изнутри — в своём ряду).
+		{TEXT("Seat0"), Body.Get(), FVector(0.f, -35.f, -5.f), FVector(20.f, 20.f, 3.f)},
+		{TEXT("Seat1"), Body.Get(), FVector(0.f, 35.f, -5.f), FVector(20.f, 20.f, 3.f)},
+		{TEXT("Seat2"), Body.Get(), FVector(-74.f, -32.f, -6.f), FVector(17.f, 22.f, 3.f)},
+		{TEXT("Seat3"), Body.Get(), FVector(-74.f, 32.f, -6.f), FVector(17.f, 22.f, 3.f)},
 		{TEXT("RadioVol"), Body.Get(), FVector(72.f, -4.f, 29.6f), FVector(2.f, 1.8f, 1.8f)},
 		{TEXT("RadioTune"), Body.Get(), FVector(72.f, 8.f, 29.6f), FVector(2.f, 1.8f, 1.8f)},
 		{TEXT("Horn"), SteeringPivot.Get(), FVector::ZeroVector, FVector(4.f, 7.f, 7.f)}};
@@ -1151,6 +1156,24 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 		}
 	}
 
+	{
+		const int32 SeatHit = SeatHitIndex(Part);
+		if (SeatHit >= 0)
+		{
+			static const TCHAR* Names[] = {TEXT("за руль"), TEXT("на переднее сиденье"), TEXT("назад слева"), TEXT("назад справа")};
+			if (bOnFoot && !Driver)
+			{
+				const FPeregonMovingPart* SeatDoorPart = FindMovingPart(SeatDoor(SeatHit));
+				return SeatDoorPart && SeatDoorPart->Target > 0.5f ? FString::Printf(TEXT("Сесть %s"), Names[SeatHit])
+																	: FString(TEXT("Сначала откройте дверь этого места"));
+			}
+			if (bInside && SeatHit != Seat && SeatHit / 2 == Seat / 2)
+			{
+				return FString::Printf(TEXT("Пересесть %s"), Names[SeatHit]);
+			}
+			return FString();
+		}
+	}
 	// Двери: снаружи — открыть; из открытой двери (стоя в проёме) — сесть на это место, сбоку — закрыть.
 	// Изнутри — открыть/закрыть любую; через открытую — выйти. Сами двери не закрываются.
 	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
@@ -1258,6 +1281,22 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 		return;
 	}
 
+	{
+		const int32 SeatHit = SeatHitIndex(Part);
+		if (SeatHit >= 0)
+		{
+			const FPeregonMovingPart* SeatDoorPart = FindMovingPart(SeatDoor(SeatHit));
+			if (Walker && !Driver && SeatDoorPart && SeatDoorPart->Target > 0.5f)
+			{
+				EnterCar(Walker, SeatHit);
+			}
+			else if (bInside && SeatHit != Seat && SeatHit / 2 == Seat / 2)
+			{
+				SwitchSeat(SeatHit);
+			}
+			return;
+		}
+	}
 	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
 	{
 		if (Part->ComponentHasTag(Tag))
@@ -1912,4 +1951,17 @@ bool APeregonCar::IsInDoorway(FName Tag, const APawn* User) const
 	const FVector ToUser = (Local - Hinge).GetSafeNormal2D();
 	const float Cross = static_cast<float>(DoorDir.X * ToUser.Y - DoorDir.Y * ToUser.X) * FMath::Sign(Eye.Y);
 	return bAlong && bSide && Cross < 0.35f;
+}
+
+int32 APeregonCar::SeatHitIndex(const UPrimitiveComponent* Part)
+{
+	static const FName SeatTags[] = {FName(TEXT("Seat0")), FName(TEXT("Seat1")), FName(TEXT("Seat2")), FName(TEXT("Seat3"))};
+	for (int32 I = 0; I < 4; ++I)
+	{
+		if (Part && Part->ComponentHasTag(SeatTags[I]))
+		{
+			return I;
+		}
+	}
+	return -1;
 }
