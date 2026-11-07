@@ -25,8 +25,8 @@ namespace
 // ---------------------------------------------------------------------------------------------
 constexpr float kXf = 203.f;         // передняя панель
 constexpr float kXr = -204.f;        // задняя панель
-constexpr float kRcF = 10.f;         // скругление углов в плане
-constexpr float kRcR = 12.f;
+constexpr float kRcF = 4.f;         // скругление углов в плане
+constexpr float kRcR = 4.5f;
 constexpr float kCrease = 8.f;       // боковое ребро
 constexpr float kArchR = 35.f;       // арки
 constexpr float kArchZ = -21.f;
@@ -37,8 +37,8 @@ constexpr float kGap = 0.6f;         // щель между панелями
 constexpr float kBelt = 40.f;        // низ остекления
 constexpr float kRail = 81.f;        // верх проёмов
 constexpr float kRoofEdge = 84.f;
-constexpr float kRoofCrown = 4.5f;
-constexpr float kTumble = 0.26f;     // завал боковин «оранжереи»
+constexpr float kRoofCrown = 1.8f;
+constexpr float kTumble = 0.19f;     // завал боковин «оранжереи»
 
 constexpr float kFDoorFront = 89.7f;
 constexpr float kFDoorRear = -12.f;
@@ -85,24 +85,26 @@ float ZTop(float X)
 {
 	if (X > 93.f)
 	{
-		return Lerpf(39.f, 35.5f, Clampf((X - 93.f) / (kXf - 93.f), 0.f, 1.f));
+		return Lerpf(39.f, 37.5f, Clampf((X - 93.f) / (kXf - 93.f), 0.f, 1.f)); // капот почти плоский
 	}
 	if (X < -110.f)
 	{
-		return Lerpf(39.f, 37.f, Clampf((-110.f - X) / (-110.f - kXr), 0.f, 1.f));
+		return Lerpf(39.f, 38.5f, Clampf((-110.f - X) / (-110.f - kXr), 0.f, 1.f));
 	}
 	return 39.f;
 }
 
 const Curve& LowerSection()
 {
-	static const Curve C({-31.f, -29.f, -26.f, -20.f, kCrease}, {72.5f, 76.5f, 78.6f, 79.4f, 80.f});
+	// Строгий борт: почти вертикальный, низ подогнут коротко и резко (порог — ступенькой).
+	static const Curve C({-31.f, -29.5f, -27.5f, -24.f, kCrease}, {75.f, 78.6f, 79.6f, 79.9f, 80.f});
 	return C;
 }
 
 const Curve& UpperSection()
 {
-	static const Curve C({0.f, 0.6f, 0.82f, 0.92f, 0.97f, 1.f}, {80.f, 79.4f, 78.5f, 77.2f, 75.6f, 74.f});
+	// Над ребром — плоско, у кромки капота — короткий скос (угловатое «плечо», а не бочка).
+	static const Curve C({0.f, 0.7f, 0.88f, 0.95f, 0.985f, 1.f}, {80.f, 79.9f, 79.6f, 78.9f, 77.6f, 76.8f});
 	return C;
 }
 
@@ -164,10 +166,10 @@ float RoofZ(float Y)
 	return kRoofEdge + kRoofCrown * (1.f - T * T);
 }
 float Wrap(float T) { return 1.f - T * T; }
-V3 WindshieldBase(float T) { return V3(86.f + 2.5f * Wrap(T), T * Gy(kBelt), kBelt); }
-V3 WindshieldTop(float T) { return V3(55.f + 2.5f * Wrap(T), T * RoofHalf(), RoofZ(T * RoofHalf())); }
-V3 RearGlassBase(float T) { return V3(-108.f - 1.5f * Wrap(T), T * Gy(kBelt), kBelt); }
-V3 RearGlassTop(float T) { return V3(-72.f - 2.5f * Wrap(T), T * RoofHalf(), RoofZ(T * RoofHalf())); }
+V3 WindshieldBase(float T) { return V3(86.f + 0.8f * Wrap(T), T * Gy(kBelt), kBelt); }
+V3 WindshieldTop(float T) { return V3(57.f + 0.8f * Wrap(T), T * RoofHalf(), RoofZ(T * RoofHalf())); }
+V3 RearGlassBase(float T) { return V3(-108.f - 0.6f * Wrap(T), T * Gy(kBelt), kBelt); }
+V3 RearGlassTop(float T) { return V3(-76.f - 0.8f * Wrap(T), T * RoofHalf(), RoofZ(T * RoofHalf())); }
 // Передний край проёма передней двери (за А-стойкой) и задний край стекла задней двери.
 float AFrontEdge(float Z) { return 77.f - (Z - kBelt) * (31.f / 44.f); }
 float CRearEdge(float Z) { return -84.f + (Z - kBelt) * (15.5f / 41.f); }
@@ -544,32 +546,42 @@ void BuildFrontRear(MeshSet& M, Model& Out)
 	const V3 Ex(1.f, 0.f, 0.f);
 	const V3 Ey(0.f, 1.f, 0.f);
 	const V3 Ez(0.f, 0.f, 1.f);
-	// Решётка радиатора.
-	RoundedBox(M, Mat::BlackTrim, V3(kXf + 0.4f, 0.f, 18.f), V3(0.8f, 44.f, 9.f), 1.f);
-	for (float Z : {12.f, 16.f, 20.f, 24.f})
+	// Перед: строгая чёрная панель во всю ширину, в ней — прямоугольные фары по краям и решётка из тонких
+	// горизонтальных хромовых планок между ними; посередине — вертикальная планка с эмблемой «С». Под фарами —
+	// прямоугольные оранжевые поворотники. Все углы — почти острые.
+	Box(M, Mat::BlackTrim, V3(kXf + 0.4f, 0.f, 17.f), V3(0.8f, 72.f, 11.f));
+	for (float Z : {9.5f, 12.5f, 15.5f, 18.5f, 21.5f, 24.5f})
 	{
-		Box(M, Mat::Chrome, V3(kXf + 1.3f, 0.f, Z), V3(0.35f, 43.5f, 0.45f));
+		Box(M, Mat::Chrome, V3(kXf + 1.25f, 0.f, Z), V3(0.3f, 44.f, 0.35f));
 	}
-	Tube(M, Mat::Chrome, {V3(kXf + 1.3f, -44.6f, 8.6f), V3(kXf + 1.3f, 44.6f, 8.6f), V3(kXf + 1.3f, 44.6f, 27.4f), V3(kXf + 1.3f, -44.6f, 27.4f)},
-		0.6f, 6, true, false);
-	// Фары, указатели поворота.
+	Tube(M, Mat::Chrome, {V3(kXf + 1.3f, -72.6f, 5.6f), V3(kXf + 1.3f, 72.6f, 5.6f), V3(kXf + 1.3f, 72.6f, 28.4f), V3(kXf + 1.3f, -72.6f, 28.4f)},
+		0.5f, 6, true, false);
+	Box(M, Mat::Chrome, V3(kXf + 1.5f, 0.f, 17.f), V3(0.45f, 1.6f, 9.5f));
+	RoundedBox(M, Mat::Chrome, V3(kXf + 1.9f, 0.f, 17.f), V3(0.3f, 3.2f, 3.2f), 0.2f);
 	for (float S : {-1.f, 1.f})
 	{
-		RoundedBox(M, Mat::Chrome, V3(kXf + 0.6f, S * 57.f, 18.f), V3(1.2f, 10.f, 8.f), 2.5f);
-		RoundedBox(M, Mat::Headlamp, V3(kXf + 1.5f, S * 57.f, 18.f), V3(0.7f, 9.f, 7.f), 2.2f);
-		RoundedBox(M, Mat::Indicator, V3(kXf + 0.7f, S * 57.f, 4.5f), V3(0.7f, 8.f, 2.4f), 1.f);
-		RoundedBox(M, Mat::Indicator, V3(165.f, S * (HalfW(165.f, 12.f) + 0.3f), 12.f), V3(3.f, 0.5f, 1.2f), 0.4f);
+		RoundedBox(M, Mat::Chrome, V3(kXf + 0.7f, S * 58.f, 18.f), V3(1.3f, 13.5f, 8.5f), 0.4f);
+		RoundedBox(M, Mat::Headlamp, V3(kXf + 1.6f, S * 58.f, 18.f), V3(0.6f, 12.6f, 7.6f), 0.3f);
+		// Рассеиватель — вертикальные рёбра.
+		for (float Dy : {-8.f, -4.f, 0.f, 4.f, 8.f})
+		{
+			Box(M, Mat::Chrome, V3(kXf + 2.25f, S * 58.f + Dy, 18.f), V3(0.05f, 0.08f, 7.f));
+		}
+		RoundedBox(M, Mat::Indicator, V3(kXf + 0.9f, S * 58.f, 7.f), V3(0.6f, 12.5f, 1.8f), 0.2f);
+		RoundedBox(M, Mat::Indicator, V3(168.f, S * (HalfW(168.f, 12.f) + 0.3f), 12.f), V3(3.5f, 0.5f, 1.2f), 0.2f);
 	}
-	Out.HeadlightL = V3(kXf + 3.f, -57.f, 18.f);
-	Out.HeadlightR = V3(kXf + 3.f, 57.f, 18.f);
+	Out.HeadlightL = V3(kXf + 3.f, -58.f, 18.f);
+	Out.HeadlightR = V3(kXf + 3.f, 58.f, 18.f);
 
 	// Задние фонари: красный, поворотник, задний ход.
 	for (float S : {-1.f, 1.f})
 	{
-		RoundedBox(M, Mat::BlackTrim, V3(kXr - 0.3f, S * 52.f, 14.f), V3(0.9f, 13.f, 9.5f), 1.5f);
-		RoundedBox(M, Mat::Taillamp, V3(kXr - 1.f, S * 52.f, 17.5f), V3(0.5f, 12.2f, 5.f), 1.2f);
-		RoundedBox(M, Mat::Indicator, V3(kXr - 1.f, S * 58.5f, 7.6f), V3(0.5f, 5.7f, 3.f), 1.f);
-		RoundedBox(M, Mat::Glass, V3(kXr - 1.f, S * 45.5f, 7.6f), V3(0.5f, 5.7f, 3.f), 1.f);
+		// Широкий горизонтальный блок: стоп-габарит сверху, поворотник и задний ход снизу, хромовая окантовка.
+		RoundedBox(M, Mat::Chrome, V3(kXr - 0.2f, S * 53.f, 13.5f), V3(0.9f, 18.f, 9.8f), 0.3f);
+		RoundedBox(M, Mat::BlackTrim, V3(kXr - 0.6f, S * 53.f, 13.5f), V3(0.8f, 17.3f, 9.1f), 0.3f);
+		RoundedBox(M, Mat::Taillamp, V3(kXr - 1.2f, S * 53.f, 17.6f), V3(0.5f, 16.8f, 4.6f), 0.2f);
+		RoundedBox(M, Mat::Indicator, V3(kXr - 1.2f, S * 60.f, 8.3f), V3(0.5f, 9.8f, 3.4f), 0.2f);
+		RoundedBox(M, Mat::Glass, V3(kXr - 1.2f, S * 43.5f, 8.3f), V3(0.5f, 6.6f, 3.4f), 0.2f);
 	}
 
 	// Бамперы: хромированная полоса с резиновой вставкой, загнутая на крылья.
@@ -579,11 +591,17 @@ void BuildFrontRear(MeshSet& M, Model& Out)
 		for (float Y : {-83.f, -81.f, -78.f, -74.f, -68.f, -60.f, -40.f, 0.f, 40.f, 60.f, 68.f, 74.f, 78.f, 81.f, 83.f})
 		{
 			const float A = std::fabs(Y);
-			const float Bend = 0.6f * (A / 62.f) * (A / 62.f) + (A > 62.f ? 0.03f * (A - 62.f) * (A - 62.f) : 0.f);
+			// Прямой бампер, концы коротко заломлены на крылья.
+			const float Bend = 0.2f * (A / 62.f) * (A / 62.f) + (A > 70.f ? 0.06f * (A - 70.f) * (A - 70.f) : 0.f);
 			Path.push_back(V3(BaseX + Sign * (6.f - Bend), Y, -15.f));
 		}
 		const V3 Ref(0.f, 0.f, -15.f);
-		Sweep(M, Mat::Chrome, Path, RoundRectProfile(5.f, 2.8f, 1.6f, 3), Ez, false, true, &Ref);
+		Sweep(M, Mat::Chrome, Path, RoundRectProfile(5.f, 2.8f, 0.5f, 2), Ez, false, true, &Ref);
+		// «Клыки» — чёрные резиновые накладки.
+		for (float Y : {-30.f, 30.f})
+		{
+			RoundedBox(M, Mat::Rubber, V3(BaseX + Sign * 8.6f, Y, -14.f), V3(2.2f, 3.f, 6.5f), 0.6f);
+		}
 		std::vector<ProfilePoint> Strip = RoundRectProfile(1.1f, 0.8f, 0.5f, 2);
 		for (ProfilePoint& P : Strip)
 		{
@@ -639,8 +657,8 @@ void BuildHoodTrunk(Builder& B)
 		const float HalfX = 0.5f * (X1 - X0);
 		B.Hit(Id, Tag, V3(Mid, 0.f, ZTop(Mid) + 1.f), V3(HalfX, 62.f, 3.f), Hinge);
 	};
-	Lid(Part::Hood, kHoodRear, kXf - 0.8f, 2.f, kHoodHinge, "Hood");
-	Lid(Part::Trunk, kXr + 0.8f, kTrunkFront, 1.6f, kTrunkHinge, "Trunk");
+	Lid(Part::Hood, kHoodRear, kXf - 0.8f, 0.6f, kHoodHinge, "Hood");
+	Lid(Part::Trunk, kXr + 0.8f, kTrunkFront, 0.5f, kTrunkHinge, "Trunk");
 }
 
 void BuildDoor(Builder& B, Part Id)

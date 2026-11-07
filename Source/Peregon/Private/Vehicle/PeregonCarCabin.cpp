@@ -18,6 +18,9 @@
 #include "World/PeregonRoadWorld.h"
 #include "World/PeregonSky.h"
 #include "ProceduralMeshComponent.h"
+#include "vsim/BodyModel.h"
+
+const vmodel::Model& PeregonCarModelData();
 
 namespace PeregonCabin
 {
@@ -407,7 +410,7 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 				Cranks[K]->SetRelativeRotation(CrankBase[K] * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(-1440.f * WindowShown[K])));
 			}
 			const float Side = (K == 0 || K == 2) ? -1.f : 1.f;
-			Win->SetRelativeLocation(FVector(0.f, Side * 0.26f * Drop, -Drop));
+			Win->SetRelativeLocation(FVector(0.f, Side * PeregonCarModelData().GlassTumble * Drop, -Drop));
 		}
 	}
 	const FPeregonTelemetry T = Movement->GetTelemetry();
