@@ -52,6 +52,8 @@ const FName DoorRR(TEXT("DoorRR"));
 const FName Hood(TEXT("Hood"));
 const FName Trunk(TEXT("Trunk"));
 const FName Glovebox(TEXT("Glovebox"));
+const FName VisorL(TEXT("VisorL"));
+const FName VisorR(TEXT("VisorR"));
 const FName Key(TEXT("Key"));
 const FName Lights(TEXT("Lights"));
 const FName Handbrake(TEXT("Handbrake"));
@@ -66,6 +68,7 @@ const TCHAR* PartNoun(FName Tag)
 	if (Tag == Hood) return TEXT("капот");
 	if (Tag == Trunk) return TEXT("багажник");
 	if (Tag == Glovebox) return TEXT("бардачок");
+	if (Tag == VisorL || Tag == VisorR) return TEXT("козырёк");
 	return TEXT("");
 }
 
@@ -273,6 +276,9 @@ APeregonCar::APeregonCar()
 	AddMovingPart(DoorRL, MakePartPivot(vmodel::Part::DoorRL, TEXT("DoorRLPivot")), FRotator(0.f, 65.f, 0.f), 3.f);
 	AddMovingPart(DoorRR, MakePartPivot(vmodel::Part::DoorRR, TEXT("DoorRRPivot")), FRotator(0.f, -65.f, 0.f), 3.f);
 	AddMovingPart(Glovebox, MakePartPivot(vmodel::Part::Glovebox, TEXT("GlovePivot")), FRotator(70.f, 0.f, 0.f), 3.f);
+	// Козырьки: шарнир вдоль Y у верха лобового, лежат под потолком — откидываются вниз к стеклу.
+	AddMovingPart(VisorL, MakePartPivot(vmodel::Part::VisorL, TEXT("VisorLPivot")), FRotator(80.f, 0.f, 0.f), 4.f);
+	AddMovingPart(VisorR, MakePartPivot(vmodel::Part::VisorR, TEXT("VisorRPivot")), FRotator(80.f, 0.f, 0.f), 4.f);
 
 	// Руль: X узла — по оси колонки к водителю, обод в плоскости YZ.
 	SteeringBaseRotation = FRotationMatrix::MakeFromX(PeregonCarModel::ToVector(Model.SteeringColumnDir)).Rotator();
@@ -313,7 +319,7 @@ APeregonCar::APeregonCar()
 		FVector Center;
 		FVector Half;
 	};
-	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 85.5f), FVector(7.f, 5.f, 2.5f)},
+	const FExtraHit Extras[] = {{TEXT("Dome"), Body.Get(), FVector(-10.f, 0.f, 82.f), FVector(7.f, 5.f, 2.f)},
 		{TEXT("Heater"), Body.Get(), FVector(72.4f, 2.f, 24.f), FVector(1.2f, 8.f, 2.4f)},
 		// Сиденья: навести и нажать — сесть (снаружи — через открытую дверь этого места, изнутри — в своём ряду).
 		{TEXT("Seat0"), Body.Get(), FVector(0.f, -35.f, -5.f), FVector(20.f, 20.f, 3.f)},
@@ -345,8 +351,11 @@ APeregonCar::APeregonCar()
 		// Ближний свет советской фары ~1 000 кд в пятне. Раньше было 6 000 — на ночной экспозиции дорога у капота «выгорала».
 		Lamp->SetIntensity(950.f);
 		Lamp->SetAttenuationRadius(6000.f);
-		// Свет фар в тумане и дожде — заметный конус, но не «стена».
-		Lamp->SetVolumetricScatteringIntensity(0.35f);
+		// Свет фар в тумане и дожде — лёгкая дымка, а не плотный «прожекторный» конус. Источник размером с отражатель:
+		// мягкие блики на мокром асфальте и кузовах вместо точки.
+		Lamp->SetVolumetricScatteringIntensity(0.12f);
+		Lamp->SetSourceRadius(6.f);
+		Lamp->SetSoftSourceRadius(4.f);
 		Lamp->SetInnerConeAngle(12.f);
 		Lamp->SetOuterConeAngle(30.f);
 		Lamp->SetLightColor(FLinearColor(1.f, 0.92f, 0.75f));
@@ -364,7 +373,7 @@ APeregonCar::APeregonCar()
 	}
 
 	// --- Камеры
-	HeadPivot = AddPivot(TEXT("HeadPivot"), Body, FVector(-22.f, -35.f, 74.f));
+	HeadPivot = AddPivot(TEXT("HeadPivot"), Body, PeregonCarModel::ToVector(Model.DriverEye));
 	HeadBaseLocation = HeadPivot->GetRelativeLocation();
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(HeadPivot);
@@ -575,6 +584,11 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 		GlassMaterial = GlassBands.Num() == 3 ? GlassBands[2].Get() : nullptr;
 		return GlassMaterial;
 	}
+	if (M == vmodel::Mat::LampLens)
+	{
+		// Рассеиватели фар и ламп: почти прозрачное чистое стекло — за ним виден отражатель и лампа.
+		return Art->MakeGlassMaterial(this, FLinearColor(0.93f, 0.95f, 0.97f), 0.1f);
+	}
 	if (M == vmodel::Mat::Water)
 	{
 		// Капли на лобовом: прозрачность растёт под дождём, дворники её сбрасывают. Без M_PSX3_Glass — нет капель.
@@ -590,7 +604,8 @@ UMaterialInterface* APeregonCar::MakeSlotMaterial(uint8 Slot)
 	case vmodel::Mat::Chrome: Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.9f, 0.9f, 0.88f), 0.18f, 1.f); break;
 	case vmodel::Mat::BlackTrim: Look = FPeregonLook(EPeregonTex::Plastic, FLinearColor(0.035f, 0.035f, 0.04f), 0.6f); break;
 	case vmodel::Mat::Rubber: Look = FPeregonLook(EPeregonTex::Rubber, FLinearColor(0.11f, 0.11f, 0.11f), 0.92f); break;
-	case vmodel::Mat::Headlamp: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.9f, 0.88f, 0.78f), 0.12f); break;
+	// Отражатель фары — полированный металл за прозрачным рассеивателем; при включённых фарах светится весь.
+	case vmodel::Mat::Headlamp: Look = FPeregonLook(EPeregonTex::Chrome, FLinearColor(0.88f, 0.87f, 0.82f), 0.12f, 1.f); break;
 	case vmodel::Mat::Taillamp: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.6f, 0.03f, 0.02f), 0.15f); break;
 	case vmodel::Mat::Indicator: Look = FPeregonLook(EPeregonTex::Glass, FLinearColor(0.9f, 0.42f, 0.04f), 0.15f); break;
 	// Салон «шестёрки»: бежево-коричневый кожзам дверей и торпедо, рыжий велюр сидений, тёмный ковролин, светлый потолок.
@@ -821,7 +836,7 @@ void APeregonCar::BuildModelMeshes()
 			{
 				Mesh->SetMaterial(SectionIndex, Material);
 			}
-			else if (S.Material == vmodel::Mat::Glass || S.Material == vmodel::Mat::Water)
+			else if (S.Material == vmodel::Mat::Glass || S.Material == vmodel::Mat::Water || S.Material == vmodel::Mat::LampLens)
 			{
 				Mesh->SetMeshSectionVisible(SectionIndex, false); // нет стеклянного материала — лучше без стёкол, чем непрозрачные
 			}
@@ -1176,7 +1191,7 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 	}
 	// Двери: снаружи — открыть; из открытой двери (стоя в проёме) — сесть на это место, сбоку — закрыть.
 	// Изнутри — открыть/закрыть любую; через открытую — выйти. Сами двери не закрываются.
-	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
+	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox, VisorL, VisorR})
 	{
 		if (Part->ComponentHasTag(Tag))
 		{
@@ -1192,6 +1207,10 @@ FString APeregonCar::GetInteractPrompt(const UPrimitiveComponent* Part, const AP
 			{
 				return FMath::Abs(Movement->GetForwardSpeed()) < MaxExitSpeed ? FString(TEXT("Закрыть дверь  ·  F — выйти через неё"))
 																			   : FString(TEXT("Закрыть дверь"));
+			}
+			if (Tag == VisorL || Tag == VisorR)
+			{
+				return bOpen ? FString(TEXT("Поднять козырёк")) : FString(TEXT("Опустить козырёк"));
 			}
 			return FString(bOpen ? TEXT("Закрыть ") : TEXT("Открыть ")) + PartNoun(Tag);
 		}
@@ -1297,7 +1316,7 @@ void APeregonCar::InteractStart(UPrimitiveComponent* Part, APawn* User)
 			return;
 		}
 	}
-	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox})
+	for (const FName& Tag : {DoorFL, DoorFR, DoorRL, DoorRR, Hood, Trunk, Glovebox, VisorL, VisorR})
 	{
 		if (Part->ComponentHasTag(Tag))
 		{

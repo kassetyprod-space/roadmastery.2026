@@ -341,6 +341,9 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UPeregonRadio> Radio;
 	UPROPERTY(Transient) TObjectPtr<UPeregonSynth> HornSound;
 	UPROPERTY(Transient) TObjectPtr<UPointLightComponent> DomeLight;
+	// Лампы под капотом (на щите) и в багажнике: горят, пока открыта крышка и есть ток.
+	UPROPERTY(Transient) TObjectPtr<UPointLightComponent> HoodLamp;
+	UPROPERTY(Transient) TObjectPtr<UPointLightComponent> TrunkLamp;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> DomeMaterial;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> RadioDialMaterial;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> BlinkerLeft;

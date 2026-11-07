@@ -306,7 +306,7 @@ void APeregonCar::RebuildPartsMesh()
 	}
 	// Что лежит в багажнике — видно, когда его открыть: вещи рядами у спинки заднего сиденья, дальше — ярусами.
 	{
-		float Y = -46.f;
+		float Y = -44.f;
 		float Z = -19.5f;
 		float RowDepth = 0.f;
 		float X = -114.f;
@@ -318,10 +318,10 @@ void APeregonCar::RebuildPartsMesh()
 				continue;
 			}
 			const FVector3f Size(Def->SizeCm);
-			if (Y + Size.Y > 48.f)
+			if (Y + Size.Y > 44.f)
 			{
 				// Ряд кончился — следующий ряд ближе к крышке, потом — ярусом выше.
-				Y = -46.f;
+				Y = -44.f;
 				X -= RowDepth + 2.f;
 				RowDepth = 0.f;
 				if (X < -134.f)

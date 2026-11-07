@@ -25,10 +25,11 @@ const vmodel::Model& PeregonCarModelData();
 namespace PeregonCabin
 {
 // Глаза сидящего: водитель, переднее правое, заднее левое, заднее правое.
-const FVector SeatEyes[] = {FVector(-10.f, -35.f, 74.f), FVector(-10.f, 35.f, 74.f), FVector(-78.f, -32.f, 70.f), FVector(-78.f, 32.f, 70.f)};
+// Глаза ниже потолка с запасом на голову (потолок ~83 см): иначе голова «торчит» сквозь крышу.
+const FVector SeatEyes[] = {FVector(-10.f, -35.f, 69.f), FVector(-10.f, 35.f, 69.f), FVector(-74.f, -32.f, 66.f), FVector(-74.f, 32.f, 66.f)};
 const TCHAR* SeatNames[] = {TEXT("за руль"), TEXT("на переднее сиденье"), TEXT("назад, слева"), TEXT("назад, справа")};
 // Плафон — тот, что в модели на потолке (между передними сиденьями).
-const FVector DomeLocation(-10.f, 0.f, 86.f);
+const FVector DomeLocation(-10.f, 0.f, 83.3f);
 const FVector RadioLocation(73.6f, 2.f, 30.f); // «Урал»: корпус в нише торпедо, лицо — заподлицо с панелью
 } // namespace PeregonCabin
 
@@ -78,6 +79,25 @@ void APeregonCar::BuildCabinExtras()
 	DomeLight->SetCastShadows(false);
 	DomeLight->SetVisibility(false);
 	DomeLight->RegisterComponent();
+
+	// Подкапотная лампа — на щите моторного отсека, светит на мотор; лампа багажника — под полкой, светит назад.
+	// Тени включены: свет остаётся в отсеке и не просвечивает салон.
+	auto MakeBayLamp = [this](const TCHAR* Name, const FVector& Where) {
+		UPointLightComponent* Lamp = NewObject<UPointLightComponent>(this, Name);
+		Lamp->SetupAttachment(Body);
+		Lamp->SetRelativeLocation(Where);
+		Lamp->SetIntensityUnits(ELightUnits::Candelas);
+		Lamp->SetIntensity(1.6f);
+		Lamp->SetAttenuationRadius(170.f);
+		Lamp->SetSourceRadius(2.f);
+		Lamp->SetLightColor(FLinearColor(1.f, 0.8f, 0.5f));
+		Lamp->SetCastShadows(true);
+		Lamp->SetVisibility(false);
+		Lamp->RegisterComponent();
+		return Lamp;
+	};
+	HoodLamp = MakeBayLamp(TEXT("HoodLamp"), FVector(98.5f, 0.f, 31.5f));
+	TrunkLamp = MakeBayLamp(TEXT("TrunkLamp"), FVector(-113.f, 0.f, 32.5f));
 
 	// Магнитола: корпус и шкала (светится, когда включена).
 	FPeregonLook Case(EPeregonTex::Plastic, FLinearColor(0.08f, 0.08f, 0.09f), 0.6f);
@@ -146,6 +166,25 @@ void APeregonCar::UpdateCabin(float DeltaSeconds)
 	}
 
 	// Радио: в салоне — громко и чисто, снаружи — глухо и тише с расстоянием. Шум эфира — вдали от городов.
+	// Лампы под капотом и в багажнике: включаются концевиком, когда крышка поднята, если есть ток.
+	{
+		const bool bPower = PartsState.BatteryCharge > 0.03 || (Movement && Movement->GetTelemetry().bEngineRunning && PartsEffects.ChargeRate > 0.1);
+		auto Lid = [this](const TCHAR* Tag) {
+			const FPeregonMovingPart* Moving = FindMovingPart(FName(Tag));
+			return Moving && Moving->Alpha > 0.25f;
+		};
+		const bool bHoodLamp = bPower && Lid(TEXT("Hood"));
+		const bool bTrunkLamp = bPower && Lid(TEXT("Trunk"));
+		if (HoodLamp && HoodLamp->IsVisible() != bHoodLamp)
+		{
+			HoodLamp->SetVisibility(bHoodLamp);
+		}
+		if (TrunkLamp && TrunkLamp->IsVisible() != bTrunkLamp)
+		{
+			TrunkLamp->SetVisibility(bTrunkLamp);
+		}
+	}
+
 	// Плафон «по дверям»: горит, пока открыта любая дверь.
 	if (DomeMode == 0)
 	{
