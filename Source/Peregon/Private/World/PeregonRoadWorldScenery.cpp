@@ -355,6 +355,10 @@ FPeregonKitMaterials APeregonRoadWorld::KitMaterials() const
 
 void APeregonRoadWorld::BuildCity(const rgen::Settlement& Town)
 {
+	if (Town.Real)
+	{
+		return; // строит BuildRealCity из OSM
+	}
 	FPeregonKit Kit(this, RootComponent, Scenery, KitMaterials());
 	Kit.Buildings(Town.Buildings);
 	Kit.Streets(Town.Streets);
@@ -394,6 +398,14 @@ void APeregonRoadWorld::BuildStele(FChunk& Chunk, double S, int32 TownIndex)
 	// Лицом к водителю.
 	const FRotator Rot(0.0, FMath::RadiansToDegrees(Smp.Heading) + 180.0, 0.0);
 	FPeregonKit Kit(this, RootComponent, Chunk.Components, KitMaterials());
+	if (Town.Real)
+	{
+		// Настоящая стела города — у въезда, по правую руку тех, кто едет в город (против хода S).
+		FVector In = RouteToWorld(S, -T, 0.0);
+		In.Z = FMath::Min(In.Z, RouteToWorld(S, -T + 2.0, 0.0).Z) - 20.0;
+		Kit.Landmark(TEXT("stele"), In, static_cast<float>(FMath::RadiansToDegrees(Smp.Heading)), 0.f, FVector::ZeroVector, Name);
+		return;
+	}
 	Kit.CityStele(Base, Rot, Name, Town.Size, PeregonScenery::TownYear(Name), Town.S < 1.0);
 }
 

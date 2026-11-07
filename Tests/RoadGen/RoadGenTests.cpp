@@ -3,9 +3,12 @@
 #include "rgen/Atlas.h"
 #include "rgen/Route.h"
 #include "rgen/Climate.h"
+#include "rgen/City.h"
 #include "rgen/Landscape.h"
 
 #include <chrono>
+#include <fstream>
+#include <sstream>
 
 #include <cmath>
 #include <cstdio>
@@ -131,7 +134,7 @@ int main()
 		R.Build(Real);
 		std::printf("\nР-255: длина %.1f км в игре, %zu точек интереса, %zu областей\n", R.Length() / 1000.0, R.Pois().size(), R.Regions().size());
 		Check(R.IsGuided(), "маршрут по опорным точкам", 1.0);
-		Check(R.Length() > 255000.0 * kGameScale * 0.9 && R.Length() < 255000.0 * kGameScale * 1.25, "длина ~51 км (1:5 от 255 км), м", R.Length());
+		Check(R.Length() > 255000.0 * kGameScale * 0.9 && R.Length() < 255000.0 * kGameScale * 1.25, "длина ~128 км (1:2 от 255 км), м", R.Length());
 		double WorstMiss = 0.0;
 		for (const Anchor& A : Real.Anchors)
 		{
@@ -425,6 +428,97 @@ int main()
 			}
 		}
 		Check(SouthMax > NorthMax + 40.0, "горы на юге (Салаир) выше, чем на севере", SouthMax - NorthMax);
+	}
+
+	// --- Настоящий город вместо процедурного ---
+	{
+		rgen::RouteParams P = rgen::NovosibirskKemerovo(7u);
+		rgen::Route Rt;
+		Rt.Build(P);
+		rgen::Landscape L;
+		const double Z0 = Rt.Sample(0.0).Z;
+		L.SetRealCity("Новосибирск", -6000.0, -3000.0, 0.0, 3000.0, Z0);
+		L.Build(Rt);
+		bool bReal = false;
+		size_t Houses = 1;
+		for (const rgen::Settlement& T : L.Settlements())
+		{
+			if (T.Name == "Новосибирск")
+			{
+				bReal = T.Real;
+				Houses = T.Buildings.size();
+			}
+		}
+		Check(bReal && Houses == 0, "Новосибирск из OSM: процедурный город не строится", static_cast<double>(Houses));
+		const double Far = L.FarHeight(-3000.0, 0.0);
+		Check(Far <= Z0 - 3.9, "дальний рельеф под городом ниже его земли, м", Far - Z0);
+	}
+
+	// --- Город из OSM (синтетическая выгрузка Tools/MapPipeline/make_test_city.py) ---
+	{
+		std::printf("\nГород из .city (тестовые данные)\n");
+		std::ifstream F(std::string(PEREGON_TEST_DATA) + "/test.city", std::ios::binary);
+		std::stringstream Buf;
+		Buf << F.rdbuf();
+		rgen::CityData City;
+		std::string Err;
+		const bool bOk = City.Parse(Buf.str(), &Err);
+		Check(bOk, "файл .city читается", bOk ? 1.0 : 0.0);
+		if (!bOk)
+		{
+			std::printf("  ошибка: %s\n", Err.c_str());
+		}
+		Check(City.Ways.size() > 20 && City.Buildings.size() > 100 && !City.Water.empty() && !City.Landmarks.empty(), "дороги, дома, вода, достопримечательности",
+			static_cast<double>(City.Ways.size()));
+		rgen::CityBuildOptions Opt;
+		Opt.Keepout.push_back(rgen::CityPt{300.0, 300.0});
+		const auto T0 = std::chrono::steady_clock::now();
+		const rgen::CityResult Res = rgen::BuildCity(City, Opt);
+		const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+		std::printf("  построен за %.0f мс: рёбер %d, перекрёстков %d, мостов %d, домов %d, тайлов %zu, треугольников %zu, реквизита %zu\n", Ms, Res.Edges,
+			Res.Junctions, Res.Bridges, Res.BuildingsBuilt, Res.Tiles.size(), Res.TriangleCount(), Res.Props.size());
+		Check(Res.Junctions >= 10, "перекрёстки (шт.)", Res.Junctions);
+		Check(Res.Bridges >= 2, "мост через реку и путепровод", Res.Bridges);
+		double MaxH = 0.0;
+		for (double Hn : Res.NodeHeight)
+		{
+			MaxH = std::max(MaxH, Hn);
+		}
+		Check(MaxH > 6.0 && MaxH < 9.5, "путепровод и мост подняты (6.5 и 9 м)", MaxH);
+		bool bFinite = true;
+		size_t Indices = 0;
+		bool bInRange = true;
+		for (const rgen::CityTile& T : Res.Tiles)
+		{
+			for (const rgen::CitySection& S : T.Sections)
+			{
+				for (float V : S.P)
+				{
+					bFinite &= std::isfinite(V);
+				}
+				for (float V : S.N)
+				{
+					bFinite &= std::isfinite(V);
+				}
+				for (int32_t I : S.I)
+				{
+					bInRange &= I >= 0 && static_cast<size_t>(I) < S.VertexCount();
+				}
+				Indices += S.I.size();
+			}
+		}
+		Check(bFinite && bInRange && Indices % 3 == 0, "геометрия без NaN и битых индексов", 1.0);
+		int Lights = 0, Lamps = 0, Landmarks = 0, Signs = 0;
+		for (const rgen::CityProp& P : Res.Props)
+		{
+			Lights += P.Kind == rgen::CityPropKind::TrafficLight;
+			Lamps += P.Kind == rgen::CityPropKind::StreetLamp;
+			Landmarks += P.Kind == rgen::CityPropKind::Landmark;
+			Signs += P.Kind == rgen::CityPropKind::SignYield || P.Kind == rgen::CityPropKind::SignRoundabout || P.Kind == rgen::CityPropKind::SignCrossing;
+		}
+		std::printf("  светофоров %d, фонарей %d, знаков %d, достопримечательностей %d\n", Lights, Lamps, Signs, Landmarks);
+		Check(Lights >= 8 && Lamps > 50 && Signs >= 4 && Landmarks >= 1, "светофоры, фонари, знаки у кольца и переходов", Lights);
+		Check(Ms < 3000.0, "город строится быстро, мс", Ms);
 	}
 
 	std::printf("\n%d проверок, %d провалено\n", GChecks, GFailures);

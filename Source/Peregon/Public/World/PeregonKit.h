@@ -133,6 +133,10 @@ public:
 	// Остановка: павильон одного из видов (Variant: бетон с мозаикой, металл со стеклом, кирпичный под
 	// двускатной крышей, деревянный сельский), лавка, урна, табличка «А» с названием и расписанием.
 	void BusStop(const FVector& Base, const FRotator& Rot, const FString& Name, int32 Variant = 0);
+	// Настоящие достопримечательности (PeregonKitTown.cpp): «opera» — Новосибирский театр оперы и балета,
+	// «stele» — крылатая стела Новосибирска. Base — центр основания, YawDeg — направление длинной стороны,
+	// FrontDir — куда смотрит главный фасад (ноль — по YawDeg), Name — название города для стелы.
+	void Landmark(const FString& Key, const FVector& Base, float YawDeg, float RadiusCm, const FVector& FrontDir, const FString& Name = FString());
 	// Рекламный щит у трассы на двух опорах (лицом по +X).
 	void Billboard(const FVector& Base, const FRotator& Rot, const FString& Text, const FLinearColor& Paper, const FLinearColor& Ink);
 	// Дворовое: колодец-журавль/сруб, лавка, поленница, сарай, штакетник от A до B.
@@ -169,6 +173,8 @@ private:
 	void WaterTower(const rgen::Building& B, FPeregonTownBuffers& T);
 	void Kiosk(const rgen::Building& B, FPeregonTownBuffers& T);
 	void Market(const rgen::Building& B, FPeregonTownBuffers& T);
+	// Выдать буферы застройки мешами (по материалу) и зарегистрировать огни.
+	void EmitTown(FPeregonTownBuffers& Town);
 	// Окна, которые вечером горят: на фасаде пролётами 3 × 2.8 м (как в текстуре).
 	void LitWindows(const rgen::Building& B, FPeregonTownBuffers& T, float WinU0, float WinU1, float WinZ0, float WinZ1, float Share);
 	// Табличка с адресом на углу дома.

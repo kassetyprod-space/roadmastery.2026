@@ -458,6 +458,13 @@ void FPeregonKit::Buildings(const std::vector<rgen::Building>& List)
 			break;
 		}
 	}
+	EmitTown(Town);
+}
+
+void FPeregonKit::EmitTown(FPeregonTownBuffers& Town)
+{
+	FPeregonMeshBuffers& Props = Town.Props;
+	FPeregonMeshBuffers& Wheels = Town.Wheels;
 	auto Emit = [&](const FPeregonMeshBuffers& Data, UMaterialInterface* Material, UMaterialInterface* Fallback, bool bCollision, bool bShadow = true) {
 		return AddProc(Data, Material ? Material : Fallback, bCollision, bShadow);
 	};

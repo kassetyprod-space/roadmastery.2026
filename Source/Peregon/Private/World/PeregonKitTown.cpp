@@ -1135,3 +1135,167 @@ void FPeregonKit::Market(const rgen::Building& B, FPeregonTownBuffers& T)
 	TBox(T.Props, F, 0.f, -W * 0.5f, 400.f, FVector(640.f, 20.f, 90.f), Col(0.12f, 0.3f, 0.55f), true, true);
 	Label(FTransform((-F.Ay).Rotation(), F.At(0.f, -W * 0.5f - 12.f, 445.f)), TEXT("РЫНОК"), 560.f, 80.f, 64, InkWhite, FLinearColor(0.12f, 0.3f, 0.55f));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Достопримечательности
+// ---------------------------------------------------------------------------------------------
+namespace PeregonTown
+{
+// Купол: стопка колец по дуге окружности (полусфера, сплющенная до высоты Hgt).
+void Dome(FPeregonMeshBuffers& Buf, const FVector& Base, float Radius, float Hgt, int32 Rings, int32 Sides, const FColor& C)
+{
+	for (int32 K = 0; K < Rings; ++K)
+	{
+		const float A0 = 0.5f * PI * K / Rings;
+		const float A1 = 0.5f * PI * (K + 1) / Rings;
+		Prism(Buf, Base + FVector(0, 0, Hgt * FMath::Sin(A0)), Base + FVector(0, 0, Hgt * FMath::Sin(A1)), Radius * FMath::Cos(A0),
+			FMath::Max(1.f, Radius * FMath::Cos(A1)), Sides, C, false);
+	}
+}
+} // namespace PeregonTown
+
+void FPeregonKit::Landmark(const FString& Key, const FVector& Base, float YawDeg, float RadiusCm, const FVector& FrontDir, const FString& Name)
+{
+	using namespace PeregonTown;
+	FPeregonTownBuffers T;
+	// Система координат: X — к главному фасаду, Y — вправо.
+	FBldFrame F;
+	F.Base = Base;
+	const FVector Front = FrontDir.IsNearlyZero() ? FRotator(0.f, YawDeg, 0.f).Vector() : FrontDir.GetSafeNormal2D();
+	F.Yaw = static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Front.Y, Front.X)));
+	F.Ax = Front;
+	F.Ay = FVector::CrossProduct(FVector::UpVector, Front).GetSafeNormal();
+
+	if (Key == TEXT("opera"))
+	{
+		// Новосибирский театр оперы и балета (1945): самое большое театральное здание России — прямоугольный
+		// объём ~120 × 100 м, в центре — барабан и купол диаметром 60 м и высотой 35 м, серебристый; на
+		// главном фасаде к площади Ленина — портик с колоннадой между пилонами, над ним — скульптурная группа;
+		// сзади — сценическая коробка. Стены светло-серые с бежевым.
+		const float S = RadiusCm > 1000.f ? FMath::Clamp(RadiusCm / 7800.f, 0.75f, 1.3f) : 1.f; // подгонка под контур из OSM
+		const float L = 11000.f * S;   // глубина (от фасада к сцене)
+		const float W = 9600.f * S;    // ширина
+		const float H = 2200.f;
+		const FColor Wall = Col(0.86f, 0.84f, 0.78f);
+		const FColor Trim = Col(0.94f, 0.93f, 0.9f);
+		const FColor Silver = Col(0.74f, 0.77f, 0.8f);
+		TBox(T.Concrete, F, 0.f, 0.f, -60.f, FVector(L + 1500.f, W + 1200.f, 210.f), Col(0.62f, 0.61f, 0.58f)); // стилобат
+		T.Stucco.AddBox(F.At(0.f, 0.f, 150.f), F.Yaw, FVector(L, W, H), FVector2D(600.f, 560.f), Wall, false, false);
+		TBox(T.Props, F, 0.f, 0.f, 150.f + H - 120.f, FVector(L + 80.f, W + 80.f, 120.f), Trim, true, true); // карниз
+		T.Roofs.AddBox(F.At(0.f, 0.f, 150.f + H), F.Yaw, FVector(L, W, 30.f), FVector2D(400.f, 400.f), FColor::White, true, false);
+		// Барабан и купол.
+		const FVector C0 = F.At(500.f * S, 0.f, 150.f + H);
+		Prism(T.Stucco, C0, C0 + FVector(0, 0, 900.f), 3150.f, 3150.f, 40, Wall, false);
+		Prism(T.Props, C0 + FVector(0, 0, 880.f), C0 + FVector(0, 0, 980.f), 3250.f, 3250.f, 40, Trim, false);
+		Dome(T.Props, C0 + FVector(0, 0, 980.f), 3050.f, 3500.f, 14, 48, Silver);
+		// Рёбра купола.
+		for (int32 K = 0; K < 24; ++K)
+		{
+			const float A = 2.f * PI * K / 24.f;
+			const FVector Dir(FMath::Cos(A), FMath::Sin(A), 0.f);
+			for (int32 Q = 0; Q < 10; ++Q)
+			{
+				const float P0 = 0.5f * PI * Q / 10.f;
+				const float P1 = 0.5f * PI * (Q + 1) / 10.f;
+				const FVector A0 = C0 + FVector(0, 0, 980.f) + Dir * (3065.f * FMath::Cos(P0)) + FVector(0, 0, 3515.f * FMath::Sin(P0));
+				const FVector A1 = C0 + FVector(0, 0, 980.f) + Dir * (3065.f * FMath::Cos(P1)) + FVector(0, 0, 3515.f * FMath::Sin(P1));
+				Prism(T.Props, A0, A1, 25.f, 25.f, 4, Col(0.6f, 0.62f, 0.66f), false);
+			}
+		}
+		const FVector Top = C0 + FVector(0, 0, 980.f + 3500.f);
+		Prism(T.Props, Top, Top + FVector(0, 0, 350.f), 300.f, 300.f, 16, Silver);
+		Dome(T.Props, Top + FVector(0, 0, 350.f), 320.f, 250.f, 4, 16, Silver);
+		Prism(T.Props, Top + FVector(0, 0, 600.f), Top + FVector(0, 0, 1000.f), 30.f, 2.f, 6, Col(0.8f, 0.7f, 0.3f), false);
+		// Сценическая коробка сзади.
+		T.Stucco.AddBox(F.At(-L * 0.32f, 0.f, 150.f + H), F.Yaw, FVector(L * 0.3f, W * 0.62f, 900.f), FVector2D(600.f, 560.f), Wall, false, false);
+		T.Roofs.AddBox(F.At(-L * 0.32f, 0.f, 150.f + H + 900.f), F.Yaw, FVector(L * 0.3f + 40.f, W * 0.62f + 40.f, 30.f), FVector2D(400.f, 400.f),
+			FColor::White, true, false);
+		// Главный фасад: пилоны, колоннада, антаблемент, аттик со скульптурами, лестница.
+		const float Fx = L * 0.5f;
+		for (float Side : {-1.f, 1.f})
+		{
+			T.Stucco.AddBox(F.At(Fx + 300.f, Side * 2900.f, 150.f), F.Yaw, FVector(1200.f, 1300.f, H + 300.f), FVector2D(600.f, 560.f), Wall, false, false);
+			TBox(T.Props, F, Fx + 300.f, Side * 2900.f, 150.f + H + 200.f, FVector(1260.f, 1360.f, 100.f), Trim, true, true);
+		}
+		const int32 Columns = 10;
+		for (int32 K = 0; K < Columns; ++K)
+		{
+			const float Y = -2000.f + 4000.f * K / (Columns - 1);
+			const FVector P = F.At(Fx + 700.f, Y, 150.f);
+			Prism(T.Props, P, P + FVector(0, 0, 80.f), 130.f, 130.f, 8, Trim);            // база
+			Prism(T.Props, P + FVector(0, 0, 80.f), P + FVector(0, 0, 1700.f), 110.f, 95.f, 16, Trim, false);
+			Prism(T.Props, P + FVector(0, 0, 1700.f), P + FVector(0, 0, 1800.f), 140.f, 140.f, 8, Trim); // капитель
+		}
+		TBox(T.Props, F, Fx + 450.f, 0.f, 1950.f, FVector(900.f, 4500.f, 300.f), Trim, true, true);   // антаблемент
+		TBox(T.Stucco, F, Fx + 350.f, 0.f, 2250.f, FVector(700.f, 4300.f, 400.f), Wall, true, false);  // аттик
+		for (int32 K = 0; K < 7; ++K)
+		{
+			const float Y = -1800.f + 3600.f * K / 6.f;
+			const float Hf = (K == 3) ? 520.f : 420.f;
+			TBox(T.Props, F, Fx + 450.f, Y, 2650.f, FVector(110.f, 120.f, Hf), Col(0.78f, 0.76f, 0.72f));   // фигуры
+			Prism(T.Props, F.At(Fx + 450.f, Y, 2650.f + Hf), F.At(Fx + 450.f, Y, 2650.f + Hf + 60.f), 40.f, 30.f, 8, Col(0.78f, 0.76f, 0.72f));
+		}
+		for (int32 Step = 0; Step < 8; ++Step)
+		{
+			TBox(T.Concrete, F, Fx + 900.f + Step * 60.f, 0.f, -60.f, FVector(500.f - Step * 50.f + 200.f, 5200.f + (8 - Step) * 60.f, 210.f - Step * 20.f),
+				Col(0.66f, 0.65f, 0.62f));
+		}
+		// Двери в портике, название, фонари.
+		for (int32 K = 0; K < 5; ++K)
+		{
+			const float Y = -1600.f + 800.f * K;
+			const FVector D0 = F.At(Fx + 3.f, Y - 150.f, 150.f);
+			const FVector D1 = F.At(Fx + 3.f, Y + 150.f, 150.f);
+			Quad(T.Props, D0, D1, D1 + FVector(0, 0, 550.f), D0 + FVector(0, 0, 550.f), F.Ax, Col(0.35f, 0.24f, 0.14f));
+		}
+		Label(FTransform(F.Ax.Rotation(), F.At(Fx + 910.f, 0.f, 2100.f)), TEXT("ТЕАТР ОПЕРЫ И БАЛЕТА"), 3600.f, 180.f, 72, FLinearColor(0.35f, 0.3f, 0.2f),
+			FLinearColor(0.94f, 0.93f, 0.9f), 1024);
+		for (float Y : {-2400.f, -800.f, 800.f, 2400.f})
+		{
+			DoorLamp(T, F.At(Fx + 1500.f, Y, 450.f), F.Ax, static_cast<uint32>(Y + 5000.f));
+			TBox(T.Props, F, Fx + 1500.f, Y, 0.f, FVector(20.f, 20.f, 450.f), Col(0.2f, 0.2f, 0.22f));
+		}
+	}
+	else if (Key == TEXT("stele"))
+	{
+		// Крылатая стела Новосибирска (восточный въезд, 2023): ~10 м, центральный пилон с вертикальной надписью
+		// и гербом наверху, по сторонам — «крылья»: одно — раскрытая книга (наука), другое — крыло самолёта.
+		const FColor White = Col(0.95f, 0.95f, 0.94f);
+		const FColor Blue = Col(0.08f, 0.28f, 0.62f);
+		const FColor Steel = Col(0.72f, 0.75f, 0.8f);
+		TBox(T.Concrete, F, 0.f, 0.f, -20.f, FVector(900.f, 400.f, 80.f), Col(0.55f, 0.55f, 0.56f));
+		TBox(T.Props, F, 0.f, 0.f, 60.f, FVector(120.f, 220.f, 1050.f), White);
+		TBox(T.Props, F, 62.f, 0.f, 160.f, FVector(6.f, 150.f, 860.f), Blue);
+		TBox(T.Props, F, -62.f, 0.f, 160.f, FVector(6.f, 150.f, 860.f), Blue);
+		// Вертикальная надпись — с обеих сторон.
+		const FString Title = Name.IsEmpty() ? FString(TEXT("НОВОСИБИРСК")) : Name.ToUpper();
+		for (float Side : {1.f, -1.f})
+		{
+			const FVector N = F.Ax * Side;
+			Label(FTransform(FRotator(0.f, static_cast<float>(N.Rotation().Yaw), 90.f), F.At(Side * 66.f, 0.f, 590.f)), Title, 820.f, 120.f, 96,
+				FLinearColor(0.95f, 0.95f, 0.94f), FLinearColor(0.08f, 0.28f, 0.62f), 1024);
+		}
+		// Герб: зелёный щит, серебряный пояс по диагонали, золотая корона над ним.
+		TBox(T.Props, F, 0.f, 0.f, 1110.f, FVector(60.f, 170.f, 200.f), Col(0.1f, 0.45f, 0.22f));
+		T.Props.AddBox(F.At(32.f, 0.f, 1150.f), F.Yaw, FVector(4.f, 200.f, 30.f), FVector2D(100.f, 100.f), White, true, true);
+		TBox(T.Props, F, 0.f, 0.f, 1310.f, FVector(50.f, 130.f, 50.f), Col(0.85f, 0.7f, 0.25f));
+		// Крылья: наборы изогнутых лопастей, уходящих вверх и в стороны.
+		for (float Side : {-1.f, 1.f})
+		{
+			for (int32 K = 0; K < 7; ++K)
+			{
+				const float Y = Side * (180.f + K * 85.f);
+				const float Z0 = 150.f + K * 70.f;
+				const float Hk = 520.f - K * 35.f + (Side > 0.f ? K * 20.f : 0.f);
+				T.Props.AddBox(F.At(-20.f + (Side > 0.f ? K * 25.f : -K * 10.f), Y, Z0), F.Yaw + Side * (8.f + K * 7.f), FVector(Side > 0.f ? 40.f : 14.f, 70.f, Hk),
+					FVector2D(100.f, 100.f), Side > 0.f ? Steel : White, true, true);
+			}
+		}
+		// Подсветка снизу.
+		for (float Y : {-300.f, 300.f})
+		{
+			T.Lamps.AddBox(F.At(150.f, Y, 30.f), F.Yaw, FVector(30.f, 30.f, 20.f), FVector2D(100.f, 100.f), FColor::White, true, false);
+		}
+	}
+	EmitTown(T);
+}

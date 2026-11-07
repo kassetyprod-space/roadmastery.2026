@@ -17,6 +17,7 @@ endif()
 
 add_executable(rgen_tests RoadGenTests.cpp)
 target_link_libraries(rgen_tests PRIVATE rgen)
+target_compile_definitions(rgen_tests PRIVATE PEREGON_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
 if(MSVC)
   target_compile_options(rgen_tests PRIVATE /utf-8)
 endif()

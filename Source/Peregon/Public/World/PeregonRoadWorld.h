@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "World/PeregonKit.h"
+#include "rgen/City.h"
 #include "rgen/Climate.h"
 #include "rgen/Landscape.h"
 #include "rgen/Route.h"
@@ -62,6 +63,9 @@ enum class EPeregonWorldMat : uint8
 	RoofGreen,  // кровля сельских домов разных цветов
 	RoofRed,
 	RoofBlue,
+	Water,      // река в городе
+	Sidewalk,   // тротуарная плитка
+	Steel,      // перила, арки мостов
 	Count UMETA(Hidden)
 };
 
@@ -166,6 +170,12 @@ private:
 	// Постоянная часть мира: дальний рельеф, города, горы на горизонте.
 	TArray<TWeakObjectPtr<UActorComponent>> Scenery;
 	TArray<double> SteleS;  // где стоят стелы городов (по индексу в Landscape.Settlements)
+	// Настоящий город из OSM (Content/Data/Cities/*.city, PeregonRoadWorldDetails.cpp).
+	rgen::CityData CityMap;
+	bool bRealCity = false;
+	double CityBaseZ = 0.0;
+	void LoadRealCity();
+	void BuildRealCity();
 	FVector RidgeCenter = FVector(1e12);
 	rgen::SeasonLook AppliedSeason;
 	bool bSeasonApplied = false;

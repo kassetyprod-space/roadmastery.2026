@@ -263,6 +263,9 @@ void APeregonRoadWorld::SetupAssets()
 	Set(EPeregonWorldMat::RoofGreen, FPeregonLook(EPeregonTex::RoofMetal, FLinearColor(0.25f, 0.42f, 0.3f), 0.5f, 0.5f));
 	Set(EPeregonWorldMat::RoofRed, FPeregonLook(EPeregonTex::RoofMetal, FLinearColor(0.55f, 0.18f, 0.14f), 0.5f, 0.5f));
 	Set(EPeregonWorldMat::RoofBlue, FPeregonLook(EPeregonTex::RoofMetal, FLinearColor(0.2f, 0.32f, 0.55f), 0.5f, 0.5f));
+	Set(EPeregonWorldMat::Water, FPeregonLook(EPeregonTex::Glass, FLinearColor(0.1f, 0.16f, 0.2f), 0.04f, 0.f));
+	Set(EPeregonWorldMat::Sidewalk, FPeregonLook(EPeregonTex::Concrete, FLinearColor(0.78f, 0.76f, 0.72f), 0.85f));
+	Set(EPeregonWorldMat::Steel, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.34f, 0.42f, 0.5f), 0.35f, 0.6f));
 }
 
 UMaterialInterface* APeregonRoadWorld::Mat(EPeregonWorldMat Type) const
@@ -304,7 +307,7 @@ void APeregonRoadWorld::Generate(int32 Seed)
 		SetupAssets();
 	}
 
-	// Настоящий маршрут: Новосибирск — Кемерово по Р-255 (масштаб 1:5).
+	// Настоящий маршрут: Новосибирск — Кемерово по Р-255 (дороги 1:2, города — 1:1 из OSM).
 	rgen::RouteParams Params = rgen::NovosibirskKemerovo(static_cast<uint32_t>(Seed));
 	PeregonRoad::ApplyOsmGeometry(Params);
 	Route.Build(Params);
@@ -326,9 +329,11 @@ void APeregonRoadWorld::Generate(int32 Seed)
 	}
 	Scenery.Reset();
 	const double StartTime = FPlatformTime::Seconds();
+	LoadRealCity();
 	Landscape.Build(Route);
 	BuildFarTerrain();
 	BuildCities();
+	BuildRealCity();
 	RidgeCenter = FVector(1e12);
 	bSeasonApplied = false;
 	UpdateSeason(true);
@@ -731,9 +736,14 @@ void APeregonRoadWorld::BuildChunk(int32 Index)
 		}
 	}
 
-	// Начало и конец участка: бетонные блоки поперёк дороги.
+	// Начало и конец участка: бетонные блоки поперёк дороги (в начале — только если нет настоящего города,
+	// иначе дорога уходит в его улицы).
 	for (double EndS : {-12.0, Route.Length() + 12.0})
 	{
+		if (EndS < 0.0 && bRealCity)
+		{
+			continue;
+		}
 		if (EndS >= S0 && EndS < S1)
 		{
 			const rgen::RouteSample Smp = Route.Sample(EndS);

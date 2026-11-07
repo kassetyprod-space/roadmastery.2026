@@ -63,6 +63,19 @@ double Building::Height() const
 	}
 }
 
+void Landscape::SetRealCity(const std::string& Name, double MinX, double MinY, double MaxX, double MaxY, double BaseZ)
+{
+	RealCities.erase(std::remove_if(RealCities.begin(), RealCities.end(), [&](const RealCityArea& C) { return C.Name == Name; }), RealCities.end());
+	RealCityArea A;
+	A.Name = Name;
+	A.MinX = MinX;
+	A.MinY = MinY;
+	A.MaxX = MaxX;
+	A.MaxY = MaxY;
+	A.Z = BaseZ;
+	RealCities.push_back(A);
+}
+
 void Landscape::Build(const Route& InRoute)
 {
 	R = &InRoute;
@@ -142,7 +155,19 @@ void Landscape::Build(const Route& InRoute)
 		const double Lateral = Size == 0 ? Side * 120.0 : Side * T.Radius * 0.15;
 		T.X = Smp.X + Fx * Along - Fy * Lateral;
 		T.Y = Smp.Y + Fy * Along + Fx * Lateral;
-		BuildCity(T);
+		bool bReal = false;
+		for (const RealCityArea& A : RealCities)
+		{
+			bReal |= A.Name == T.Name;
+		}
+		if (bReal)
+		{
+			T.Real = true; // дома, улицы, мосты — из OSM (rgen/City.h)
+		}
+		else
+		{
+			BuildCity(T);
+		}
 		Towns.push_back(std::move(T));
 	}
 }
@@ -296,6 +321,28 @@ double Landscape::GroundAt(double X, double Y) const
 }
 
 double Landscape::FarHeight(double X, double Y) const
+{
+	if (!R)
+	{
+		return 0.0;
+	}
+	// Под настоящим городом дальний рельеф ниже уровня города (город кладёт свою землю), к краям — плавно.
+	for (const RealCityArea& A : RealCities)
+	{
+		const double Dx = std::max({A.MinX - X, 0.0, X - A.MaxX});
+		const double Dy = std::max({A.MinY - Y, 0.0, Y - A.MaxY});
+		const double D = std::hypot(Dx, Dy);
+		if (D < 600.0)
+		{
+			const double Base = FarHeightRaw(X, Y);
+			const double Low = A.Z - 4.0;
+			return D <= 0.0 ? std::min(Base, Low) : Low + (Base - Low) * Smooth(0.0, 600.0, D);
+		}
+	}
+	return FarHeightRaw(X, Y);
+}
+
+double Landscape::FarHeightRaw(double X, double Y) const
 {
 	if (!R)
 	{

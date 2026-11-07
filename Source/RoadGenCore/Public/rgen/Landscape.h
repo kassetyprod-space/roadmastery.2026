@@ -68,6 +68,7 @@ struct Settlement
 	double Y = 0.0;
 	double Radius = 300.0;
 	int Size = 0;        // 0 — посёлок с парой пятиэтажек, 1 — город, 2 — областной центр
+	bool Real = false;   // настоящий город из OSM (rgen/City.h): своих домов не строим
 	std::vector<Building> Buildings;
 	std::vector<Street> Streets;
 };
@@ -75,6 +76,9 @@ struct Settlement
 class RGEN_API Landscape
 {
 public:
+	// Настоящий город из OpenStreetMap (вызывать до Build): процедурного города с этим именем не будет,
+	// а дальний рельеф в его границах (с запасом) опускается ниже уровня города BaseZ.
+	void SetRealCity(const std::string& Name, double MinX, double MinY, double MaxX, double MaxY, double BaseZ);
 	void Build(const Route& InRoute);
 
 	// Ближайшая точка дороги (по разреженной копии осевой линии, шаг 25 м): S, смещение T и расстояние.
@@ -100,6 +104,7 @@ public:
 
 private:
 	void BuildCity(Settlement& Town);
+	double FarHeightRaw(double X, double Y) const;
 	double OuterHeight(double X, double Y, double S, double D) const;
 	bool Blocked(double X, double Y, double Radius, const std::vector<Building>& Placed) const;
 
@@ -115,6 +120,12 @@ private:
 	double BucketOx = 0.0, BucketOy = 0.0;
 	static constexpr double BucketSize = 400.0;
 	std::vector<Settlement> Towns;
+	struct RealCityArea
+	{
+		std::string Name;
+		double MinX = 0.0, MinY = 0.0, MaxX = 0.0, MaxY = 0.0, Z = 0.0;
+	};
+	std::vector<RealCityArea> RealCities;
 	double BMinX = 0.0, BMinY = 0.0, BMaxX = 0.0, BMaxY = 0.0;
 	uint32_t Seed = 0;
 };

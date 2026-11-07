@@ -13,6 +13,10 @@
 #include "World/PeregonKit.h"
 #include "rgen/Noise.h"
 
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Engine/CollisionProfile.h"
+
 namespace PeregonMarks
 {
 constexpr double M = 100.0;
@@ -243,11 +247,14 @@ void APeregonRoadWorld::BuildMarkings(FChunk& Chunk, double S0, double S1)
 namespace PeregonMarks
 {
 // Треугольный предупреждающий знак: красная кайма, белое поле. Center — центр, Fwd — куда смотрит лицо.
-void Triangle(FPeregonMeshBuffers& Buf, const FVector& Center, const FVector& Fwd, float Side)
+void Triangle(FPeregonMeshBuffers& Buf, const FVector& Center, const FVector& Fwd, float Side, bool bInverted = false)
 {
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, Fwd).GetSafeNormal();
 	const float R = Side / FMath::Sqrt(3.f);
-	auto V = [&](float Ang, float Rad, float Lift) { return Center + Fwd * Lift + (FVector::UpVector * FMath::Cos(Ang) + Right * FMath::Sin(Ang)) * Rad; };
+	const float Flip = bInverted ? PI : 0.f;
+	auto V = [&](float Ang, float Rad, float Lift) {
+		return Center + Fwd * Lift + (FVector::UpVector * FMath::Cos(Ang + Flip) + Right * FMath::Sin(Ang + Flip)) * Rad;
+	};
 	for (const auto& Layer : {TPair<float, FColor>(1.f, C(0.75f, 0.06f, 0.05f)), TPair<float, FColor>(0.72f, C(0.95f, 0.95f, 0.93f))})
 	{
 		const float Lift = Layer.Key < 1.f ? 0.6f : 0.3f;
@@ -485,4 +492,352 @@ void APeregonRoadWorld::BuildRoadsideSigns(FChunk& Chunk, double S0, double S1)
 	{
 		AddProc(Chunk.Components, Plates, Mat(EPeregonWorldMat::VertexPaint), false);
 	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// Настоящий город из OpenStreetMap
+// ---------------------------------------------------------------------------------------------
+void APeregonRoadWorld::LoadRealCity()
+{
+	bRealCity = false;
+	CityMap = rgen::CityData();
+	const FString Path = FPaths::ProjectContentDir() / TEXT("Data/Cities/novosibirsk.city");
+	TArray<uint8> Bytes;
+	if (!FFileHelper::LoadFileToArray(Bytes, *Path))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Peregon] Нет %s — Новосибирск будет процедурным. Выгрузите город: python Tools/MapPipeline/fetch_city.py novosibirsk"),
+			*Path);
+		return;
+	}
+	const std::string Text(reinterpret_cast<const char*>(Bytes.GetData()), static_cast<size_t>(Bytes.Num()));
+	std::string Error;
+	if (!CityMap.Parse(Text, &Error))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Peregon] %s не прочитан: %s"), *Path, UTF8_TO_TCHAR(Error.c_str()));
+		return;
+	}
+	double X0 = 1e18, Y0 = 1e18, X1 = -1e18, Y1 = -1e18;
+	for (const rgen::CityNode& N : CityMap.Nodes)
+	{
+		X0 = FMath::Min(X0, N.X);
+		Y0 = FMath::Min(Y0, N.Y);
+		X1 = FMath::Max(X1, N.X);
+		Y1 = FMath::Max(Y1, N.Y);
+	}
+	for (const rgen::CityBuilding& B : CityMap.Buildings)
+	{
+		for (const rgen::CityPt& P : B.Ring)
+		{
+			X0 = FMath::Min(X0, P.X);
+			Y0 = FMath::Min(Y0, P.Y);
+			X1 = FMath::Max(X1, P.X);
+			Y1 = FMath::Max(Y1, P.Y);
+		}
+	}
+	if (X0 > X1)
+	{
+		return;
+	}
+	CityBaseZ = Route.Sample(0.0).Z;
+	Landscape.SetRealCity(CityMap.Name, X0, Y0, X1, Y1, CityBaseZ);
+	bRealCity = true;
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Город %s из OSM: %d дорог, %d зданий, %d достопримечательностей"), UTF8_TO_TCHAR(CityMap.Name.c_str()),
+		static_cast<int32>(CityMap.Ways.size()), static_cast<int32>(CityMap.Buildings.size()), static_cast<int32>(CityMap.Landmarks.size()));
+}
+
+namespace PeregonMarks
+{
+// Восьмиугольник «STOP» (2.5).
+void Octagon(FPeregonMeshBuffers& Buf, const FVector& Center, const FVector& Fwd, float Radius)
+{
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, Fwd).GetSafeNormal();
+	for (int32 K = 0; K < 8; ++K)
+	{
+		const float A0 = 2.f * PI * (K + 0.5f) / 8.f;
+		const float A1 = 2.f * PI * (K + 1.5f) / 8.f;
+		const FVector P0 = Center + Fwd * 0.3f + (FVector::UpVector * FMath::Cos(A0) + Right * FMath::Sin(A0)) * Radius;
+		const FVector P1 = Center + Fwd * 0.3f + (FVector::UpVector * FMath::Cos(A1) + Right * FMath::Sin(A1)) * Radius;
+		Buf.AddQuad(Center + Fwd * 0.3f, P0, P1, P1, Fwd, FVector2D(0.f, 1.f), FVector2D(1.f, 0.f), C(0.75f, 0.06f, 0.05f), 0);
+		Buf.AddQuad(Center - Fwd * 0.3f, P1 - Fwd * 0.6f, P0 - Fwd * 0.6f, P0 - Fwd * 0.6f, -Fwd, FVector2D(0.f, 1.f), FVector2D(1.f, 0.f),
+			C(0.5f, 0.5f, 0.52f), 0);
+	}
+}
+
+// Синий круг «Круговое движение» (4.3): белое кольцо из трёх дуг-стрелок.
+void Roundabout(FPeregonMeshBuffers& Buf, const FVector& Center, const FVector& Fwd, float Radius)
+{
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, Fwd).GetSafeNormal();
+	auto P = [&](float A, float R, float Lift) { return Center + Fwd * Lift + (FVector::UpVector * FMath::Cos(A) + Right * FMath::Sin(A)) * R; };
+	for (int32 K = 0; K < 24; ++K)
+	{
+		const float A0 = 2.f * PI * K / 24.f;
+		const float A1 = 2.f * PI * (K + 1) / 24.f;
+		Buf.AddQuad(Center + Fwd * 0.3f, P(A0, Radius, 0.3f), P(A1, Radius, 0.3f), P(A1, Radius, 0.3f), Fwd, FVector2D(0.f, 1.f), FVector2D(1.f, 0.f),
+			C(0.1f, 0.3f, 0.7f), 0);
+		Buf.AddQuad(Center - Fwd * 0.3f, P(A1, Radius, -0.3f), P(A0, Radius, -0.3f), P(A0, Radius, -0.3f), -Fwd, FVector2D(0.f, 1.f), FVector2D(1.f, 0.f),
+			C(0.5f, 0.5f, 0.52f), 0);
+		if (K % 8 < 6)
+		{
+			Buf.AddQuad(P(A0, Radius * 0.42f, 0.6f), P(A1, Radius * 0.42f, 0.6f), P(A1, Radius * 0.62f, 0.6f), P(A0, Radius * 0.62f, 0.6f), Fwd,
+				FVector2D(0.f, 1.f), FVector2D(1.f, 0.f), C(0.95f, 0.95f, 0.93f), 0);
+		}
+		else if (K % 8 == 6)
+		{
+			Buf.AddQuad(P(A0, Radius * 0.32f, 0.6f), P(A0, Radius * 0.72f, 0.6f), P(A1 + 0.15f, Radius * 0.52f, 0.6f), P(A1 + 0.15f, Radius * 0.52f, 0.6f), Fwd,
+				FVector2D(0.f, 1.f), FVector2D(1.f, 0.f), C(0.95f, 0.95f, 0.93f), 0); // наконечник
+		}
+	}
+}
+} // namespace PeregonMarks
+
+void APeregonRoadWorld::BuildRealCity()
+{
+	using namespace PeregonMarks;
+	if (!bRealCity)
+	{
+		return;
+	}
+	const double StartTime = FPlatformTime::Seconds();
+	rgen::CityBuildOptions Opt;
+	// Землю города не кладём рядом с трассой — у неё своя земля чанков.
+	for (double S = 30.0; S < FMath::Min(4000.0, Route.Length()); S += 25.0)
+	{
+		const rgen::RouteSample Smp = Route.Sample(S);
+		Opt.Keepout.push_back(rgen::CityPt{Smp.X, Smp.Y});
+	}
+	const rgen::CityResult Res = rgen::BuildCity(CityMap, Opt);
+	const double Z0 = CityBaseZ;
+
+	auto MatFor = [this](rgen::CityMat Cm) -> UMaterialInterface* {
+		switch (Cm)
+		{
+		case rgen::CityMat::Asphalt: return Mat(EPeregonWorldMat::Road);
+		case rgen::CityMat::Marking: return Mat(EPeregonWorldMat::Marking);
+		case rgen::CityMat::Sidewalk: return Mat(EPeregonWorldMat::Sidewalk);
+		case rgen::CityMat::Curb: return Mat(EPeregonWorldMat::Concrete);
+		case rgen::CityMat::Ground: return Mat(EPeregonWorldMat::Grass);
+		case rgen::CityMat::Grass: return Mat(EPeregonWorldMat::Grass);
+		case rgen::CityMat::Water: return Mat(EPeregonWorldMat::Water);
+		case rgen::CityMat::Concrete: return Mat(EPeregonWorldMat::Concrete);
+		case rgen::CityMat::Steel: return Mat(EPeregonWorldMat::Steel);
+		case rgen::CityMat::Ballast: return Mat(EPeregonWorldMat::Shoulder);
+		case rgen::CityMat::WallPanel: return Mat(EPeregonWorldMat::Panel);
+		case rgen::CityMat::WallBrick: return Mat(EPeregonWorldMat::Brick);
+		case rgen::CityMat::WallStucco: return Mat(EPeregonWorldMat::Stucco);
+		case rgen::CityMat::WallOffice: return Mat(EPeregonWorldMat::Ribbon);
+		case rgen::CityMat::WallIndustrial: return Mat(EPeregonWorldMat::Silicate);
+		case rgen::CityMat::WallHouse: return Mat(EPeregonWorldMat::Wood);
+		case rgen::CityMat::Roof: return Mat(EPeregonWorldMat::CityRoof);
+		case rgen::CityMat::LitWindow: return Mat(EPeregonWorldMat::LitWindow);
+		default: return nullptr;
+		}
+	};
+	// Три вида компонентов на тайл: дорожные поверхности (асфальт под колёсами), земля (трава), прочее.
+	enum class EGroup : uint8
+	{
+		Road,
+		Ground,
+		Other,
+		NoCollision
+	};
+	auto GroupOf = [](rgen::CityMat Cm) {
+		switch (Cm)
+		{
+		case rgen::CityMat::Asphalt:
+		case rgen::CityMat::Sidewalk:
+		case rgen::CityMat::Curb:
+		case rgen::CityMat::Concrete:
+		case rgen::CityMat::Steel:
+		case rgen::CityMat::Ballast: return EGroup::Road;
+		case rgen::CityMat::Ground:
+		case rgen::CityMat::Grass: return EGroup::Ground;
+		case rgen::CityMat::Marking:
+		case rgen::CityMat::Water:
+		case rgen::CityMat::LitWindow: return EGroup::NoCollision;
+		default: return EGroup::Other;
+		}
+	};
+	FChunk Holder;
+	int32 Sections = 0;
+	for (const rgen::CityTile& Tile : Res.Tiles)
+	{
+		UProceduralMeshComponent* Comps[4] = {nullptr, nullptr, nullptr, nullptr};
+		int32 Next[4] = {0, 0, 0, 0};
+		for (int32 Mi = 0; Mi < static_cast<int32>(rgen::CityMat::Count); ++Mi)
+		{
+			const rgen::CitySection& Sec = Tile.Sections[Mi];
+			if (Sec.I.empty())
+			{
+				continue;
+			}
+			const rgen::CityMat CMat = static_cast<rgen::CityMat>(Mi);
+			const int32 G = static_cast<int32>(GroupOf(CMat));
+			if (!Comps[G])
+			{
+				UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this);
+				Mesh->SetMobility(EComponentMobility::Movable);
+				Mesh->SetupAttachment(RootComponent);
+				Mesh->bUseAsyncCooking = true;
+				Mesh->bUseComplexAsSimpleCollision = true;
+				const bool bCollide = G != static_cast<int32>(EGroup::NoCollision);
+				Mesh->SetCollisionProfileName(bCollide ? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
+				if (G == static_cast<int32>(EGroup::Road))
+				{
+					Mesh->SetPhysMaterialOverride(AsphaltPhys);
+				}
+				else if (G == static_cast<int32>(EGroup::Ground))
+				{
+					Mesh->SetPhysMaterialOverride(GrassPhys);
+				}
+				if (G == static_cast<int32>(EGroup::NoCollision))
+				{
+					Mesh->SetCastShadow(false);
+				}
+				Mesh->RegisterComponent();
+				Holder.Components.Add(Mesh);
+				Comps[G] = Mesh;
+			}
+			const int32 NV = static_cast<int32>(Sec.VertexCount());
+			TArray<FVector> V;
+			TArray<FVector> N;
+			TArray<FVector2D> UV;
+			TArray<FColor> Col;
+			TArray<int32> Tri;
+			V.SetNumUninitialized(NV);
+			N.SetNumUninitialized(NV);
+			UV.SetNumUninitialized(NV);
+			Col.SetNumUninitialized(NV);
+			for (int32 K = 0; K < NV; ++K)
+			{
+				V[K] = FVector(Sec.P[K * 3], Sec.P[K * 3 + 1], static_cast<double>(Sec.P[K * 3 + 2]) + Z0) * PeregonMarks::M;
+				N[K] = FVector(Sec.N[K * 3], Sec.N[K * 3 + 1], Sec.N[K * 3 + 2]);
+				UV[K] = FVector2D(Sec.UV[K * 2], Sec.UV[K * 2 + 1]);
+				Col[K] = FColor(Sec.C[K * 4], Sec.C[K * 4 + 1], Sec.C[K * 4 + 2], Sec.C[K * 4 + 3]);
+			}
+			Tri.Append(Sec.I.data(), static_cast<int32>(Sec.I.size()));
+			const int32 Index = Next[G]++;
+			const bool bCollision = G != static_cast<int32>(EGroup::NoCollision);
+			Comps[G]->CreateMeshSection(Index, V, Tri, N, UV, Col, TArray<FProcMeshTangent>(), bCollision);
+			Comps[G]->SetMaterial(Index, MatFor(CMat));
+			++Sections;
+		}
+	}
+
+	// Реквизит улиц: опоры и таблички — один меш с цветом вершин, головы фонарей — светящиеся.
+	FPeregonMeshBuffers Plates;
+	FPeregonMeshBuffers Heads;
+	TArray<FPeregonLightSpot> LampSpots;
+	FPeregonKit Kit(this, RootComponent, Holder.Components, KitMaterials());
+	const FColor PoleC = C(0.55f, 0.56f, 0.58f);
+	const FColor DarkC = C(0.12f, 0.12f, 0.13f);
+	int32 Lights = 0;
+	for (const rgen::CityProp& P : Res.Props)
+	{
+		const FVector At = FVector(P.X, P.Y, P.Z + Z0) * PeregonMarks::M;
+		const float Yaw = static_cast<float>(P.Yaw);
+		const FVector Fwd = FRotator(0.f, Yaw, 0.f).Vector();
+		switch (P.Kind)
+		{
+		case rgen::CityPropKind::StreetLamp:
+		{
+			// Бетонная опора 9 м с консолью над проезжей частью.
+			Plates.AddBox(At, Yaw, FVector(24.f, 24.f, 900.f), FVector2D(100.f, 100.f), PoleC, true, false);
+			const FVector Arm = At + FVector(0, 0, 880.f);
+			Plates.AddBox(Arm + Fwd * 90.f, Yaw, FVector(180.f, 8.f, 8.f), FVector2D(100.f, 100.f), PoleC, true, true);
+			Heads.AddBox(Arm + Fwd * 190.f - FVector(0, 0, 14.f), Yaw, FVector(60.f, 26.f, 14.f), FVector2D(100.f, 100.f), FColor::White, true, true);
+			FPeregonLightSpot Spot;
+			Spot.Location = Arm + Fwd * 190.f - FVector(0, 0, 30.f);
+			Spot.Direction = FVector::DownVector;
+			Spot.Seed = static_cast<uint32>(static_cast<int64>(P.X * 7.0 + P.Y * 13.0));
+			LampSpots.Add(Spot);
+			break;
+		}
+		case rgen::CityPropKind::TrafficLight:
+		{
+			// Стойка, корпус, три сигнала (верхний красный, нижний зелёный), козырьки.
+			Plates.AddBox(At, Yaw, FVector(12.f, 12.f, 330.f), FVector2D(100.f, 100.f), PoleC, true, false);
+			const FVector Box = At + FVector(0, 0, 300.f) + Fwd * 12.f;
+			Plates.AddBox(Box - FVector(0, 0, 105.f), Yaw, FVector(26.f, 36.f, 105.f), FVector2D(100.f, 100.f), DarkC, true, true);
+			const FColor Lamps[] = {C(0.85f, 0.08f, 0.06f), C(0.75f, 0.6f, 0.08f), C(0.1f, 0.7f, 0.25f)};
+			for (int32 K = 0; K < 3; ++K)
+			{
+				const FVector L = Box - FVector(0, 0, 25.f + K * 32.f) + Fwd * 14.f;
+				Plates.AddBox(L - FVector(0, 0, 11.f), Yaw, FVector(3.f, 22.f, 22.f), FVector2D(100.f, 100.f), Lamps[K], true, true);
+				Plates.AddBox(L + FVector(0, 0, 12.f) + Fwd * 8.f, Yaw, FVector(16.f, 26.f, 2.f), FVector2D(100.f, 100.f), DarkC, true, true);
+			}
+			++Lights;
+			break;
+		}
+		case rgen::CityPropKind::SignYield:
+		case rgen::CityPropKind::SignStop:
+		case rgen::CityPropKind::SignCrossing:
+		case rgen::CityPropKind::SignRoundabout:
+		case rgen::CityPropKind::SignSpeed:
+		{
+			Plates.AddBox(At, Yaw, FVector(7.f, 7.f, 270.f), FVector2D(100.f, 100.f), PoleC, true, false);
+			const FVector Head = At + FVector(0, 0, 235.f);
+			if (P.Kind == rgen::CityPropKind::SignYield)
+			{
+				Triangle(Plates, Head, Fwd, 90.f, true);
+			}
+			else if (P.Kind == rgen::CityPropKind::SignStop)
+			{
+				Octagon(Plates, Head, Fwd, 36.f);
+				Kit.Label(FTransform(Fwd.Rotation(), Head + Fwd * 1.0), TEXT("STOP"), 44.f, 18.f, 40, FLinearColor(0.95f, 0.95f, 0.93f),
+					FLinearColor(0.75f, 0.06f, 0.05f), 128);
+			}
+			else if (P.Kind == rgen::CityPropKind::SignCrossing)
+			{
+				Crossing(Plates, Head, Fwd);
+			}
+			else if (P.Kind == rgen::CityPropKind::SignRoundabout)
+			{
+				Roundabout(Plates, Head, Fwd, 35.f);
+			}
+			else
+			{
+				Disc(Plates, Head, Fwd, 35.f);
+				Kit.Label(FTransform(Fwd.Rotation(), Head + Fwd * 1.2), FString::FromInt(P.Value), 38.f, 26.f, 54, FLinearColor(0.03f, 0.03f, 0.03f),
+					FLinearColor(0.95f, 0.95f, 0.93f), 128);
+			}
+			break;
+		}
+		case rgen::CityPropKind::StreetName:
+		{
+			Plates.AddBox(At, Yaw, FVector(7.f, 7.f, 300.f), FVector2D(100.f, 100.f), PoleC, true, false);
+			for (float Side : {1.f, -1.f})
+			{
+				const FVector N = Fwd * Side;
+				Kit.Label(FTransform(N.Rotation(), At + FVector(0, 0, 270.f) + N * 4.0), UTF8_TO_TCHAR(P.Text.c_str()), 110.f, 22.f, 26,
+					FLinearColor(0.95f, 0.95f, 0.95f), FLinearColor(0.08f, 0.24f, 0.55f), 256);
+			}
+			break;
+		}
+		case rgen::CityPropKind::Landmark:
+		{
+			// Главный фасад — к центру города (у театра — на площадь Ленина).
+			FVector ToCenter = FVector(CityMap.CenterX - P.X, CityMap.CenterY - P.Y, 0.0);
+			if (ToCenter.Size() < 30.0)
+			{
+				ToCenter = FRotator(0.f, Yaw, 0.f).Vector();
+			}
+			Kit.Landmark(UTF8_TO_TCHAR(P.Text.c_str()), At - FVector(0, 0, 10.f), Yaw, static_cast<float>(P.Value) * 100.f, ToCenter.GetSafeNormal());
+			break;
+		}
+		default: break;
+		}
+	}
+	AddProc(Holder.Components, Plates, Mat(EPeregonWorldMat::VertexPaint), false);
+	if (UProceduralMeshComponent* Glow = AddProc(Holder.Components, Heads, Mat(EPeregonWorldMat::LampGlow), false, false))
+	{
+		for (FPeregonLightSpot& Spot : LampSpots)
+		{
+			Spot.Anchor = Glow;
+		}
+		PeregonLights::Spots().Append(LampSpots);
+	}
+	Scenery.Append(Holder.Components);
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Город %s построен за %.0f мс: улиц %d, перекрёстков %d, мостов %d, домов %d, светофоров %d, %d треугольников"),
+		UTF8_TO_TCHAR(CityMap.Name.c_str()), (FPlatformTime::Seconds() - StartTime) * 1000.0, Res.Edges, Res.Junctions, Res.Bridges, Res.BuildingsBuilt,
+		Lights, static_cast<int32>(Res.TriangleCount()));
 }
