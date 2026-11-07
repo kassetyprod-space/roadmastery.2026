@@ -542,7 +542,15 @@ void UPeregonArtSubsystem::EnsureBaseMaterial()
 	}
 	bTriedLoad = true;
 	// Сначала второе поколение (погода, ветер, альфа), потом старое.
-	BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX3.M_PSX3"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	// «Живопись» — третье поколение (рельеф по текстуре и лужи), если редактор его уже создал.
+	if (UPeregonGameUserSettings::Get()->VisualStyle == 0)
+	{
+		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX4.M_PSX4"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+	if (!BaseMaterial)
+	{
+		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Peregon/Materials/M_PSX3.M_PSX3"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
 	bPsx3 = BaseMaterial != nullptr;
 	if (!BaseMaterial)
 	{
@@ -787,6 +795,30 @@ UMaterialInstanceDynamic* UPeregonArtSubsystem::MakeMaterial(UObject* Outer, con
 		Mid->SetScalarParameterValue(TEXT("Emissive"), Look.Emissive);
 		Mid->SetScalarParameterValue(TEXT("WorldUV"), Look.WorldTileCm > 0.f ? 1.f : 0.f);
 		Mid->SetScalarParameterValue(TEXT("TileSize"), Look.WorldTileCm > 0.f ? Look.WorldTileCm : 400.f);
+		// Глубина рельефа (M_PSX4), см: кирпич, кора и камень — глубоко, краска, хром и пластик — почти гладко.
+		{
+			float Relief = 0.6f;
+			switch (Look.Texture)
+			{
+			case EPeregonTex::Paint:
+			case EPeregonTex::Chrome:
+			case EPeregonTex::Glass:
+			case EPeregonTex::White:
+			case EPeregonTex::Plastic: Relief = 0.06f; break;
+			case EPeregonTex::BrickFacade:
+			case EPeregonTex::BirchBark:
+			case EPeregonTex::PineBark:
+			case EPeregonTex::Gravel: Relief = 1.6f; break;
+			case EPeregonTex::Asphalt:
+			case EPeregonTex::RoadMarked:
+			case EPeregonTex::Concrete:
+			case EPeregonTex::WoodPlanks:
+			case EPeregonTex::Dirt:
+			case EPeregonTex::Mud: Relief = 1.0f; break;
+			default: break;
+			}
+			Mid->SetScalarParameterValue(TEXT("Relief"), Relief);
+		}
 		if (bPsx3)
 		{
 			// Как поверхность ведёт себя в непогоду, если не сказано явно.

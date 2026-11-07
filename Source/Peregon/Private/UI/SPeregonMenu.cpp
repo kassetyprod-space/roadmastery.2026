@@ -343,7 +343,9 @@ TSharedRef<SWidget> SPeregonMenu::BuildMainPage()
 			.ColorAndOpacity(DimColor)
 		];
 	}
-	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Новая игра"), [this]() { ShowPage(EPage::NewGame); })];
+	// «Играть» — карта России: выбрать регион, старт в его крупнейшем городе.
+	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Играть"), [this]() { if (Owner.IsValid()) { Owner->OpenRussiaMap(); } })];
+	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Параметры заезда"), [this]() { ShowPage(EPage::NewGame); }, true, false)];
 	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Испытательный полигон"), [this]() { StartNewGame(true); })];
 	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Настройки"), [this]() { ShowPage(EPage::Settings); })];
 	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Выход"), [this]() { if (Owner.IsValid()) { Owner->UiQuit(); } })];
@@ -372,7 +374,7 @@ TSharedRef<SWidget> SPeregonMenu::BuildNewGamePage()
 	}
 
 	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
-	Box->AddSlot().AutoHeight()[MakeHeader(INVTEXT("НОВАЯ ИГРА"))];
+	Box->AddSlot().AutoHeight()[MakeHeader(INVTEXT("ПАРАМЕТРЫ ЗАЕЗДА"))];
 	Box->AddSlot().AutoHeight()
 	[
 		MakeRow(INVTEXT("Маршрут"), SNew(STextBlock).Text(INVTEXT("Новосибирск → Заречный · 15 км")).Font(Font(14)).ColorAndOpacity(DimColor))
@@ -416,7 +418,12 @@ TSharedRef<SWidget> SPeregonMenu::BuildNewGamePage()
 	];
 	Box->AddSlot().AutoHeight()[MakeRow(INVTEXT("Цвет машины"), MakeChoice(&ColorIndex, PaintNames))];
 	Box->AddSlot().AutoHeight()[MakeRow(INVTEXT("Начало"), MakeChoice(&StartIndex, {INVTEXT("Гараж: собрать «Сокол» из хлама"), INVTEXT("Сразу на трассу")}))];
-	Box->AddSlot().AutoHeight().Padding(0.f, 18.f, 0.f, 0.f)[MakeButton(INVTEXT("В путь"), [this]() { StartNewGame(false); })];
+	Box->AddSlot().AutoHeight().Padding(0.f, 18.f, 0.f, 0.f)[MakeButton(INVTEXT("Выбрать регион на карте"), [this]() {
+		if (Owner.IsValid())
+		{
+			Owner->OpenRussiaMap();
+		}
+	})];
 	Box->AddSlot().AutoHeight()[MakeButton(INVTEXT("Назад"), [this]() { GoBack(); }, true, false)];
 	return Box;
 }
@@ -589,6 +596,12 @@ void SPeregonMenu::ApplySettings()
 	S->SetFrameRateLimit(FpsLimits[FMath::Clamp(FpsIndex, 0, static_cast<int32>(UE_ARRAY_COUNT(FpsLimits)) - 1)]);
 	S->ApplySettings(false);
 	S->SaveSettings();
+}
+
+void SPeregonMenu::StartFromMap(int32 Region)
+{
+	NewConfig.StartRegion = Region;
+	StartNewGame(false);
 }
 
 void SPeregonMenu::StartNewGame(bool bProvingGround)

@@ -27,6 +27,7 @@
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Misc/PackageName.h"
@@ -138,7 +139,7 @@ void CreatePsxMaterial(const TCHAR* MaterialName, bool bGlass)
 //  • маска прозрачности из альфы текстуры (трава, кусты, листья);
 //  • у стекла: прозрачность × альфа текстуры и плавное исчезание ближе NearFade (дождь не идёт в салоне).
 // Старые M_PSX2 не трогаем — игра берёт M_PSX3, если он есть.
-void CreatePsx3Material(const TCHAR* MaterialName, bool bGlass)
+void CreatePsx3Material(const TCHAR* MaterialName, bool bGlass, bool bRelief = false)
 {
 	const FString PackagePath = FString(MaterialDir) / MaterialName;
 	if (FPackageName::DoesPackageExist(PackagePath))
@@ -178,11 +179,30 @@ void CreatePsx3Material(const TCHAR* MaterialName, bool bGlass)
 	UMaterialEditingLibrary::ConnectMaterialExpressions(Divide, TEXT(""), UvLerp, TEXT("B"));
 	UMaterialEditingLibrary::ConnectMaterialExpressions(WorldUV, TEXT(""), UvLerp, TEXT("Alpha"));
 
-	UMaterialExpressionTextureSampleParameter2D* Tex = AddNode<UMaterialExpressionTextureSampleParameter2D>(Material, -1200, 0);
-	Tex->ParameterName = TEXT("Tex");
-	Tex->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
-	Tex->SamplerType = SAMPLERTYPE_Color;
-	UMaterialEditingLibrary::ConnectMaterialExpressions(UvLerp, TEXT(""), Tex, TEXT("UVs"));
+	UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+	UMaterialExpressionTextureSample* Tex = nullptr;
+	UMaterialExpressionTextureObjectParameter* TexObj = nullptr;
+	if (bRelief)
+	{
+		// Текстура как объект — её же читает код рельефа (тот же параметр «Tex»).
+		TexObj = AddNode<UMaterialExpressionTextureObjectParameter>(Material, -1450, -250);
+		TexObj->ParameterName = TEXT("Tex");
+		TexObj->Texture = WhiteTex;
+		TexObj->SamplerType = SAMPLERTYPE_Color;
+		Tex = AddNode<UMaterialExpressionTextureSample>(Material, -1200, 0);
+		Tex->TextureObject.Expression = TexObj;
+		Tex->Coordinates.Expression = UvLerp;
+		Tex->SamplerType = SAMPLERTYPE_Color;
+	}
+	else
+	{
+		UMaterialExpressionTextureSampleParameter2D* TexParam = AddNode<UMaterialExpressionTextureSampleParameter2D>(Material, -1200, 0);
+		TexParam->ParameterName = TEXT("Tex");
+		TexParam->Texture = WhiteTex;
+		TexParam->SamplerType = SAMPLERTYPE_Color;
+		UMaterialEditingLibrary::ConnectMaterialExpressions(UvLerp, TEXT(""), TexParam, TEXT("UVs"));
+		Tex = TexParam;
+	}
 
 	// --- Цвет: текстура × Color × цвет вершин
 	UMaterialExpressionVectorParameter* Color = AddNode<UMaterialExpressionVectorParameter>(Material, -1200, 300);
@@ -291,7 +311,79 @@ void CreatePsx3Material(const TCHAR* MaterialName, bool bGlass)
 		SnowRough->ConstB = 0.8f;
 		UMaterialEditingLibrary::ConnectMaterialExpressions(WetRough, TEXT(""), SnowRough, TEXT("A"));
 		UMaterialEditingLibrary::ConnectMaterialExpressions(SnowAmount, TEXT(""), SnowRough, TEXT("Alpha"));
-		UMaterialEditingLibrary::ConnectMaterialProperty(SnowRough, TEXT(""), MP_Roughness);
+		UMaterialExpression* FinalRough = SnowRough;
+		if (bRelief)
+		{
+			// Рельеф: яркость текстуры — высота; нормаль по «градиенту поверхности» (ddx/ddy), касательные не нужны —
+			// работает на любых процедурных мешах. Relief — глубина в см (0 — гладко).
+			Material->bTangentSpaceNormal = false;
+			UMaterialExpressionWorldPosition* BumpPos = AddNode<UMaterialExpressionWorldPosition>(Material, -900, -1100);
+			UMaterialExpressionVertexNormalWS* BumpNormal = AddNode<UMaterialExpressionVertexNormalWS>(Material, -900, -1000);
+			UMaterialExpressionCustom* Bump = AddNode<UMaterialExpressionCustom>(Material, -500, -1000);
+			Bump->OutputType = CMOT_Float3;
+			Bump->Description = TEXT("PeregonRelief");
+			Bump->Inputs.Reset();
+			auto AddInput = [](UMaterialExpressionCustom* Node, const TCHAR* Name, UMaterialExpression* From) {
+				FCustomInput& In = Node->Inputs.AddDefaulted_GetRef();
+				In.InputName = FName(Name);
+				In.Input.Expression = From;
+			};
+			AddInput(Bump, TEXT("Tex"), TexObj);
+			AddInput(Bump, TEXT("UV"), UvLerp);
+			AddInput(Bump, TEXT("Pos"), BumpPos);
+			AddInput(Bump, TEXT("N"), BumpNormal);
+			AddInput(Bump, TEXT("Depth"), AddScalar(Material, TEXT("Relief"), 0.6f, -900, -900));
+			Bump->Code = TEXT(
+				"float3 L = float3(0.3, 0.55, 0.15);\n"
+				"float H = dot(Texture2DSample(Tex, TexSampler, UV).rgb, L) * Depth;\n"
+				"float3 Nn = normalize(N);\n"
+				"float3 Dx = ddx(Pos); float3 Dy = ddy(Pos);\n"
+				"float Hx = ddx(H); float Hy = ddy(H);\n"
+				"float3 R1 = cross(Dy, Nn); float3 R2 = cross(Nn, Dx);\n"
+				"float Det = dot(Dx, R1);\n"
+				"if (abs(Det) < 1e-6) { return Nn; }\n"
+				"float3 Grad = sign(Det) * (Hx * R1 + Hy * R2);\n"
+				"return normalize(abs(Det) * Nn - Grad);\n");
+
+			// Лужи: на горизонтальном в дождь — пятна по шуму мира: тёмные, гладкие, ровные (отражают небо).
+			UMaterialExpressionCustom* Puddle = AddNode<UMaterialExpressionCustom>(Material, -500, -850);
+			Puddle->OutputType = CMOT_Float1;
+			Puddle->Description = TEXT("PeregonPuddles");
+			Puddle->Inputs.Reset();
+			AddInput(Puddle, TEXT("Pos"), BumpPos);
+			AddInput(Puddle, TEXT("Up"), NormalZ);
+			AddInput(Puddle, TEXT("Wet"), WetAmount);
+			Puddle->Code = TEXT(
+				"float2 P = Pos.xy / 380.0;\n"
+				"float2 I = floor(P); float2 F = frac(P); F = F * F * (3.0 - 2.0 * F);\n"
+				"float A = frac(sin(dot(I, float2(127.1, 311.7))) * 43758.55);\n"
+				"float B = frac(sin(dot(I + float2(1, 0), float2(127.1, 311.7))) * 43758.55);\n"
+				"float C = frac(sin(dot(I + float2(0, 1), float2(127.1, 311.7))) * 43758.55);\n"
+				"float D = frac(sin(dot(I + float2(1, 1), float2(127.1, 311.7))) * 43758.55);\n"
+				"float Noise = lerp(lerp(A, B, F.x), lerp(C, D, F.x), F.y);\n"
+				"float Flat = saturate((Up - 0.92) * 14.0);\n"
+				"return saturate((Noise - (1.0 - 0.55 * Wet)) * 6.0) * Flat * saturate(Wet * 1.5);\n");
+			UMaterialExpressionLinearInterpolate* PuddleNormal = AddNode<UMaterialExpressionLinearInterpolate>(Material, -250, -950);
+			UMaterialEditingLibrary::ConnectMaterialExpressions(Bump, TEXT(""), PuddleNormal, TEXT("A"));
+			UMaterialEditingLibrary::ConnectMaterialExpressions(BumpNormal, TEXT(""), PuddleNormal, TEXT("B"));
+			UMaterialEditingLibrary::ConnectMaterialExpressions(Puddle, TEXT(""), PuddleNormal, TEXT("Alpha"));
+			UMaterialEditingLibrary::ConnectMaterialProperty(PuddleNormal, TEXT(""), MP_Normal);
+			UMaterialExpressionLinearInterpolate* PuddleRough = AddNode<UMaterialExpressionLinearInterpolate>(Material, -100, 350);
+			PuddleRough->ConstB = 0.02f;
+			UMaterialEditingLibrary::ConnectMaterialExpressions(SnowRough, TEXT(""), PuddleRough, TEXT("A"));
+			UMaterialEditingLibrary::ConnectMaterialExpressions(Puddle, TEXT(""), PuddleRough, TEXT("Alpha"));
+			FinalRough = PuddleRough;
+			// Цвет под лужей — темнее.
+			UMaterialExpressionMultiply* PuddleDark = AddNode<UMaterialExpressionMultiply>(Material, -100, 0);
+			PuddleDark->ConstB = 0.55f;
+			UMaterialEditingLibrary::ConnectMaterialExpressions(FinalBase, TEXT(""), PuddleDark, TEXT("A"));
+			UMaterialExpressionLinearInterpolate* PuddleBase = AddNode<UMaterialExpressionLinearInterpolate>(Material, 50, 50);
+			UMaterialEditingLibrary::ConnectMaterialExpressions(FinalBase, TEXT(""), PuddleBase, TEXT("A"));
+			UMaterialEditingLibrary::ConnectMaterialExpressions(PuddleDark, TEXT(""), PuddleBase, TEXT("B"));
+			UMaterialEditingLibrary::ConnectMaterialExpressions(Puddle, TEXT(""), PuddleBase, TEXT("Alpha"));
+			UMaterialEditingLibrary::ConnectMaterialProperty(PuddleBase, TEXT(""), MP_BaseColor);
+		}
+		UMaterialEditingLibrary::ConnectMaterialProperty(FinalRough, TEXT(""), MP_Roughness);
 		UMaterialEditingLibrary::ConnectMaterialProperty(AddScalar(Material, TEXT("Metallic"), 0.f, -450, 480), TEXT(""), MP_Metallic);
 
 		// Ветер.
@@ -467,6 +559,8 @@ public:
 			PeregonEditorContent::CreatePsx3Material(TEXT("M_PSX3"), false);
 			PeregonEditorContent::CreatePsx3Material(TEXT("M_PSX3_Glass"), true);
 			PeregonEditorContent::CreatePaintedPostMaterial();
+			// M_PSX4: всё, что у M_PSX3, плюс рельеф по текстуре и лужи. Игра берёт его, если он есть.
+			PeregonEditorContent::CreatePsx3Material(TEXT("M_PSX4"), false, true);
 			return false;
 		}), 1.f);
 	}

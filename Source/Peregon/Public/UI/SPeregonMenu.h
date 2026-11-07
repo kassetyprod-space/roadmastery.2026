@@ -23,6 +23,10 @@ public:
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
+	// Вызывает карта России: регион выбран — новая игра с текущими параметрами.
+	void StartFromMap(int32 Region);
+	void OpenNewGameOptions() { ShowPage(EPage::NewGame); }
+
 private:
 	enum class EPage : int32
 	{

@@ -28,6 +28,8 @@ struct FPeregonRunConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") bool bProvingGround = false;
 	// Сюжетное начало: пятиэтажка, гаражный кооператив, «Сокол» без половины деталей, помойка и разборка рядом.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") bool bGarageStart = true;
+	// Регион старта на карте России (SPeregonRussiaMap); старт — в его крупнейшем городе.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") int32 StartRegion = -1;
 	// День года старта (1..365). 258 — 15 сентября, золотая осень.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run") int32 StartDayOfYear = 258;
 };

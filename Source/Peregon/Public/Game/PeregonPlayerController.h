@@ -47,6 +47,9 @@ public:
 	void OpenMapRegion(int32 Region);
 	// Техничка: что не так с машиной рядом (или той, в которой сидим).
 	void OpenManual();
+	// Карта России перед новой игрой.
+	void OpenRussiaMap();
+	void CloseRussiaMap();
 	// Бортовой журнал (B): пробег, траты, ремонт, фотографии, пройденные места.
 	void OpenJournal();
 	// Фото (F9): кадр без интерфейса в Saved/Screenshots/Peregon, подпись — в журнал.
@@ -112,6 +115,8 @@ private:
 	TSharedPtr<SWidget> PanelContainer;
 	float ShopFuelPrice = 52.f;
 	TWeakObjectPtr<APeregonCar> StorageCar;
+	TSharedPtr<class SPeregonRussiaMap> RussiaMap;
+	TSharedPtr<class SWidget> RussiaMapContainer;
 	FName HeldId;
 	float HeldCondition = 1.f;
 };

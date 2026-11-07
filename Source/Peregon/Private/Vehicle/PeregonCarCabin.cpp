@@ -420,12 +420,12 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 	const float CabinRate = 0.004f + 0.01f * Heat + 0.05f * Open;
 	CabinTempC = FMath::Lerp(CabinTempC, CabinTarget, FMath::Clamp(DeltaSeconds * CabinRate, 0.f, 1.f));
 	// Холод: сидеть в салоне ниже +10 °C тяжело, ниже нуля — замерзаешь.
-	const float Freeze = Controller ? FMath::SmoothStep(10.f, -10.f, CabinTempC) : 0.f;
+	const float Freeze = Controller ? (1.f - FMath::SmoothStep(-10.f, 10.f, CabinTempC)) : 0.f;
 	Chill = FMath::Clamp(Chill + DeltaSeconds * (Freeze * 0.01f - (1.f - Freeze) * 0.02f), 0.f, 1.f);
 
 	// Запотевание: дыхание в холодной машине с закрытыми окнами; тёплый салон и холодное стекло потеют сильнее
 	// (печка без проветривания только хуже). Чуть приоткрытое окно (от 8%) — и стёкла сохнут, печка тогда помогает.
-	const float Cold = FMath::SmoothStep(16.f, 0.f, Temperature);
+	const float Cold = (1.f - FMath::SmoothStep(0.f, 16.f, Temperature));
 	const float Humid = Rain > 0.05f ? 1.f : 0.5f;
 	const float Breath = Controller ? 1.f : 0.f;
 	const float Contrast = FMath::Clamp((CabinTempC - Temperature) / 20.f, 0.f, 1.5f);
@@ -445,7 +445,7 @@ void APeregonCar::UpdateGlassAndDirt(float DeltaSeconds)
 		ApplyDirt();
 	}
 	// Стёкла потеют от рамки к центру; в мороз по углам — белые ледяные узоры.
-	const float Frost = FMath::SmoothStep(0.f, -8.f, Temperature);
+	const float Frost = (1.f - FMath::SmoothStep(-8.f, 0.f, Temperature));
 	for (int32 B = 0; B < GlassBands.Num(); ++B)
 	{
 		UMaterialInstanceDynamic* Band = GlassBands[B];

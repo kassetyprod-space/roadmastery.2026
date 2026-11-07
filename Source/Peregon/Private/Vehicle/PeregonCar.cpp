@@ -633,6 +633,15 @@ void APeregonCar::BuildModelMeshes()
 	for (int32 Slot = 0; Slot < static_cast<int32>(vmodel::Mat::Count); ++Slot)
 	{
 		SlotMaterials.Add(MakeSlotMaterial(static_cast<uint8>(Slot)));
+		// Краска мокнет (блестит в дождь) и собирает снег на крыше, капоте и багажнике, пока машина стоит.
+		if (UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(SlotMaterials.Last()))
+		{
+			if (static_cast<vmodel::Mat>(Slot) == vmodel::Mat::Paint)
+			{
+				Mid->SetScalarParameterValue(TEXT("WetMask"), 0.7f);
+				Mid->SetScalarParameterValue(TEXT("SnowMask"), 0.85f);
+			}
+		}
 	}
 
 	WindowGlass.SetNum(4);

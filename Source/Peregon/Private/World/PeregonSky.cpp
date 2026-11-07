@@ -558,11 +558,16 @@ void APeregonSky::ApplyTime(float Hours)
 			const float Density = 0.0016f + 0.006f * Morning + 0.0015f * Night + 0.06f * static_cast<float>(Mix.Fog) + 0.008f * static_cast<float>(Mix.Rain)
 				+ 0.02f * static_cast<float>(Mix.Snow);
 			FogComp->SetFogDensity(Density);
+			// Утренний туман лежит в низинах: плотный у земли, а выше — ясно (крыши и верхушки леса торчат из пелены).
+			FogComp->SetFogHeightFalloff(0.05f + 0.35f * Morning * (1.f - static_cast<float>(Mix.Rain)));
+			// В мороз — искрящаяся дымка: голубее и светлее.
+			const float Frosty = (1.f - FMath::SmoothStep(-25.f, -5.f, Temperature)) * Day;
 			// Цвет дымки — от света неба: ночью не «светится».
 			const float FogLight = FMath::Lerp(0.015f, 1.f, Day) * FMath::Lerp(1.f, 0.6f, Cover);
 			const FLinearColor Clear(0.45f, 0.6f, 0.85f);
 			const FLinearColor Grey(0.55f, 0.58f, 0.62f);
-			FogComp->SetFogInscatteringColor(FMath::Lerp(Clear, Grey, FMath::Clamp(Cover * 1.2f, 0.f, 1.f)) * FogLight);
+			const FLinearColor Haze = FMath::Lerp(FMath::Lerp(Clear, Grey, FMath::Clamp(Cover * 1.2f, 0.f, 1.f)), FLinearColor(0.75f, 0.85f, 1.f), Frosty * 0.6f);
+			FogComp->SetFogInscatteringColor(Haze * FogLight);
 			FogComp->SetVolumetricFogExtinctionScale(1.f + 3.f * static_cast<float>(Mix.Fog));
 		}
 	}

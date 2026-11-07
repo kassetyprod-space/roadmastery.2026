@@ -213,6 +213,19 @@ void APeregonCar::BuildPartSlots()
 		FillBoxes.Add(MakeBox(FString::Printf(TEXT("Fill%d"), I), FillPlaces[I], FVector(4.f), FName(TEXT("Fill"))));
 	}
 
+	// Номера: «А 123 ВС 54» — регион 54 (Новосибирская область), буквы — только те, что есть и в латинице.
+	if (UPeregonArtSubsystem* PlateArt = UPeregonArtSubsystem::Get(this))
+	{
+		static const TCHAR* Letters[] = {TEXT("А"), TEXT("В"), TEXT("Е"), TEXT("К"), TEXT("М"), TEXT("Н"), TEXT("О"), TEXT("Р"), TEXT("С"), TEXT("Т"), TEXT("У"), TEXT("Х")};
+		FRandomStream PlateRand(static_cast<int32>(GetUniqueID() * 7919u + 13u));
+		auto Letter = [&PlateRand]() { return Letters[PlateRand.RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(Letters)) - 1)]; };
+		const FString Number = FString::Printf(TEXT("%s %03d %s%s  54"), Letter(), PlateRand.RandRange(1, 999), Letter(), Letter());
+		UMaterialInstanceDynamic* PlateMat = PlateArt->MakeLabelMaterial(this, Number, FLinearColor(0.02f, 0.02f, 0.02f), FLinearColor(0.92f, 0.92f, 0.9f), 512,
+			112, 74, EPeregonFont::Display);
+		UPeregonArtSubsystem::AddLabelQuad(this, Body, FTransform(FRotator::ZeroRotator, FVector(203.f + 9.2f + 0.35f, 0.f, -15.5f)), 43.f, 10.f, PlateMat);
+		UPeregonArtSubsystem::AddLabelQuad(this, Body, FTransform(FRotator(0.f, 180.f, 0.f), FVector(-204.f - 0.6f - 0.35f, 0.f, 2.f)), 43.f, 10.f, PlateMat);
+	}
+
 	PartsMesh = NewObject<UProceduralMeshComponent>(this, TEXT("PartsMesh"));
 	PartsMesh->SetupAttachment(Body);
 	PartsMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -243,6 +256,18 @@ void APeregonCar::RebuildPartsMesh()
 		}
 		// Настоящая модель узла (PeregonPartMeshes): клеммы, рёбра, шкивы, провода — цвет тускнеет с износом.
 		PeregonPartMeshes::BuildInstalled(I, Buf, FTransform(Places[I].Base), static_cast<float>(R.Part.Condition));
+	}
+	// Брызговики за задними колёсами и антенна на переднем крыле — всегда.
+	{
+		const FColor Rubber = FLinearColor(0.035f, 0.035f, 0.04f).ToFColor(false);
+		const FColor Chrome = FLinearColor(0.75f, 0.76f, 0.78f).ToFColor(false);
+		for (float Y : {-66.f, 66.f})
+		{
+			Buf.AddBox(FVector(-160.f, Y, -34.f), 0.f, FVector(0.8f, 20.f, 22.f), FVector2D(20.f, 20.f), Rubber, true, true);
+			Buf.AddBox(FVector(-160.f, Y, -12.5f), 0.f, FVector(1.5f, 22.f, 1.5f), FVector2D(20.f, 20.f), Chrome, true, true);
+		}
+		Buf.AddBox(FVector(165.f, -79.f, 38.f), 0.f, FVector(2.2f, 2.2f, 1.5f), FVector2D(10.f, 10.f), Chrome, true, true);
+		Buf.AddBox(FVector(165.f, -79.f, 39.5f), 0.f, FVector(0.35f, 0.35f, 85.f), FVector2D(10.f, 10.f), Chrome, true, true);
 	}
 	PartsMesh->ClearAllMeshSections();
 	if (Buf.Vertices.Num() > 0)

@@ -1,4 +1,5 @@
 #include "Game/PeregonPlayerController.h"
+#include "UI/SPeregonRussiaMap.h"
 #include "rgen/Route.h"
 #include "UnrealClient.h"
 #include "Misc/Paths.h"
@@ -402,6 +403,77 @@ void APeregonPlayerController::UiNewGame(const FPeregonRunConfig& Config)
 	if (APeregonGameMode* GM = GetWorld()->GetAuthGameMode<APeregonGameMode>())
 	{
 		GM->StartNewGame(Config);
+	}
+	// Карту убираем на следующем кадре: сейчас мы, возможно, внутри её же Tick.
+	if (RussiaMap.IsValid())
+	{
+		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() { CloseRussiaMap(); }));
+	}
+	// Мир проявляется из темноты (карта ушла в чёрное перед загрузкой).
+	if (PlayerCameraManager)
+	{
+		PlayerCameraManager->StartCameraFade(1.f, 0.f, 2.5f, FLinearColor::Black, false, false);
+	}
+}
+
+void APeregonPlayerController::OpenRussiaMap()
+{
+	UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	if (!Viewport || RussiaMap.IsValid())
+	{
+		return;
+	}
+	TWeakObjectPtr<APeregonPlayerController> Self(this);
+	RussiaMap = SNew(SPeregonRussiaMap)
+		.OnBack_Lambda([Self]() {
+			if (Self.IsValid())
+			{
+				Self->CloseRussiaMap();
+			}
+		})
+		.OnOptions_Lambda([Self]() {
+			if (Self.IsValid())
+			{
+				Self->CloseRussiaMap();
+				if (Self->MenuWidget.IsValid())
+				{
+					Self->MenuWidget->OpenNewGameOptions();
+				}
+			}
+		})
+		.OnChosen_Lambda([Self](int32 Region) {
+			if (Self.IsValid() && Self->MenuWidget.IsValid())
+			{
+				const TSharedPtr<SPeregonMenu> Menu = Self->MenuWidget; // меню закроется во время старта — держим его до конца вызова
+				Menu->StartFromMap(Region);
+			}
+		});
+	RussiaMapContainer = SNew(SWeakWidget).PossiblyNullContent(RussiaMap.ToSharedRef());
+	Viewport->AddViewportWidgetContent(RussiaMapContainer.ToSharedRef(), 110);
+	FInputModeUIOnly Mode;
+	Mode.SetWidgetToFocus(RussiaMap);
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(Mode);
+	bShowMouseCursor = true;
+}
+
+void APeregonPlayerController::CloseRussiaMap()
+{
+	if (RussiaMapContainer.IsValid())
+	{
+		if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
+		{
+			Viewport->RemoveViewportWidgetContent(RussiaMapContainer.ToSharedRef());
+		}
+	}
+	RussiaMapContainer.Reset();
+	RussiaMap.Reset();
+	if (MenuWidget.IsValid())
+	{
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(MenuWidget);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(Mode);
 	}
 }
 
