@@ -31,10 +31,18 @@ import json
 import math
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 
-OVERPASS = "https://overpass-api.de/api/interpreter"
+# Серверы Overpass: при ошибке или таймауте берётся следующий.
+OVERPASS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
+TILES = 4  # город качается кусками TILES × TILES — целиком сервер не успевает (504)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 
@@ -63,12 +71,14 @@ MAJOR = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link
 K = 2.0  # масштаб трассы между городами (1:2)
 
 
-def query(bbox):
-    s, w, n, e = bbox
+def query(tile, clip):
+    """Всё, что начинается в куске tile; геометрия обрезается рамкой города clip (иначе Обь придёт целиком)."""
+    s, w, n, e = tile
     b = f"({s},{w},{n},{e})"
+    c = "({},{},{},{})".format(*clip)
     hw = "|".join(HIGHWAYS)
     return f"""
-[out:json][timeout:600][maxsize:1073741824];
+[out:json][timeout:180];
 (
   way["highway"~"^({hw})$"]{b};
   way["building"]{b};
@@ -81,15 +91,58 @@ def query(bbox):
   way["railway"="rail"]{b};
   node["highway"~"^(traffic_signals|crossing|stop|give_way)$"]{b};
 );
-out body geom{b};
+out body geom{c};
 """
 
 
-def fetch(bbox):
-    data = urllib.parse.urlencode({"data": query(bbox)}).encode()
-    req = urllib.request.Request(OVERPASS, data=data, headers={"User-Agent": "peregon-map-pipeline/1.0"})
-    with urllib.request.urlopen(req, timeout=900) as resp:
-        return json.load(resp)
+def post(q):
+    """Запрос с повторами по нескольким серверам."""
+    data = urllib.parse.urlencode({"data": q}).encode()
+    last = None
+    for attempt in range(3):
+        for url in OVERPASS:
+            req = urllib.request.Request(url, data=data, headers={"User-Agent": "peregon-map-pipeline/1.1"})
+            try:
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    return json.load(resp)
+            except Exception as ex:  # 429/504/обрыв — пробуем другой сервер
+                last = ex
+                print(f"    {url.split('/')[2]}: {ex}")
+        wait = 30 * (attempt + 1)
+        print(f"    все серверы заняты, жду {wait} с…")
+        time.sleep(wait)
+    raise SystemExit(f"Overpass недоступен: {last}. Запустите позже — уже скачанные куски сохранятся.")
+
+
+def fetch(bbox, city):
+    s, w, n, e = bbox
+    tile_dir = os.path.join(HERE, "data", f"{city}.tiles")
+    os.makedirs(tile_dir, exist_ok=True)
+    seen = set()
+    out = []
+    total = TILES * TILES
+    for i in range(TILES):
+        for j in range(TILES):
+            k = i * TILES + j + 1
+            tile = (s + (n - s) * i / TILES, w + (e - w) * j / TILES,
+                    s + (n - s) * (i + 1) / TILES, w + (e - w) * (j + 1) / TILES)
+            path = os.path.join(tile_dir, f"{i}_{j}.json")
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    part = json.load(f)
+                print(f"  кусок {k}/{total}: уже скачан")
+            else:
+                print(f"  кусок {k}/{total}…")
+                part = post(query(tile, bbox))
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(part, f, ensure_ascii=False)
+                time.sleep(2)  # не злим сервер
+            for el in part.get("elements", []):
+                key = (el.get("type"), el.get("id"))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(el)
+    return {"elements": out}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -252,6 +305,39 @@ def road_lanes(tags, hw):
     return max(1, min(lanes, 8)), oneway
 
 
+def clean_clipped(els):
+    """Геометрия, обрезанная рамкой города, приходит с пустыми точками (null) за рамкой. У дорог оставляем
+    самый длинный непрерывный кусок (узлы и точки — в паре), у контуров просто выкидываем пустые точки."""
+    def ok(g):
+        return isinstance(g, dict) and "lat" in g and "lon" in g
+    for el in els:
+        geom = el.get("geometry")
+        if el.get("type") == "way" and geom and not all(ok(g) for g in geom):
+            nodes = el.get("nodes", [])
+            if "highway" in el.get("tags", {}) and len(nodes) == len(geom):
+                best, cur = (0, 0), None
+                for i, g in enumerate(geom + [None]):
+                    if ok(g):
+                        cur = i if cur is None else cur
+                    elif cur is not None:
+                        if i - cur > best[1] - best[0]:
+                            best = (cur, i)
+                        cur = None
+                el["geometry"] = geom[best[0]:best[1]]
+                el["nodes"] = nodes[best[0]:best[1]]
+                if len(el["geometry"]) < 2:
+                    el["geometry"] = []
+            else:
+                el["geometry"] = [g for g in geom if ok(g)]
+                if len(el["geometry"]) < 3:
+                    el["geometry"] = []
+        for m in el.get("members", []):
+            mg = m.get("geometry")
+            if mg:
+                m["geometry"] = [g for g in mg if ok(g)]
+    return els
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("city", nargs="?", default="novosibirsk", choices=sorted(CITIES))
@@ -270,14 +356,14 @@ def main():
             payload = json.load(f)
     else:
         print("Запрос к Overpass API (крупный город — до нескольких минут)…")
-        payload = fetch(cfg["bbox"])
+        payload = fetch(cfg["bbox"], args.city)
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with open(cache, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         print(f"  ответ сохранён: {cache}")
 
     warp = Warp(cfg["center"], cfg["core"], cfg["blend"])
-    els = payload.get("elements", [])
+    els = clean_clipped(payload.get("elements", []))
     print(f"  элементов: {len(els)}")
 
     # Узлы со смыслом для перекрёстков.
