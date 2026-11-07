@@ -298,6 +298,38 @@ void BuildWheel(MeshSet& M, const V3& Center, const V3& Axis, const V3& Ref)
 		Lathe(M, Mat::BlackTrim, Center, Axis, Ref, {{28.56f, H - 0.35f}, {28.56f, H + 0.35f}}, 36, 1.f, 0.f);
 	}
 	Lathe(M, Mat::Metal, Center, Axis, Ref, {{16.3f, -7.2f}, {16.3f, 6.3f}}, 24, 1.f, 0.f);
+	{
+		// Поперечные ламели протектора (шашки) и боковой поясок с «надписью» — шина читается как шина.
+		const V3 Ax0 = Normalize(Axis);
+		const V3 Q0 = Normalize(Ref - Ax0 * Dot(Ref, Ax0));
+		const V3 Q1 = Cross(Ax0, Q0);
+		for (int32_t K = 0; K < 60; ++K)
+		{
+			const float T = 2.f * Pi * static_cast<float>(K) / 60.f;
+			const V3 Radial = Q0 * std::cos(T) + Q1 * std::sin(T);
+			const V3 Tangent = Cross(Ax0, Radial);
+			for (float H : {-5.4f, -1.3f, 1.3f, 5.4f})
+			{
+				const float Shift2 = (K % 2 == 0) ? 0.6f : -0.6f;
+				Box(M, Mat::BlackTrim, Center + Radial * 28.5f + Ax0 * (H + (std::fabs(H) < 2.f ? 0.f : Shift2)), V3(0.22f, std::fabs(H) < 2.f ? 0.9f : 1.6f, 0.1f),
+					Tangent, Ax0, Radial);
+			}
+		}
+		for (int32_t K = 0; K < 24; ++K)
+		{
+			if (K % 6 == 5)
+			{
+				continue;
+			}
+			const float T = 2.f * Pi * static_cast<float>(K) / 24.f;
+			const V3 Radial = Q0 * std::cos(T) + Q1 * std::sin(T);
+			const V3 Tangent = Cross(Ax0, Radial);
+			Box(M, Mat::BlackTrim, Center + Radial * 22.5f + Ax0 * 9.f, V3(1.6f, 0.08f, 0.9f), Tangent, Ax0, Radial);
+		}
+		// Вентиль.
+		const V3 ValveAt = Center + Q0 * 14.8f + Ax0 * 5.6f;
+		Tube(M, Mat::Metal, {ValveAt, ValveAt + Ax0 * 1.6f + Q0 * 0.4f}, 0.35f, 6);
+	}
 	const std::vector<ProfilePoint> Dish = {{17.2f, 6.9f}, {16.2f, 7.45f, true}, {14.8f, 6.1f}, {12.9f, 3.3f}, {10.2f, 3.0f}, {9.7f, 4.3f}};
 	Lathe(M, Mat::Metal, Center, Axis, Ref, Dish, 30, 0.f, 1.f);
 	const std::vector<ProfilePoint> Cap = {{0.f, 8.7f}, {3.6f, 8.5f}, {7.f, 7.5f}, {9.4f, 5.7f}, {9.95f, 4.4f}};
@@ -504,6 +536,14 @@ void BuildGreenhouse(MeshSet& M)
 			Loop.push_back(Top(T));
 		}
 		Tube(M, Mat::BlackTrim, Loop, 1.f, 6, true, false);
+		// Хромовый кант по уплотнителю.
+		const V3 OutN = Normalize(Out);
+		std::vector<V3> Reveal;
+		for (const V3& P : Loop)
+		{
+			Reveal.push_back(P + OutN * 0.85f);
+		}
+		Tube(M, Mat::Chrome, Reveal, 0.3f, 6, true, false);
 	};
 	Glass(WindshieldBase, WindshieldTop, V3(1.f, 0.f, 1.f));
 	Glass(RearGlassBase, RearGlassTop, V3(-1.f, 0.f, 1.f));
@@ -653,6 +693,32 @@ void BuildHoodTrunk(Builder& B)
 		// Усилители изнанки.
 		const float Mid = 0.5f * (X0 + X1);
 		Box(M, Mat::Paint, V3(Mid, 0.f, ZTop(Mid) - 2.2f), V3(0.5f * (X1 - X0) - 6.f, 2.f, 0.8f));
+		for (float Y : {-38.f, 38.f})
+		{
+			Box(M, Mat::Paint, V3(Mid, Y, ZTop(Mid) - 2.f), V3(0.5f * (X1 - X0) - 8.f, 1.6f, 0.7f));
+		}
+		if (Id == Part::Hood)
+		{
+			// Шумоизоляция на изнанке, петли-«гусаки», замок, эмблема на передней кромке.
+			Box(M, Mat::Rubber, V3(Mid + 4.f, 0.f, ZTop(Mid) - 1.3f), V3(0.5f * (X1 - X0) - 16.f, 30.f, 0.2f));
+			for (float S : {-1.f, 1.f})
+			{
+				Tube(M, Mat::Metal, {V3(X0 + 9.f, S * 40.f, ZTop(X0) - 1.2f), V3(X0 + 5.f, S * 40.f, ZTop(X0) - 4.5f), V3(X0 + 0.5f, S * 40.f, ZTop(X0) - 3.f),
+					Hinge + V3(0.f, S * 40.f, 0.f)}, 0.5f, 6);
+			}
+			RoundedBox(M, Mat::Metal, V3(X1 - 6.f, 0.f, ZTop(X1) - 2.2f), V3(1.5f, 2.f, 1.2f), 0.3f);
+			RoundedBox(M, Mat::Chrome, V3(X1 - 4.f, 0.f, ZTop(X1 - 4.f) + Crown + 0.5f), V3(2.4f, 4.5f, 0.35f), 0.3f);
+			RoundedBox(M, Mat::BlackTrim, V3(X1 - 4.f, 0.f, ZTop(X1 - 4.f) + Crown + 0.75f), V3(1.6f, 3.4f, 0.15f), 0.1f);
+		}
+		else
+		{
+			for (float S : {-1.f, 1.f})
+			{
+				Tube(M, Mat::Metal, {V3(X1 - 7.f, S * 42.f, ZTop(X1) - 1.2f), V3(X1 - 3.5f, S * 42.f, ZTop(X1) - 5.f), V3(X1 + 0.5f, S * 42.f, ZTop(X1) - 3.5f),
+					Hinge + V3(0.f, S * 42.f, 0.f)}, 0.55f, 6);
+			}
+			RoundedBox(M, Mat::Metal, V3(X0 + 4.f, 0.f, ZTop(X0) - 2.f), V3(1.2f, 3.f, 1.5f), 0.3f);
+		}
 		B.Add(Id, M, Hinge);
 		const float HalfX = 0.5f * (X1 - X0);
 		B.Hit(Id, Tag, V3(Mid, 0.f, ZTop(Mid) + 1.f), V3(HalfX, 62.f, 3.f), Hinge);
@@ -730,6 +796,62 @@ void BuildDoor(Builder& B, Part Id)
 	const V3 KnobBase = Card(KnobX, kBelt - 1.5f, 1.2f);
 	Tube(M, Mat::Chrome, {KnobBase, KnobBase + V3(0.f, 0.f, 3.f)}, 0.5f, 8);
 	Lathe(M, Mat::Chrome, KnobBase + V3(0.f, 0.f, 3.f), V3(0.f, 0.f, 1.f), V3(1.f, 0.f, 0.f), {{0.5f, 0.f}, {0.6f, 0.3f}, {0.f, 0.5f}}, 8);
+
+	// Карман внизу, хромовый молдинг по карте, динамик (передние) или пепельница (задние), уплотнитель по
+	// периметру проёма, красный катафот на торце.
+	{
+		const float PX0 = bFront ? 10.f : -94.f;
+		const float PX1 = bFront ? 70.f : -40.f;
+		const float PMid = 0.5f * (PX0 + PX1);
+		RoundedBox(M, Mat::InteriorDark, Card(PMid, -11.f, 1.6f), V3(0.5f * (PX1 - PX0), 1.6f, 5.f), 0.6f);
+		RoundedBox(M, Mat::BlackTrim, Card(PMid, -7.f, 2.9f), V3(0.5f * (PX1 - PX0) - 1.f, 0.3f, 0.6f), 0.2f);
+		std::vector<V3> Trim;
+		for (float X : Range(X0 + 4.f, X1 - 4.f, 10.f))
+		{
+			Trim.push_back(Card(X, 31.f, 0.25f));
+		}
+		Tube(M, Mat::Chrome, Trim, 0.3f, 6);
+		// Вертикальная «стёжка» нижней части карты.
+		for (float X : Range(X0 + 8.f, X1 - 8.f, 6.f))
+		{
+			if (X > PX0 - 1.f && X < PX1 + 1.f)
+			{
+				continue;
+			}
+			Box(M, Mat::InteriorDark, Card(X, -6.f, 0.05f), V3(0.18f, 0.12f, 12.f));
+		}
+		if (bFront)
+		{
+			const V3 Spk = Card(78.f, -4.f, 0.2f);
+			Lathe(M, Mat::BlackTrim, Spk, V3(0.f, -S, 0.f), V3(1.f, 0.f, 0.f), {{0.f, 0.3f}, {5.f, 0.3f}, {5.6f, 0.f}}, 20, 0.f, 1.f);
+			for (float Dz : {-3.f, -1.5f, 0.f, 1.5f, 3.f})
+			{
+				Box(M, Mat::InteriorDark, Spk + V3(0.f, -S * 0.32f, Dz), V3(std::sqrt(std::max(0.f, 25.f - Dz * Dz)), 0.05f, 0.25f));
+			}
+		}
+		else
+		{
+			RoundedBox(M, Mat::Chrome, Card(-48.f, 24.f, 0.4f), V3(5.f, 0.6f, 2.f), 0.3f);
+			Box(M, Mat::BlackTrim, Card(-48.f, 24.f, 0.95f), V3(4.f, 0.1f, 0.3f));
+		}
+		// Уплотнитель по торцу двери и катафот.
+		const float EdgeX = bFront ? X0 + 0.6f : X0 + 0.6f;
+		Box(M, Mat::Taillamp, V3(EdgeX - 0.6f, S * (HalfW(EdgeX, 0.f) - 4.f), -6.f), V3(0.12f, 2.2f, 1.3f));
+		std::vector<V3> Seal;
+		for (float Z : Range(kDoorBottom + 1.f, kBelt - 1.f, 4.f))
+		{
+			Seal.push_back(V3(X0 + 1.f, S * (HalfW(X0, Z) - 6.f), Z));
+		}
+		Tube(M, Mat::Rubber, Seal, 0.7f, 5);
+		// Личинка замка (передние двери).
+		if (bFront)
+		{
+			Lathe(M, Mat::Chrome, V3(HandleX - 9.f, S * (HalfW(HandleX - 9.f, 27.f) + 0.1f), 27.f), V3(0.f, S, 0.f), V3(1.f, 0.f, 0.f),
+				{{0.f, 0.5f}, {0.9f, 0.4f}, {1.f, 0.f}}, 12, 0.f, 1.f);
+		}
+		// Внутренний уплотнитель стекла («бархотка») по верху карты.
+		Tube(M, Mat::BlackTrim, {Card(X0 + 3.f, kBelt - 0.8f, -1.f), Card(X1 - 3.f, kBelt - 0.8f, -1.f)}, 0.5f, 5);
+	}
 
 	// Зеркало заднего вида на водительской двери.
 	if (Id == Part::DoorFL)
@@ -988,8 +1110,8 @@ void BuildEngineBay(MeshSet& M)
 	RoundedBox(M, Mat::Metal, V3(192.f, 0.f, 28.f), V3(1.2f, 44.f, 1.5f), 0.4f);
 	Lathe(M, Mat::GaugeFace, V3(176.f, -32.f, -4.f), Ez, Ex,
 		{{0.f, 0.f}, {5.5f, 0.f}, {6.f, 1.f}, {6.f, 16.f}, {5.f, 18.f}, {1.5f, 18.5f, true}, {1.5f, 21.f, true}, {0.f, 21.f}}, 18);
-	Lathe(M, Mat::Metal, V3(96.f, -36.f, 24.f), Ex, Ez, {{0.f, 0.f}, {3.5f, 0.f, true}, {3.5f, 10.f, true}, {0.f, 10.f}}, 14);
-	RoundedBox(M, Mat::GaugeFace, V3(101.f, -36.f, 29.5f), V3(3.f, 3.f, 2.f), 0.8f);
+	Lathe(M, Mat::Metal, V3(100.f, -36.f, 24.f), Ex, Ez, {{0.f, 0.f}, {3.5f, 0.f, true}, {3.5f, 10.f, true}, {0.f, 10.f}}, 14);
+	RoundedBox(M, Mat::GaugeFace, V3(105.f, -36.f, 29.5f), V3(3.f, 3.f, 2.f), 0.8f);
 	(void)Ey;
 }
 
@@ -1131,6 +1253,258 @@ void BuildControls(Builder& B)
 	}
 	(void)Ey;
 }
+
+// Спираль пружины.
+std::vector<V3> Helix(const V3& Base, float Radius, float Height, float Turns)
+{
+	std::vector<V3> P;
+	const int32_t N = static_cast<int32_t>(Turns * 14.f);
+	for (int32_t K = 0; K <= N; ++K)
+	{
+		const float T = static_cast<float>(K) / static_cast<float>(N);
+		const float A = 2.f * Pi * Turns * T;
+		P.push_back(Base + V3(Radius * std::cos(A), Radius * std::sin(A), Height * T));
+	}
+	return P;
+}
+
+// Мелочи, из которых складывается «настоящая» машина: снаружи, в салоне, под капотом, в багажнике и снизу.
+void BuildDetails(MeshSet& M)
+{
+	const V3 Ex(1.f, 0.f, 0.f);
+	const V3 Ey(0.f, 1.f, 0.f);
+	const V3 Ez(0.f, 0.f, 1.f);
+
+	// ---- Снаружи ----
+	for (float S : {-1.f, 1.f})
+	{
+		// Резиновый молдинг порога и хромовые окантовки арок.
+		std::vector<V3> Sill;
+		for (float X : Range(kWheelXR + kArchR + 1.5f, kWheelXF - kArchR - 1.5f, 10.f))
+		{
+			Sill.push_back(SidePoint(X, -26.f, S) + V3(0.f, S * 0.2f, 0.f));
+		}
+		Tube(M, Mat::BlackTrim, Sill, 0.8f, 6);
+		for (float Center : {kWheelXF, kWheelXR})
+		{
+			std::vector<V3> Lip;
+			for (int32_t K = 0; K <= 28; ++K)
+			{
+				const float Phi = Pi * static_cast<float>(K) / 28.f;
+				const float X = Center + (kArchR + 0.2f) * std::cos(Phi);
+				const float Z = std::max(-27.f, kArchZ + (kArchR + 0.2f) * std::sin(Phi));
+				Lip.push_back(SidePoint(X, Z, S) + V3(0.f, S * 0.15f, 0.f));
+			}
+			Tube(M, Mat::Chrome, Lip, 0.4f, 6);
+		}
+		// Вентиляционная решётка на задней стойке.
+		for (int32_t K = 0; K < 5; ++K)
+		{
+			const float Z = 50.f + 2.f * static_cast<float>(K);
+			const float X = -96.f + 0.35f * static_cast<float>(K);
+			RoundedBox(M, Mat::BlackTrim, GlassSide(X, Z, S, -0.5f), V3(4.6f, 0.4f, 0.55f), 0.2f);
+		}
+		Tube(M, Mat::Chrome, {GlassSide(-101.5f, 48.5f, S, -0.6f), GlassSide(-90.f, 48.5f, S, -0.6f), GlassSide(-89.3f, 59.5f, S, -0.6f),
+			GlassSide(-100.8f, 59.5f, S, -0.6f)}, 0.3f, 6, true, false);
+		// Форсунки омывателя на жабо.
+		RoundedBox(M, Mat::BlackTrim, V3(90.5f, S * 14.f, 41.9f), V3(1.f, 0.6f, 0.5f), 0.3f);
+		// Буксирные проушины.
+		Tube(M, Mat::Metal, {V3(kXf - 4.f, S * 42.f, -28.f), V3(kXf + 3.f, S * 42.f, -28.f), V3(kXf + 3.f, S * 42.f, -24.f)}, 0.7f, 6);
+		// Кронштейны бамперов.
+		for (float Sign : {-1.f, 1.f})
+		{
+			const float BaseX = Sign > 0.f ? kXf : kXr;
+			RoundedBox(M, Mat::Metal, V3(BaseX + Sign * 2.f, S * 48.f, -15.f), V3(2.5f, 1.5f, 2.f), 0.3f);
+		}
+	}
+	// Воздухозаборные щели под решёткой и надпись-шильдик на задней панели, замок багажника, фонари номера.
+	Box(M, Mat::BlackTrim, V3(kXf + 0.15f, 0.f, 1.2f), V3(0.25f, 34.f, 1.2f));
+	Box(M, Mat::BlackTrim, V3(kXf + 0.15f, 0.f, -2.8f), V3(0.25f, 30.f, 0.8f));
+	Box(M, Mat::Chrome, V3(kXr - 0.4f, 0.f, 25.f), V3(0.3f, 34.f, 0.5f));
+	Lathe(M, Mat::Chrome, V3(kXr - 0.5f, 0.f, 21.5f), V3(-1.f, 0.f, 0.f), Ez, {{0.f, 0.6f}, {1.3f, 0.5f}, {1.5f, 0.f}}, 14, 0.f, 1.f);
+	for (int32_t K = 0; K < 5; ++K)
+	{
+		// Шильдик: пять коротких хромовых «букв» справа над фонарём.
+		RoundedBox(M, Mat::Chrome, V3(kXr - 0.35f, 37.f + 2.2f * static_cast<float>(K), 27.6f), V3(0.2f, 0.8f, 1.f), 0.2f);
+	}
+	for (float Y : {-15.f, 15.f})
+	{
+		RoundedBox(M, Mat::Chrome, V3(kXr - 0.8f, Y, 9.f), V3(0.8f, 3.f, 1.2f), 0.4f);
+		Box(M, Mat::Headlamp, V3(kXr - 0.9f, Y, 8.f), V3(0.8f, 2.4f, 0.3f));
+	}
+	// Наконечник глушителя.
+	Lathe(M, Mat::Chrome, V3(-213.f, 32.f, -32.5f), V3(-1.f, 0.f, 0.f), Ez, {{2.6f, -2.f}, {2.9f, -2.f}, {2.9f, 1.5f}, {2.5f, 1.5f}}, 14);
+
+	// ---- Снизу: подвеска, мосты, вал ----
+	for (float S : {-1.f, 1.f})
+	{
+		// Передняя: пружина, амортизатор, нижний рычаг, поворотный кулак.
+		Tube(M, Mat::BlackTrim, Helix(V3(kWheelXF, S * 52.f, -18.f), 5.f, 26.f, 5.f), 0.75f, 6);
+		Tube(M, Mat::Metal, {V3(kWheelXF, S * 52.f, -22.f), V3(kWheelXF, S * 52.f, 12.f)}, 1.6f, 8);
+		Tube(M, Mat::Metal, {V3(kWheelXF - 14.f, S * 40.f, -30.f), V3(kWheelXF, S * 60.f, -27.f), V3(kWheelXF + 14.f, S * 40.f, -30.f)}, 1.3f, 6);
+		Tube(M, Mat::Metal, {V3(kWheelXF, S * 60.f, -27.f), V3(kWheelXF, S * 61.f, -15.f)}, 1.4f, 6);
+		Lathe(M, Mat::Metal, V3(kWheelXF, S * 61.f, -24.f), V3(0.f, S, 0.f), Ex, {{0.f, 0.f}, {12.f, 0.f}, {12.f, 2.f}, {0.f, 2.f}}, 20);
+		// Задняя: мост, продольные тяги, амортизатор, тормозной барабан.
+		Tube(M, Mat::Metal, {V3(kWheelXR + 48.f, S * 46.f, -29.f), V3(kWheelXR + 2.f, S * 50.f, -27.f)}, 1.4f, 6);
+		Tube(M, Mat::Metal, {V3(kWheelXR - 6.f, S * 54.f, -26.f), V3(kWheelXR - 8.f, S * 54.f, -12.f)}, 1.4f, 8);
+		Tube(M, Mat::BlackTrim, Helix(V3(kWheelXR + 4.f, S * 50.f, -22.f), 5.f, 18.f, 4.f), 0.75f, 6);
+		Lathe(M, Mat::Metal, V3(kWheelXR, S * 59.f, -24.f), V3(0.f, S, 0.f), Ex, {{0.f, 0.f}, {11.5f, 0.f}, {12.f, 3.5f}, {0.f, 3.5f}}, 20);
+	}
+	Tube(M, Mat::Metal, {V3(kWheelXR, -60.f, -24.f), V3(kWheelXR, 60.f, -24.f)}, 3.6f, 10);
+	Lathe(M, Mat::Metal, V3(kWheelXR - 4.f, 0.f, -26.f), Ex, Ez, {{0.f, -9.f}, {6.f, -8.f}, {10.f, -3.f}, {10.f, 3.f}, {6.f, 8.f}, {0.f, 10.f}}, 16);
+	Tube(M, Mat::Metal, {V3(80.f, 0.f, -31.f), V3(kWheelXR + 10.f, 0.f, -28.f)}, 3.f, 10);
+	RoundedBox(M, Mat::Engine, V3(100.f, 0.f, -26.f), V3(18.f, 10.f, 7.f), 3.f); // коробка передач
+	RoundedBox(M, Mat::Metal, V3(-150.f, 0.f, -33.f), V3(24.f, 30.f, 1.5f), 1.f); // днище багажника/бак
+	Tube(M, Mat::Metal, {V3(kWheelXF + 18.f, -52.f, -27.f), V3(kWheelXF + 18.f, 52.f, -27.f)}, 1.2f, 8); // стабилизатор
+
+	// ---- Салон ----
+	// Обдув лобового стекла: щели на верхней полке торпедо.
+	{
+		const V3 TX = Normalize(V3(1.f, 0.f, -0.56f));
+		const V3 TZ = Normalize(V3(0.56f, 0.f, 1.f));
+		for (float S : {-1.f, 1.f})
+		{
+			RoundedBox(M, Mat::BlackTrim, V3(81.f, S * 30.f, 42.45f), V3(1.4f, 15.f, 0.25f), 0.2f, TX, Ey, TZ);
+			for (float Dy : {-10.f, -5.f, 0.f, 5.f, 10.f})
+			{
+				Box(M, Mat::InteriorDark, V3(81.f, S * 30.f + Dy, 42.6f), V3(1.3f, 0.15f, 0.2f), TX, Ey, TZ);
+			}
+		}
+		// Решётка динамика посередине.
+		RoundedBox(M, Mat::BlackTrim, V3(78.5f, 0.f, 44.f), V3(2.2f, 7.f, 0.25f), 0.3f, TX, Ey, TZ);
+		for (float Dy : {-5.f, -3.f, -1.f, 1.f, 3.f, 5.f})
+		{
+			Box(M, Mat::Chrome, V3(78.5f, Dy, 44.15f), V3(2.f, 0.12f, 0.2f), TX, Ey, TZ);
+		}
+	}
+	// Хромовый молдинг по торпедо со стороны пассажира, пепельница.
+	Box(M, Mat::Chrome, V3(72.95f, 31.5f, 37.2f), V3(0.15f, 32.f, 0.25f));
+	RoundedBox(M, Mat::Chrome, V3(72.7f, 2.f, 19.3f), V3(0.4f, 6.f, 1.4f), 0.4f);
+	Box(M, Mat::InteriorDark, V3(72.3f, 2.f, 19.6f), V3(0.08f, 4.f, 0.2f));
+	// Контрольные лампы между приборами.
+	{
+		const Mat Lamps[] = {Mat::Indicator, Mat::Taillamp, Mat::Headlamp, Mat::Indicator};
+		for (int32_t K = 0; K < 4; ++K)
+		{
+			Lathe(M, Lamps[K], V3(71.85f, -35.f, 45.6f - 2.7f * static_cast<float>(K)), V3(-1.f, 0.f, 0.f), Ez, {{0.f, 0.15f}, {0.75f, 0.1f}, {0.8f, 0.f}}, 10,
+				0.f, 1.f);
+		}
+	}
+	// Ряд тумблеров слева от рулевой колонки.
+	for (int32_t K = 0; K < 4; ++K)
+	{
+		const float Y = -60.f + 3.2f * static_cast<float>(K);
+		RoundedBox(M, Mat::BlackTrim, V3(72.9f, Y, 27.f), V3(0.3f, 1.2f, 1.6f), 0.3f);
+		Tube(M, Mat::Chrome, {V3(72.6f, Y, 27.f), V3(71.2f, Y, 27.8f)}, 0.25f, 6);
+	}
+	// Кожух рулевой колонки с подрулевыми рычагами.
+	{
+		const V3 Col = Normalize(V3(1.f, 0.f, -0.45f));
+		const V3 Up = Cross(Col, Ey);
+		const V3 C = kSteeringCenter + Col * 12.f;
+		RoundedBox(M, Mat::InteriorDark, C, V3(6.5f, 4.2f, 3.8f), 1.5f, Col, Ey, Up * -1.f);
+		for (float S : {-1.f, 1.f})
+		{
+			const V3 Root = C - Col * 4.f + Ey * (S * 4.f);
+			Tube(M, Mat::BlackTrim, {Root, Root + Ey * (S * 9.f) - Col * 2.f + Up * 0.5f}, 0.55f, 6);
+			Lathe(M, Mat::BlackTrim, Root + Ey * (S * 9.f) - Col * 2.f + Up * 0.5f, Ey * S, Ex, {{0.8f, 0.f}, {0.9f, 1.f}, {0.f, 1.4f}}, 8);
+		}
+	}
+	// Коврики, накладки порогов, ручки над дверьми, дуги потолка, динамики на полке.
+	for (float S : {-1.f, 1.f})
+	{
+		RoundedBox(M, Mat::Rubber, V3(46.f, S * 35.f, -25.6f), V3(20.f, 16.f, 0.45f), 0.4f);
+		RoundedBox(M, Mat::Rubber, V3(-44.f, S * 35.f, -25.6f), V3(12.f, 16.f, 0.45f), 0.4f);
+		for (float Dx : {-12.f, -6.f, 0.f, 6.f, 12.f})
+		{
+			Box(M, Mat::BlackTrim, V3(46.f + Dx, S * 35.f, -25.12f), V3(0.3f, 13.f, 0.06f));
+		}
+		Box(M, Mat::Chrome, V3(39.f, S * 70.5f, -22.45f), V3(46.f, 4.f, 0.12f));
+		Box(M, Mat::Chrome, V3(-61.f, S * 70.5f, -22.45f), V3(38.f, 4.f, 0.12f));
+		for (float X : {32.f, -60.f})
+		{
+			Tube(M, Mat::InteriorDark, {V3(X - 10.f, S * 61.8f, 83.f), V3(X - 8.5f, S * 60.f, 81.4f), V3(X + 8.5f, S * 60.f, 81.4f), V3(X + 10.f, S * 61.8f, 83.f)},
+				0.8f, 8);
+		}
+		RoundedBox(M, Mat::Chrome, V3(-30.f, S * 61.8f, 81.5f), V3(0.6f, 0.6f, 1.2f), 0.3f); // крючок для одежды
+		Lathe(M, Mat::BlackTrim, V3(-106.f, S * 38.f, 38.6f), Ez, Ex, {{0.f, 0.3f}, {6.f, 0.3f}, {6.5f, 0.f}}, 20, 0.f, 1.f);
+		for (float Dx : {-3.f, -1.5f, 0.f, 1.5f, 3.f})
+		{
+			Box(M, Mat::InteriorDark, V3(-106.f + Dx, S * 38.f, 38.92f), V3(0.2f, std::sqrt(std::max(0.f, 30.f - Dx * Dx)), 0.05f));
+		}
+	}
+	for (float X : {34.f, 8.f, -22.f, -50.f})
+	{
+		std::vector<V3> Bow;
+		for (float T : Range(-1.f, 1.f, 0.1f))
+		{
+			const float Y = T * (RoofHalf() - 4.f);
+			Bow.push_back(V3(X, Y, RoofZ(Y) - 2.15f));
+		}
+		Tube(M, Mat::Headliner, Bow, 0.35f, 6);
+	}
+	// Сиденья: поперечная «стёжка» подушек и спинок, задняя панель спинок с карманом.
+	for (float S : {-1.f, 1.f})
+	{
+		const float Y = S * 35.f;
+		const float Fx = 6.f;
+		for (float X : Range(Fx - 26.f, Fx + 10.f, 6.f))
+		{
+			RoundedBox(M, Mat::Fabric, V3(X, Y, -6.2f), V3(2.4f, 16.f, 0.8f), 0.7f);
+		}
+		const float Tilt = Rad(12.f);
+		const V3 BackZ(-std::sin(Tilt), 0.f, std::cos(Tilt));
+		const V3 BackX(std::cos(Tilt), 0.f, std::sin(Tilt));
+		const V3 BackC(Fx - 35.f, Y, 18.f);
+		for (float T : Range(-20.f, 18.f, 6.4f))
+		{
+			RoundedBox(M, Mat::Fabric, BackC + BackX * 4.9f + BackZ * T, V3(0.8f, 15.5f, 2.4f), 0.7f, BackX, Ey, BackZ);
+		}
+		RoundedBox(M, Mat::InteriorDark, BackC - BackX * 5.1f, V3(0.4f, 21.f, 24.f), 0.3f, BackX, Ey, BackZ);
+		RoundedBox(M, Mat::InteriorDark, BackC - BackX * 5.8f - BackZ * 10.f, V3(0.5f, 17.f, 8.f), 0.4f, BackX, Ey, BackZ);
+		// Рычаг наклона спинки.
+		Tube(M, Mat::Chrome, {V3(Fx - 26.f, Y + S * 25.f, -8.f), V3(Fx - 20.f, Y + S * 26.f, -6.f)}, 0.5f, 6);
+		// Задний диван: стёжка.
+		const float RY = S * 30.f;
+		for (float X : Range(-92.f, -60.f, 6.4f))
+		{
+			RoundedBox(M, Mat::Fabric, V3(X, RY, -7.2f), V3(2.4f, 22.f, 0.8f), 0.7f);
+		}
+		const float RT = Rad(15.f);
+		const V3 RBX(std::cos(RT), 0.f, std::sin(RT));
+		const V3 RBZ(-std::sin(RT), 0.f, std::cos(RT));
+		for (float T : Range(-18.f, 18.f, 6.f))
+		{
+			RoundedBox(M, Mat::Fabric, V3(-98.f, RY, 13.f) + RBX * 5.4f + RBZ * T, V3(0.8f, 22.f, 2.3f), 0.7f, RBX, Ey, RBZ);
+		}
+		// Задние ремни: замки на подушке.
+		RoundedBox(M, Mat::BlackTrim, V3(-97.f, S * 8.f, -6.f), V3(1.5f, 1.f, 2.5f), 0.5f);
+	}
+	// Подлокотник-перегородка в спинке дивана.
+	RoundedBox(M, Mat::Fabric, V3(-96.f, 0.f, 4.f), V3(4.5f, 6.f, 14.f), 2.5f);
+
+	// ---- Под капотом ----
+	Lathe(M, Mat::BlackTrim, V3(94.f, -36.f, 24.f), Ex, Ez, {{0.f, 0.f}, {9.5f, 0.f}, {10.f, 1.5f}, {9.5f, 5.f}, {0.f, 6.f}}, 24); // вакуумник
+	RoundedBox(M, Mat::Engine, V3(99.f, 26.f, 22.f), V3(5.f, 14.f, 9.f), 2.f);  // корпус печки
+	Lathe(M, Mat::Metal, V3(98.f, -12.f, 31.f), Ey, Ez, {{0.f, -4.f}, {3.f, -4.f}, {3.f, 4.f}, {0.f, 4.f}}, 12); // моторчик дворников
+	RoundedBox(M, Mat::BlackTrim, V3(97.f, -22.f, 29.f), V3(2.f, 5.f, 3.5f), 0.5f); // блок предохранителей
+	Lathe(M, Mat::Metal, V3(110.f, 34.f, 16.f), Ez, Ex, {{0.f, 0.f}, {2.8f, 0.f}, {2.8f, 11.f}, {1.6f, 12.5f}, {0.f, 12.5f}}, 12); // катушка
+	Tube(M, Mat::BlackTrim, {V3(110.f, 34.f, 28.5f), V3(118.f, 22.f, 30.f), V3(150.f, 12.f, 26.f)}, 0.4f, 6);
+	Tube(M, Mat::BlackTrim, {V3(95.5f, -40.f, 33.f), V3(95.5f, 40.f, 33.f)}, 0.6f, 6); // жгут проводов
+	Tube(M, Mat::BlackTrim, {V3(95.5f, -40.f, 31.f), V3(150.f, -42.f, 30.f), V3(188.f, -40.f, 24.f), V3(190.f, -20.f, 22.f)}, 0.6f, 6);
+	Lathe(M, Mat::BlackTrim, V3(183.f, 0.f, 2.f), Ex, Ez, {{13.f, 0.f}, {14.f, 0.f}, {14.f, 5.f}, {13.f, 5.f}}, 24); // кожух вентилятора
+	Lathe(M, Mat::BlackTrim, V3(194.f, 32.f, -12.f), V3(1.f, 0.f, 0.f), Ez, {{0.f, 0.f}, {2.f, 0.f}, {5.f, 3.f}, {5.f, 3.5f}, {0.f, 3.5f}}, 14); // сигнал
+	RoundedBox(M, Mat::Metal, V3(193.f, 0.f, 30.5f), V3(1.5f, 4.f, 2.f), 0.4f); // замок капота
+	Tube(M, Mat::Indicator, {V3(150.f, -17.f, 8.f), V3(151.f, -18.f, 26.f)}, 0.35f, 6); // щуп
+	Lathe(M, Mat::Indicator, V3(151.f, -18.f, 26.f), Ez, Ex, {{0.f, 1.f}, {1.f, 1.f}, {1.f, 0.f}}, 8);
+	Tube(M, Mat::Metal, {V3(152.f, 18.f, 6.f), V3(150.f, 30.f, -6.f), V3(160.f, 36.f, -20.f)}, 1.f, 6); // трубка топлива/тормозов
+
+	// ---- Багажник ----
+	Box(M, Mat::Rubber, V3(-156.f, 0.f, -19.7f), V3(42.f, 60.f, 0.25f));
+	Tube(M, Mat::Metal, {V3(-150.f, 48.f, 2.f), V3(-150.f, 62.f, 10.f), V3(-150.f, HalfW(-150.f, 18.f) - 2.f, 18.f)}, 2.2f, 10); // горловина бака
+	RoundedBox(M, Mat::Dome, V3(-110.f, 0.f, 35.f), V3(0.6f, 4.f, 1.2f), 0.3f); // плафон багажника
+	(void)Ez;
+}
 } // namespace
 
 // ---------------------------------------------------------------------------------------------
@@ -1145,6 +1519,7 @@ Model BuildSokol()
 		BuildInterior(M);
 		BuildEngineBay(M);
 		BuildTrunkInside(M);
+		BuildDetails(M);
 		B.Add(Part::Body, M, V3(), false);
 		B.Out.HitBoxes.push_back({Part::Body, "Fuel", V3(-150.f, 80.5f, 18.f), V3(2.f, 6.f, 6.f)});
 		// Полости бардачка и багажника: видны лучу, только когда крышка открыта (закрытая — ближе и перекрывает).
