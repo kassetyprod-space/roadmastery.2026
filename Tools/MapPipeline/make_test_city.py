@@ -137,4 +137,13 @@ for k in range(80):  # частный сектор вдоль шоссе — в 
     poly([(n, e), (n, e + 10), (n + 8, e + 10), (n + 8, e)], {"building": "house"})
 poly([(2400, 300), (2400, 420), (2480, 420), (2480, 300)], {"building": "industrial"})
 
+# Двор с детской площадкой, рынок, киоски, роща.
+poly([(-1250, 700), (-1250, 730), (-1230, 730), (-1230, 700)], {"leisure": "playground"})
+poly([(600, -900), (600, -840), (640, -840), (640, -900)], {"amenity": "marketplace", "name": "Центральный рынок"})
+for n, e in [(470, 40), (-430, -45), (930, 40)]:
+    i = nid()
+    g = ll(n, e)
+    els.append({"type": "node", "id": i, "lat": g["lat"], "lon": g["lon"], "tags": {"shop": "kiosk"}})
+poly([(2600, -1200), (2600, -700), (3000, -700), (3000, -1200)], {"landuse": "forest"})
+
 print(json.dumps({"elements": els}, ensure_ascii=False))

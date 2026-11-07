@@ -67,6 +67,7 @@ enum class EPeregonWorldMat : uint8
 	Sidewalk,   // тротуарная плитка
 	Steel,      // перила, арки мостов
 	Yard,       // земля городских дворов: вытоптанный газон с пылью
+	FarForest,  // кромка дальнего леса (заглушки за пределами настоящих деревьев)
 	Count UMETA(Hidden)
 };
 
@@ -177,6 +178,25 @@ private:
 	double CityBaseZ = 0.0;
 	void LoadRealCity();
 	void BuildRealCity();
+	// Подгрузка города квадратами (TileSize rgen, 400 м): 0 — нет, 1 — дальний вид, 2 — полностью.
+	struct FCityTileSlot
+	{
+		int32 Index = -1; // в CityRes.Tiles
+		int32 Level = 0;
+		TArray<int32> Props; // в CityRes.Props
+		TArray<TWeakObjectPtr<UActorComponent>> Comps;
+	};
+	TMap<FIntPoint, FCityTileSlot> CityTiles;
+	rgen::CityResult CityRes;
+	double CityTileSize = 400.0;
+	bool bCityStreamAll = false;
+	double CityFullRadius = 650.0;  // м: полный квадрат (коллизия, знаки, фонари)
+	double CityLodRadius = 5000.0;  // м: дальний вид (коробки домов)
+	void UpdateCityStreaming(const FVector& Focus);
+	void BuildCityTile(FCityTileSlot& Slot, int32 Level);
+	void ClearCityTile(FCityTileSlot& Slot);
+	void AddCityProps(FCityTileSlot& Slot);
+	UMaterialInterface* CityMaterial(rgen::CityMat Cm) const;
 	FVector RidgeCenter = FVector(1e12);
 	rgen::SeasonLook AppliedSeason;
 	bool bSeasonApplied = false;

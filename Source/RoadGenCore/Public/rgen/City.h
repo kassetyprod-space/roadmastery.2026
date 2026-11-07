@@ -90,6 +90,21 @@ struct CityLandmark
 	double Radius = 0.0;
 };
 
+// Площадка по контуру: playground — детская площадка, marketplace — рынок.
+struct CityArea
+{
+	std::string Kind;
+	std::vector<CityPt> Ring;
+};
+
+// Точка: kiosk — киоск, marketplace — рынок без контура.
+struct CityPoi
+{
+	std::string Kind;
+	double X = 0.0;
+	double Y = 0.0;
+};
+
 struct RGEN_API CityData
 {
 	std::string Name;
@@ -104,6 +119,9 @@ struct RGEN_API CityData
 	std::vector<std::vector<CityPt>> Islands;
 	std::vector<std::vector<CityPt>> Parks;
 	std::vector<std::vector<CityPt>> Rails;
+	std::vector<std::vector<CityPt>> Woods; // лес и рощи (густо деревьев)
+	std::vector<CityArea> Areas;
+	std::vector<CityPoi> Pois;
 
 	// Текст файла .city (UTF-8). false — не тот формат или битые строки (Error — что именно).
 	bool Parse(const std::string& Text, std::string* Error = nullptr);
@@ -130,6 +148,7 @@ enum class CityMat : uint8_t
 	WallHouse,
 	Roof,
 	LitWindow,  // окна, в которых вечером горит свет
+	LodMass,    // дальний вид: дома одной коробкой, цвет — в вершинах (без окон, без коллизии)
 	Count
 };
 
@@ -164,7 +183,15 @@ enum class CityPropKind : uint8_t
 	SignRoundabout, // 4.3 «Круговое движение»
 	SignSpeed,    // 3.24, Value — км/ч
 	StreetName,   // табличка с названием улицы, Text
-	Landmark      // точка модели достопримечательности: Text — ключ, Value — радиус, м
+	Landmark,     // точка модели достопримечательности: Text — ключ, Value — радиус, м
+	Tree,         // дерево: Value — 0 лиственное (берёза, тополь), 1 хвойное; Size — масштаб
+	Playground,   // детская площадка: Yaw — длинная сторона
+	Kiosk,        // киоск: Yaw — лицом к улице, Value — вид
+	Market,       // рынок: Yaw — вдоль рядов, Size — длина, Size2 — ширина, м
+	Bench,        // лавка: Yaw — куда смотрит сидящий
+	BusStop,      // остановка: Yaw — лицом к дороге, Text — название, Value — вид павильона
+	Barrier,      // бетонные блоки поперёк въезда: Yaw — вдоль ряда, Size — длина ряда, м
+	SignNoEntry   // 3.1 «Въезд запрещён»
 };
 
 struct CityProp
@@ -175,6 +202,8 @@ struct CityProp
 	double Z = 0.0;
 	double Yaw = 0.0; // градусы, как в Unreal: 0 — на север (+X), 90 — на восток (+Y)
 	int Value = 0;
+	double Size = 1.0;
+	double Size2 = 0.0;
 	std::string Text;
 };
 
@@ -191,6 +220,9 @@ struct CityBuildOptions
 	double KeepoutClear = 35.0;  // дома ближе этого к точкам Keepout не строятся (там идёт трасса)
 	double ApronWidth = 1.4;     // отмостка и тротуар вокруг многоэтажек, м
 	double RouteHalfWidth = 7.0; // полуширина трассы с обочинами: городские улицы на ней не строятся
+	// Игрок ездит по крупным улицам (этот класс и крупнее, со съездами); въезды на остальные перекрыты блоками.
+	CityRoadClass DrivableMinClass = CityRoadClass::Secondary;
+	bool BlockMinorStreets = true;
 };
 
 struct RGEN_API CityResult
@@ -208,6 +240,13 @@ struct RGEN_API CityResult
 	int EdgesOnRoute = 0;     // улицы, совпавшие с трассой (не строятся)
 	int MergedJunctionNodes = 0; // узлов OSM, слитых в общие перекрёстки
 	int SidewalkRuns = 0;
+	int Trees = 0;
+	int Playgrounds = 0;
+	int Kiosks = 0;
+	int Markets = 0;
+	int BusStops = 0;
+	int BlockedEntries = 0;
+	int LaneArrows = 0;
 	int PropsOnRoad = 0;      // знаки/фонари, которые попали бы на проезжую часть (не ставятся)
 
 	size_t TriangleCount() const;

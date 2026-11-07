@@ -431,6 +431,9 @@ public:
 		RingIslands();
 		Buildings();
 		Areas();
+		Greenery();
+		Amenities();
+		MajorRoads();
 		Ground();
 		for (const CityLandmark& L : D.Landmarks)
 		{
@@ -2414,6 +2417,53 @@ private:
 		BuildBuildingGrid();
 	}
 
+	// Дальний вид дома: стены и крыша одной секцией, цвет фасада — средний цвет его текстуры с оттенком.
+	void LodBox(const std::vector<CityPt>& Ring, V2 C, double Height, CityMat Wm, uint32_t Tint)
+	{
+		double Br = 0.78, Bg = 0.78, Bb = 0.75;
+		switch (Wm)
+		{
+		case CityMat::WallBrick: Br = 0.56; Bg = 0.33; Bb = 0.26; break;
+		case CityMat::WallStucco: Br = 0.86; Bg = 0.82; Bb = 0.74; break;
+		case CityMat::WallOffice: Br = 0.6; Bg = 0.68; Bb = 0.76; break;
+		case CityMat::WallIndustrial: Br = 0.7; Bg = 0.68; Bb = 0.64; break;
+		case CityMat::WallHouse: Br = 0.62; Bg = 0.55; Bb = 0.45; break;
+		default: break;
+		}
+		auto Ch = [&](int Shift) { return static_cast<double>((Tint >> Shift) & 0xFFu) / 255.0; };
+		const uint32_t Wall = Rgba(Br * Ch(0), Bg * Ch(8), Bb * Ch(16));
+		const uint32_t RoofC = Rgba(0.36, 0.36, 0.38);
+		CitySection& S = Sec(C.X, C.Y, CityMat::LodMass);
+		const size_t N = Ring.size();
+		for (size_t K = 0; K < N; ++K)
+		{
+			const CityPt& A = Ring[K];
+			const CityPt& B = Ring[(K + 1) % N];
+			const V2 Mid{(A.X + B.X) * 0.5, (A.Y + B.Y) * 0.5};
+			V2 Nn = RightOf(Unit(V2{B.X - A.X, B.Y - A.Y}));
+			if (Nn.X * (Mid.X - C.X) + Nn.Y * (Mid.Y - C.Y) < 0.0)
+			{
+				Nn = Nn * -1.0; // наружу — от центра
+			}
+			const int32_t I0 = S.Vertex(A.X, A.Y, 0.0, Nn.X, Nn.Y, 0, 0, 0, Wall);
+			const int32_t I1 = S.Vertex(B.X, B.Y, 0.0, Nn.X, Nn.Y, 0, 0, 0, Wall);
+			const int32_t I2 = S.Vertex(B.X, B.Y, Height, Nn.X, Nn.Y, 0, 0, 0, Wall);
+			const int32_t I3 = S.Vertex(A.X, A.Y, Height, Nn.X, Nn.Y, 0, 0, 0, Wall);
+			S.Tri(I0, I1, I2, Nn.X, Nn.Y, 0);
+			S.Tri(I0, I2, I3, Nn.X, Nn.Y, 0);
+		}
+		const std::vector<int> Tri = Triangulate(Ring);
+		std::vector<int32_t> Id;
+		for (const CityPt& P : Ring)
+		{
+			Id.push_back(S.Vertex(P.X, P.Y, Height, 0, 0, 1, 0, 0, RoofC));
+		}
+		for (size_t K = 0; K + 2 < Tri.size(); K += 3)
+		{
+			S.Tri(Id[static_cast<size_t>(Tri[K])], Id[static_cast<size_t>(Tri[K + 1])], Id[static_cast<size_t>(Tri[K + 2])], 0, 0, 1);
+		}
+	}
+
 	void Buildings()
 	{
 		for (size_t Bi = 0; Bi < D.Buildings.size(); ++Bi)
@@ -2546,6 +2596,7 @@ private:
 					}
 				}
 			}
+			LodBox(Ring, C, Height, Wm, Tint);
 			if (B.Kind != "house" && B.Kind != "garage" && O.ApronWidth > 0.0)
 			{
 				Apron(Ring, O.ApronWidth);
@@ -2635,6 +2686,418 @@ private:
 				Ribbon(E, 0.0, L, T - 0.05, T + 0.05, 0.38, CityMat::Steel, 1.0, 1.0);
 				Wall(E, 0.0, L, T - 0.05, 0.22, 0.38, false, CityMat::Steel, false);
 				Wall(E, 0.0, L, T + 0.05, 0.22, 0.38, true, CityMat::Steel, false);
+			}
+		}
+	}
+
+	// ---- Зелень: деревья в парках и лесах, аллеи вдоль крупных улиц ----
+	static bool InRing(const std::vector<CityPt>& Rg, V2 P)
+	{
+		bool In = false;
+		for (size_t A = 0, Bk = Rg.size() - 1; A < Rg.size(); Bk = A++)
+		{
+			if ((Rg[A].X > P.X) != (Rg[Bk].X > P.X) && P.Y < Rg[A].Y + (P.X - Rg[A].X) * (Rg[Bk].Y - Rg[A].Y) / (Rg[Bk].X - Rg[A].X))
+			{
+				In = !In;
+			}
+		}
+		return In;
+	}
+
+	// Место свободно: не вода, не проезжая часть (с запасом Clear), не дом, не тротуар.
+	bool Free(V2 P, double Clear) const
+	{
+		return !IsWet(P.X, P.Y) && !GroundRoadAt(P, -1, Clear) && !InsideAnyBuilding(P, std::numeric_limits<size_t>::max()) && !SidewalkAt(P, -1) &&
+			RouteDist(P) > O.RouteHalfWidth + 6.0;
+	}
+
+	void AddTree(V2 P, bool bConifer, uint32_t Seed)
+	{
+		CityProp Pr;
+		Pr.Kind = CityPropKind::Tree;
+		Pr.X = P.X;
+		Pr.Y = P.Y;
+		Pr.Z = 0.0;
+		Pr.Yaw = HashToUnit(Seed) * 360.0;
+		Pr.Value = bConifer ? 1 : 0;
+		Pr.Size = 0.75 + 0.5 * HashToUnit(Hash(Seed, 3u));
+		R.Props.push_back(Pr);
+		++R.Trees;
+	}
+
+	void PlantArea(const std::vector<CityPt>& Rg, double Spacing, double Chance, double Conifer, uint32_t Salt)
+	{
+		if (Rg.size() < 3)
+		{
+			return;
+		}
+		double X0 = 1e18, Y0 = 1e18, X1 = -1e18, Y1 = -1e18;
+		for (const CityPt& P : Rg)
+		{
+			X0 = std::min(X0, P.X);
+			Y0 = std::min(Y0, P.Y);
+			X1 = std::max(X1, P.X);
+			Y1 = std::max(Y1, P.Y);
+		}
+		for (double X = std::floor(X0 / Spacing) * Spacing; X <= X1; X += Spacing)
+		{
+			for (double Y = std::floor(Y0 / Spacing) * Spacing; Y <= Y1; Y += Spacing)
+			{
+				const uint32_t H0 = Hash(static_cast<uint32_t>(static_cast<int64_t>(X) * 73856093 ^ static_cast<int64_t>(Y) * 19349663), Salt);
+				if (HashToUnit(H0) > Chance)
+				{
+					continue;
+				}
+				const V2 P{X + (HashToUnit(Hash(H0, 1u)) - 0.5) * Spacing * 0.8, Y + (HashToUnit(Hash(H0, 2u)) - 0.5) * Spacing * 0.8};
+				if (!InRing(Rg, P) || !Free(P, 2.5))
+				{
+					continue;
+				}
+				AddTree(P, HashToUnit(Hash(H0, 4u)) < Conifer, H0);
+			}
+		}
+	}
+
+	void Greenery()
+	{
+		for (const auto& Park : D.Parks)
+		{
+			PlantArea(Park, 9.0, 0.5, 0.2, 0x9A4Bu);
+		}
+		for (const auto& Wood : D.Woods)
+		{
+			PlantArea(Wood, 6.5, 0.85, 0.55, 0x3D0Du);
+		}
+		// Аллеи: тополя и берёзы за тротуаром крупных улиц (по ним и ездит игрок).
+		for (const Edge& E : Edges)
+		{
+			if (E.Hidden || E.Internal || !HasSidewalks(E) || E.Class > CityRoadClass::Tertiary)
+			{
+				continue;
+			}
+			const double L = E.Ax.Length();
+			const double S0 = std::max(0.0, E.Trim0) + 10.0;
+			const double S1 = L - std::max(0.0, E.Trim1) - 10.0;
+			const double Off = E.HalfW + CitySidewalkWidth(E.Class) + 1.8;
+			int K = 0;
+			for (double S = S0; S < S1; S += 11.0, ++K)
+			{
+				double Miter = 1.0;
+				const V2 C = E.Ax.At(S);
+				const V2 Rt = E.Ax.RightAt(S, Miter);
+				for (double Side : {-1.0, 1.0})
+				{
+					const V2 P = C + Rt * (Side * Off);
+					const uint32_t H0 = Hash(static_cast<uint32_t>(E.Way * 977 + K * 2 + (Side > 0.0 ? 1 : 0)), 0xA11Eu);
+					if (HashToUnit(H0) < 0.18 || !Free(P, 1.2))
+					{
+						continue; // пропуски, как в жизни
+					}
+					AddTree(P, HashToUnit(Hash(H0, 9u)) < 0.08, H0);
+				}
+			}
+		}
+	}
+
+	// ---- Площадки, рынки, киоски ----
+	static void OrientedBox(const std::vector<CityPt>& Rg, V2& OutC, double& OutYawDeg, double& OutL, double& OutW)
+	{
+		size_t Longest = 0;
+		double Best = -1.0;
+		for (size_t K = 0; K < Rg.size(); ++K)
+		{
+			const double L = Len(V2{Rg[(K + 1) % Rg.size()].X - Rg[K].X, Rg[(K + 1) % Rg.size()].Y - Rg[K].Y});
+			if (L > Best)
+			{
+				Best = L;
+				Longest = K;
+			}
+		}
+		const V2 Ax = Unit(V2{Rg[(Longest + 1) % Rg.size()].X - Rg[Longest].X, Rg[(Longest + 1) % Rg.size()].Y - Rg[Longest].Y});
+		const V2 Ay = RightOf(Ax);
+		double U0 = 1e18, U1 = -1e18, V0 = 1e18, V1 = -1e18;
+		for (const CityPt& P : Rg)
+		{
+			const double U = P.X * Ax.X + P.Y * Ax.Y;
+			const double V = P.X * Ay.X + P.Y * Ay.Y;
+			U0 = std::min(U0, U);
+			U1 = std::max(U1, U);
+			V0 = std::min(V0, V);
+			V1 = std::max(V1, V);
+		}
+		OutC = Ax * ((U0 + U1) * 0.5) + Ay * ((V0 + V1) * 0.5);
+		OutYawDeg = YawDeg(Ax);
+		OutL = U1 - U0;
+		OutW = V1 - V0;
+	}
+
+	void AddAmenity(CityPropKind Kind, V2 P, double YawD, int Value, double Size, double Size2)
+	{
+		CityProp Pr;
+		Pr.Kind = Kind;
+		Pr.X = P.X;
+		Pr.Y = P.Y;
+		Pr.Z = 0.0;
+		Pr.Yaw = YawD;
+		Pr.Value = Value;
+		Pr.Size = Size;
+		Pr.Size2 = Size2;
+		R.Props.push_back(Pr);
+	}
+
+	// Киоск лицом к ближайшей улице (у модели витрина смотрит на −Y, т. е. на 90° левее длинной стороны).
+	void PlaceKiosk(V2 P, uint32_t Seed)
+	{
+		if (!Free(P, 1.5) || !Free(P + V2{2.0, 0.0}, 1.0) || !Free(P - V2{2.0, 0.0}, 1.0))
+		{
+			return;
+		}
+		V2 Q{0, 0};
+		if (RoadNearest(P, Q) > 60.0)
+		{
+			Q = P + V2{1.0, 0.0};
+		}
+		AddAmenity(CityPropKind::Kiosk, P, YawDeg(Unit(Q - P)) + 90.0, static_cast<int>(Seed % 7u), 1.0, 0.0);
+		++R.Kiosks;
+	}
+
+	void Amenities()
+	{
+		for (const CityArea& A : D.Areas)
+		{
+			V2 C{0, 0};
+			double Yaw = 0.0, L = 0.0, W = 0.0;
+			OrientedBox(A.Ring, C, Yaw, L, W);
+			if (A.Kind == "playground")
+			{
+				if (L < 8.0 || W < 6.0 || !Free(C, 2.0))
+				{
+					continue;
+				}
+				AddAmenity(CityPropKind::Playground, C, Yaw, 0, L, W);
+				++R.Playgrounds;
+				// Лавки по краю площадки, лицом внутрь.
+				const V2 Ax = Unit(V2{std::cos(Yaw * kPiC / 180.0), std::sin(Yaw * kPiC / 180.0)});
+				for (double Side : {-1.0, 1.0})
+				{
+					const V2 Pb = C + RightOf(Ax) * (Side * (W * 0.5 - 1.0));
+					if (Free(Pb, 1.0))
+					{
+						AddAmenity(CityPropKind::Bench, Pb, Yaw + (Side > 0.0 ? 90.0 : -90.0) + 180.0, 0, 1.0, 0.0);
+					}
+				}
+			}
+			else if (A.Kind == "marketplace")
+			{
+				if (L < 10.0 || W < 6.0 || IsWet(C.X, C.Y))
+				{
+					continue;
+				}
+				AddAmenity(CityPropKind::Market, C, Yaw, 0, std::min(L * 0.9, 70.0), std::min(W * 0.9, 45.0));
+				++R.Markets;
+			}
+		}
+		for (const CityPoi& P : D.Pois)
+		{
+			const V2 Pt{P.X, P.Y};
+			const uint32_t Seed = Hash(static_cast<uint32_t>(static_cast<int64_t>(P.X * 10.0) ^ static_cast<int64_t>(P.Y * 10.0) * 31), 0x51A7u);
+			if (P.Kind == "kiosk")
+			{
+				PlaceKiosk(Pt, Seed);
+			}
+			else if (P.Kind == "marketplace" && Free(Pt, 4.0))
+			{
+				V2 Q{0, 0};
+				RoadNearest(Pt, Q);
+				AddAmenity(CityPropKind::Market, Pt, YawDeg(Unit(Q - Pt)) + 90.0, 0, 30.0, 18.0);
+				++R.Markets;
+			}
+		}
+		// Киоски на углах регулируемых перекрёстков (там, где их и ставили): «Союзпечать», цветы, шаурма, квас.
+		for (size_t K = 0; K < Clusters.size(); ++K)
+		{
+			const Cluster& Cl = Clusters[K];
+			if (!(Cl.Flags & CityFlag::Signals) || Cl.Z > 0.6 || HashToUnit(Hash(static_cast<uint32_t>(K), 0xC105u)) > 0.4)
+			{
+				continue;
+			}
+			for (int N : Cl.Nodes)
+			{
+				for (int Ei : NodeEdges[static_cast<size_t>(N)])
+				{
+					const Edge& E = Edges[static_cast<size_t>(Ei)];
+					if (E.Hidden || E.Internal || !HasSidewalks(E) || ClusterOf[static_cast<size_t>(E.Nodes.front())] == ClusterOf[static_cast<size_t>(E.Nodes.back())])
+					{
+						continue;
+					}
+					const bool AtStart = E.Nodes.front() == N;
+					const double S = AtStart ? std::max(0.0, E.Trim0) + 9.0 : E.Ax.Length() - std::max(0.0, E.Trim1) - 9.0;
+					if (S <= 0.0 || S >= E.Ax.Length())
+					{
+						continue;
+					}
+					double Miter = 1.0;
+					const V2 P = E.Ax.At(S) + E.Ax.RightAt(S, Miter) * (E.HalfW + CitySidewalkWidth(E.Class) + 2.6);
+					PlaceKiosk(P, Hash(static_cast<uint32_t>(Ei), static_cast<uint32_t>(K)));
+					goto NextCluster; // один киоск на перекрёсток
+				}
+			}
+		NextCluster:;
+		}
+	}
+
+	// ---- Крупные улицы: по ним ездит игрок ----
+	bool Drivable(const Edge& E) const
+	{
+		return E.Class <= O.DrivableMinClass || E.Class == CityRoadClass::Link;
+	}
+
+	// Стрелка направления на полосе (разметка 1.18): стержень и наконечник, лицом по оси ребра (Dir = +1) или против.
+	void Arrow(const Edge& E, double S, double T, double Dir)
+	{
+		const double Shaft = 3.0, Head = 1.4, Hw = 0.08, HeadW = 0.45;
+		const double SBack = S - Dir * (Shaft + Head) * 0.5;
+		const double STip = S + Dir * (Shaft + Head) * 0.5;
+		const double SNeck = STip - Dir * Head;
+		Ribbon(E, std::min(SBack, SNeck), std::max(SBack, SNeck), T - Hw, T + Hw, 0.016, CityMat::Marking, 0.5, 0.5, 0xFFFFFFFFu, 4.0);
+		double Miter = 1.0;
+		const V2 Rt = E.Ax.RightAt(SNeck, Miter);
+		const V2 Neck = E.Ax.At(SNeck) + Rt * T;
+		const V2 Tip = E.Ax.At(STip) + E.Ax.RightAt(STip, Miter) * T;
+		const double Z = E.Ax.ZAt(S) + 0.016;
+		CitySection& Sc = Sec(Neck.X, Neck.Y, CityMat::Marking);
+		const V2 L = Neck - Rt * HeadW;
+		const V2 Rr = Neck + Rt * HeadW;
+		const int32_t A = Sc.Vertex(L.X, L.Y, Z, 0, 0, 1, 0, 0);
+		const int32_t B = Sc.Vertex(Rr.X, Rr.Y, Z, 0, 0, 1, 1, 0);
+		const int32_t C = Sc.Vertex(Tip.X, Tip.Y, Z, 0, 0, 1, 0.5, 1);
+		Sc.Tri(A, B, C, 0, 0, 1);
+		++R.LaneArrows;
+	}
+
+	void MajorRoads()
+	{
+		for (size_t Ei = 0; Ei < Edges.size(); ++Ei)
+		{
+			const Edge& E = Edges[Ei];
+			if (E.Hidden || E.Internal || E.Ring)
+			{
+				continue;
+			}
+			const double L = E.Ax.Length();
+			const double S0 = std::max(0.0, E.Trim0);
+			const double S1 = L - std::max(0.0, E.Trim1);
+			if (Drivable(E))
+			{
+				// Стрелки по полосам перед перекрёстком (на подходе, перед стоп-линией).
+				const int PerDir = E.OneWay ? E.Lanes : std::max(1, E.Lanes / 2);
+				if (E.Class <= CityRoadClass::Secondary && PerDir >= 2 && S1 - S0 > 45.0)
+				{
+					for (int End = 0; End < 2; ++End)
+					{
+						if (End == 0 && E.OneWay)
+						{
+							continue;
+						}
+						const int N = End == 1 ? E.Nodes.back() : E.Nodes.front();
+						if (!IsJ(N))
+						{
+							continue;
+						}
+						const bool Sig = (JFlags(N) & CityFlag::Signals) != 0;
+						const double Back = (Sig ? 6.4 : 1.6) + 12.0;
+						const double S = End == 1 ? S1 - Back : S0 + Back;
+						for (int K = 0; K < PerDir; ++K)
+						{
+							// Полосы по ходу: у одностороннего — от левого края, у двустороннего — справа от оси (или слева для встречных).
+							const double T = E.OneWay ? -E.HalfW + (K + 0.5) * E.LaneW : (End == 1 ? 1.0 : -1.0) * (K + 0.5) * E.LaneW;
+							Arrow(E, S, T, End == 1 ? 1.0 : -1.0);
+						}
+					}
+				}
+				// Остановки общественного транспорта: на проспектах и магистральных улицах через ~450 м, справа по ходу.
+				if ((E.Class == CityRoadClass::Primary || E.Class == CityRoadClass::Secondary) && HasSidewalks(E) && S1 - S0 > 160.0)
+				{
+					for (double Side : {1.0, -1.0})
+					{
+						if (Side < 0.0 && E.OneWay)
+						{
+							continue;
+						}
+						const double Phase = HashToUnit(Hash(static_cast<uint32_t>(Ei), Side > 0.0 ? 11u : 12u));
+						for (double S = S0 + 60.0 + Phase * 200.0; S < S1 - 60.0; S += 450.0)
+						{
+							double Miter = 1.0;
+							const V2 Rt = E.Ax.RightAt(S, Miter);
+							const V2 P = E.Ax.At(S) + Rt * (Side * (E.HalfW + CitySidewalkWidth(E.Class) + 1.6));
+							if (!Free(P, 1.0) || !Free(P + E.Ax.Dir(S) * 3.0, 1.0) || !Free(P - E.Ax.Dir(S) * 3.0, 1.0))
+							{
+								continue;
+							}
+							CityProp Pr;
+							Pr.Kind = CityPropKind::BusStop;
+							Pr.X = P.X;
+							Pr.Y = P.Y;
+							Pr.Z = 0.0;
+							// Павильон лицом к дороге: «вперёд» модели — к оси.
+							Pr.Yaw = YawDeg(Rt * -Side);
+							Pr.Value = static_cast<int>(Hash(static_cast<uint32_t>(Ei), static_cast<uint32_t>(S)) % 3u);
+							Pr.Text = E.Name.empty() ? std::string("Остановка") : E.Name;
+							R.Props.push_back(Pr);
+							++R.BusStops;
+						}
+					}
+				}
+				continue;
+			}
+			if (!O.BlockMinorStreets || E.Elevated || E.Bridge)
+			{
+				continue;
+			}
+			// Въезд с крупной улицы на мелкую — бетонные блоки поперёк и знак «Въезд запрещён».
+			for (int End = 0; End < 2; ++End)
+			{
+				const int N = End == 0 ? E.Nodes.front() : E.Nodes.back();
+				bool FromMajor = false;
+				const int K = ClusterOf[static_cast<size_t>(N)];
+				if (K >= 0)
+				{
+					for (int Cn : Clusters[static_cast<size_t>(K)].Nodes)
+					{
+						for (int Qe : NodeEdges[static_cast<size_t>(Cn)])
+						{
+							const Edge& Other = Edges[static_cast<size_t>(Qe)];
+							FromMajor |= !Other.Hidden && static_cast<size_t>(Qe) != Ei && Drivable(Other);
+						}
+					}
+				}
+				if (!FromMajor || S1 - S0 < 10.0)
+				{
+					continue;
+				}
+				const double S = End == 0 ? S0 + 4.0 : S1 - 4.0;
+				double Miter = 1.0;
+				const V2 Rt = E.Ax.RightAt(S, Miter);
+				const V2 C = E.Ax.At(S);
+				CityProp Pr;
+				Pr.Kind = CityPropKind::Barrier;
+				Pr.X = C.X;
+				Pr.Y = C.Y;
+				Pr.Z = E.Ax.ZAt(S);
+				Pr.Yaw = YawDeg(Rt);
+				Pr.Size = 2.0 * E.HalfW + 1.0;
+				R.Props.push_back(Pr);
+				// Знак — справа по ходу въезда (лицом к въезжающему).
+				const double Dir = End == 0 ? 1.0 : -1.0; // въезд идёт по оси (с начала) или против (с конца)
+				const V2 Sp = C + Rt * (Dir * (E.HalfW + 0.6));
+				CityProp Sg;
+				Sg.Kind = CityPropKind::SignNoEntry;
+				Sg.X = Sp.X;
+				Sg.Y = Sp.Y;
+				Sg.Z = Pr.Z + 0.1;
+				Sg.Yaw = YawDeg(E.Ax.Dir(S) * -Dir);
+				R.Props.push_back(Sg);
+				++R.BlockedEntries;
 			}
 		}
 	}
@@ -2941,14 +3404,37 @@ bool CityData::Parse(const std::string& Text, std::string* Error)
 			ReadDouble(Cur, End, L.Radius);
 			Landmarks.push_back(L);
 		}
-		else if (Tag == "WATER" || Tag == "ISLAND" || Tag == "PARK" || Tag == "RAIL")
+		else if (Tag == "WATER" || Tag == "ISLAND" || Tag == "PARK" || Tag == "RAIL" || Tag == "WOOD")
 		{
 			std::vector<CityPt> Pts = ReadPoints(Cur, End);
 			if (Pts.size() >= 2)
 			{
-				(Tag == "WATER" ? Water : Tag == "ISLAND" ? Islands : Tag == "PARK" ? Parks : Rails).push_back(std::move(Pts));
+				(Tag == "WATER" ? Water : Tag == "ISLAND" ? Islands : Tag == "PARK" ? Parks : Tag == "WOOD" ? Woods : Rails).push_back(std::move(Pts));
 			}
 		}
+		else if (Tag == "AREA")
+		{
+			std::string Head, AName, Tail;
+			SplitBars(Line, 5, Head, AName, Tail); // после «AREA »
+			const char* H = Head.data();
+			const char* He = Head.data() + Head.size();
+			CityArea A;
+			A.Kind = ReadWord(H, He);
+			A.Ring = ReadPoints(Tail.data(), Tail.data() + Tail.size());
+			if (A.Ring.size() >= 3)
+			{
+				Areas.push_back(A);
+			}
+		}
+		else if (Tag == "POI")
+		{
+			CityPoi P;
+			P.Kind = ReadWord(Cur, End);
+			ReadDouble(Cur, End, P.X);
+			ReadDouble(Cur, End, P.Y);
+			Pois.push_back(P);
+		}
+		// Неизвестные записи пропускаем: старая игра читает файлы новых версий конвейера.
 	}
 	if (!bHeader)
 	{

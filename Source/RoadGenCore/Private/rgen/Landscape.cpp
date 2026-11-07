@@ -76,6 +76,18 @@ void Landscape::SetRealCity(const std::string& Name, double MinX, double MinY, d
 	RealCities.push_back(A);
 }
 
+bool Landscape::InRealCity(double X, double Y, double Margin) const
+{
+	for (const RealCityArea& A : RealCities)
+	{
+		if (X > A.MinX - Margin && X < A.MaxX + Margin && Y > A.MinY - Margin && Y < A.MaxY + Margin)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void Landscape::Build(const Route& InRoute)
 {
 	R = &InRoute;

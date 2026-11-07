@@ -118,6 +118,7 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 	case EPeregonTex::BirchBark:
 	case EPeregonTex::PineBark: W = 32; H = 64; break;
 	case EPeregonTex::GrassTuft: W = 32; H = 32; break;
+	case EPeregonTex::TreeLine: W = 128; H = 32; break;
 	case EPeregonTex::Leaf: W = H = 8; break;
 	case EPeregonTex::PanelFacade:
 	case EPeregonTex::BrickFacade:
@@ -360,6 +361,45 @@ void Draw(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px)
 						const float Tip = Up / Height;
 						C = Rgba(150.f + 60.f * Tip, 180.f + 50.f * Tip, 120.f + 30.f * Tip, 255.f);
 					}
+				}
+				break;
+			}
+			case EPeregonTex::TreeLine:
+			{
+				// Кромка леса (бесшовно по U): ели — узкие треугольники, берёзы — круглые кроны; низ сплошной.
+				C = Rgba(0.f, 0.f, 0.f, 0.f);
+				const float Up = static_cast<float>(H - 1 - Y) / static_cast<float>(H); // 0 внизу, 1 вверху
+				const float Fx = static_cast<float>(X);
+				bool bTree = Up < 0.38f;
+				float Shade = 0.6f + 0.25f * Up;
+				for (int32 Tr = 0; Tr < 22 && !bTree; ++Tr)
+				{
+					const float Cx = 128.f * (Tr + Rand(Tr, 0, 191) * 0.8f) / 22.f;
+					float Dx = FMath::Abs(Fx - Cx);
+					Dx = FMath::Min(Dx, 128.f - Dx); // бесшовно
+					const bool bSpruce = Rand(Tr, 1, 192) < 0.62f;
+					const float Top = 0.62f + 0.36f * Rand(Tr, 2, 193);
+					if (bSpruce)
+					{
+						// Ель: ширина растёт книзу, по краю — «лапы» ступеньками.
+						const float Half = (Top - Up) * 10.f * (0.85f + 0.3f * (((Y + Tr) % 3) == 0 ? 1.f : 0.f));
+						bTree = Up < Top && Dx < Half;
+						Shade = 0.5f + 0.2f * (Top - Up);
+					}
+					else
+					{
+						// Берёза: овальная крона на светлом стволе.
+						const float Cy = Top - 0.2f;
+						const float Ey = (Up - Cy) / 0.2f;
+						const float Ex = Dx / 3.6f;
+						bTree = Ex * Ex + Ey * Ey < 1.f && Rand(X / 2, Y / 2, 194 + Tr) < 0.9f;
+						Shade = 0.8f + 0.15f * Ey;
+					}
+				}
+				if (bTree)
+				{
+					const float Grain = (TileNoise(X, Y, 8, W, H, 195) - 0.5f) * 0.25f;
+					C = Rgba(150.f * (Shade + Grain), 190.f * (Shade + Grain), 150.f * (Shade + Grain), 255.f);
 				}
 				break;
 			}
@@ -615,7 +655,7 @@ void Enhance(EPeregonTex Type, int32& W, int32& H, TArray<FColor>& Px, int32 Fac
 	{
 		return;
 	}
-	const bool bAlpha = Type == EPeregonTex::GrassTuft || Type == EPeregonTex::Bush || Type == EPeregonTex::Leaf || Type == EPeregonTex::Raindrops ||
+	const bool bAlpha = Type == EPeregonTex::GrassTuft || Type == EPeregonTex::Bush || Type == EPeregonTex::TreeLine || Type == EPeregonTex::Leaf || Type == EPeregonTex::Raindrops ||
 		Type == EPeregonTex::Clouds || Type == EPeregonTex::GlassDirt || Type == EPeregonTex::Glass;
 	const bool bSoft = Type == EPeregonTex::Clouds || Type == EPeregonTex::GlassDirt || Type == EPeregonTex::Raindrops;
 	const int32 Nw = W * Factor;

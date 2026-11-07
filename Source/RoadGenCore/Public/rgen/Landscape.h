@@ -80,6 +80,8 @@ public:
 	// а дальний рельеф в его границах (с запасом) опускается ниже уровня города BaseZ.
 	void SetRealCity(const std::string& Name, double MinX, double MinY, double MaxX, double MaxY, double BaseZ);
 	void Build(const Route& InRoute);
+	// Точка в границах настоящего города (с запасом Margin, м).
+	bool InRealCity(double X, double Y, double Margin) const;
 
 	// Ближайшая точка дороги (по разреженной копии осевой линии, шаг 25 м): S, смещение T и расстояние.
 	void Nearest(double X, double Y, double& OutS, double& OutT, double& OutDist) const;

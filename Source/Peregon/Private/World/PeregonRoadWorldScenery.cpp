@@ -214,6 +214,65 @@ void APeregonRoadWorld::BuildFarTerrain()
 			}
 		}
 	}
+
+	// Кромка дальнего леса: там, где кончаются настоящие деревья (дальше ~330 м от дороги), лес — не голая
+	// «шапка» рельефа, а стена силуэтов елей и берёз (карточки с прозрачностью, лицом к дороге). Так граница
+	// подробного мира не видна, а стоит это пару сотен тысяч треугольников на весь маршрут.
+	FPeregonMeshBuffers Cards;
+	int32 CardCount = 0;
+	const uint32 CardSeed = rgen::Hash(Route.Params().Seed, 0xCA4Du);
+	for (int32 J = 1; J < Ny - 1; ++J)
+	{
+		for (int32 I = 1; I < Nx - 1; ++I)
+		{
+			const int32 K = J * Nx + I;
+			const double D = Dist[K];
+			if (D < 360.0 || D > Corridor - 200.0)
+			{
+				continue;
+			}
+			const double X = MinX + I * Step;
+			const double Y = MinY + J * Step;
+			const double Dens = Landscape.ForestDensity(X, Y);
+			if (Dens < 0.5 || Landscape.UrbanMask(X, Y) > 0.3 || Landscape.InRealCity(X, Y, 300.0))
+			{
+				continue;
+			}
+			const uint32 H0 = rgen::Hash(static_cast<uint32>(I * 7919 + J), CardSeed);
+			const double Jx = X + (static_cast<double>(H0 & 0xFFu) / 255.0 - 0.5) * Step * 0.6;
+			const double Jy = Y + (static_cast<double>((H0 >> 8) & 0xFFu) / 255.0 - 0.5) * Step * 0.6;
+			// Лицом к дороге: направление на ближайшую точку трассы.
+			double S = 0.0, T = 0.0, Dd = 0.0;
+			Landscape.Nearest(Jx, Jy, S, T, Dd);
+			const rgen::RouteSample Near = Route.Sample(S);
+			FVector Face(Near.X - Jx, Near.Y - Jy, 0.0);
+			if (!Face.Normalize())
+			{
+				continue;
+			}
+			const FVector Along(-Face.Y, Face.X, 0.0);
+			const double Width = 150.0 + 40.0 * (static_cast<double>((H0 >> 16) & 0xFFu) / 255.0);
+			const double Tall = 15.0 + 7.0 * Dens;
+			const double Base = Landscape.FarHeight(Jx, Jy) + Landscape.CanopyHeight(Jx, Jy) - 9.0;
+			const double U0 = static_cast<double>((H0 >> 24) & 0xFFu) / 255.0;
+			const FVector C0 = FVector(Jx, Jy, Base) * M;
+			const FVector Hw = Along * (Width * 0.5 * M);
+			const FVector Up(0.0, 0.0, Tall * M);
+			const FVector Pa = C0 - Hw, Pb = C0 + Hw;
+			// Цвет вершин: оттенок (хвоя темнее, смешанный лес светлее), альфа 0 — не качается.
+			const float Tone = static_cast<float>(0.8 + 0.35 * (1.0 - Dens));
+			FLinearColor Tint(Tone, Tone, Tone, 0.f);
+			const FColor Col = ToColor(Tint);
+			const float Uw = static_cast<float>(Width / 120.0); // ~5 м на дерево
+			Cards.AddQuad(Pa, Pb, Pb + Up, Pa + Up, Face, FVector2D(U0, 1.0), FVector2D(U0 + Uw, 0.0), Col, 0);
+			++CardCount;
+		}
+	}
+	if (Cards.Triangles.Num() > 0)
+	{
+		AddProc(Scenery, Cards, Mat(EPeregonWorldMat::FarForest), false, false);
+	}
+	UE_LOG(LogTemp, Log, TEXT("[Peregon] Дальний лес: %d карточек кромки"), CardCount);
 }
 
 void APeregonRoadWorld::UpdateRidges(const FVector& Focus)

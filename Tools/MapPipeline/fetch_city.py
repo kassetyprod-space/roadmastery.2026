@@ -20,7 +20,8 @@
   перекрёстки узлы с highway=traffic_signals / crossing / stop / give_way;
   здания      building=*: контур, этажность (building:levels, height), вид, название;
   вода        natural=water, waterway=riverbank (Обь, с островами);
-  парки       leisure=park|garden, landuse=grass|forest;
+  парки       leisure=park|garden, landuse=grass; леса — landuse=forest, natural=wood;
+  площадки    leisure=playground, рынки amenity=marketplace, киоски shop=kiosk;
   железная дорога railway=rail;
   достопримечательности — по названию (см. LANDMARKS): вместо коробки игра ставит свою модель.
 
@@ -42,6 +43,7 @@ OVERPASS = [
     "https://overpass.private.coffee/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
+QUERY_VERSION = 2  # 2: площадки, рынки, киоски, леса
 TILES = 4  # город качается кусками TILES × TILES — целиком сервер не успевает (504)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -88,6 +90,11 @@ def query(tile, clip):
   relation["waterway"="riverbank"]{b};
   way["leisure"~"^(park|garden)$"]{b};
   way["landuse"~"^(grass|forest)$"]{b};
+  way["natural"="wood"]{b};
+  way["leisure"="playground"]{b};
+  way["amenity"="marketplace"]{b};
+  node["amenity"="marketplace"]{b};
+  node["shop"="kiosk"]{b};
   way["railway"="rail"]{b};
   node["highway"~"^(traffic_signals|crossing|stop|give_way)$"]{b};
 );
@@ -116,7 +123,8 @@ def post(q):
 
 def fetch(bbox, city):
     s, w, n, e = bbox
-    tile_dir = os.path.join(HERE, "data", f"{city}.tiles")
+    # Версия запроса в имени папки: при новых тегах куски скачиваются заново, старые не мешают.
+    tile_dir = os.path.join(HERE, "data", f"{city}.tiles.v{QUERY_VERSION}")
     os.makedirs(tile_dir, exist_ok=True)
     seen = set()
     out = []
@@ -691,7 +699,7 @@ def main():
     print(f"  зданий: {len(buildings)} (на окраинах убрано налезающих: {dropped})")
 
     # ---- Вода, острова, парки, железная дорога ----
-    water, islands, parks, rails = [], [], [], []
+    water, islands, parks, rails, woods, areas, pois = [], [], [], [], [], [], []
 
     def ring_of(geom):
         return [warp.game(g["lat"], g["lon"]) for g in geom]
@@ -704,9 +712,21 @@ def main():
             water += [[warp.game(la, lo) for la, lo in r] for r in outer_rings]
             islands += [[warp.game(la, lo) for la, lo in r] for r in isl]
             continue
+        if el.get("type") == "node" and "lat" in el:
+            if tags.get("shop") == "kiosk":
+                pois.append(("kiosk",) + warp.game(el["lat"], el["lon"]))
+            elif tags.get("amenity") == "marketplace":
+                pois.append(("marketplace",) + warp.game(el["lat"], el["lon"]))
+            continue
         if el.get("type") == "way" and el.get("geometry"):
-            if tags.get("leisure") in ("park", "garden") or tags.get("landuse") in ("grass", "forest"):
+            if tags.get("landuse") == "forest" or tags.get("natural") == "wood":
+                woods.append(ring_of(el["geometry"]))
+            elif tags.get("leisure") in ("park", "garden") or tags.get("landuse") == "grass":
                 parks.append(ring_of(el["geometry"]))
+            elif tags.get("leisure") == "playground":
+                areas.append(("playground", tags.get("name", "").replace("|", "/"), ring_of(el["geometry"])))
+            elif tags.get("amenity") == "marketplace":
+                areas.append(("marketplace", tags.get("name", "").replace("|", "/"), ring_of(el["geometry"])))
             elif tags.get("railway") == "rail":
                 rails.append(ring_of(el["geometry"]))
 
@@ -745,9 +765,16 @@ def main():
             f.write(f"PARK {fmt(ring)}\n")
         for line in rails:
             f.write(f"RAIL {fmt(line)}\n")
+        for ring in woods:
+            f.write(f"WOOD {fmt(ring)}\n")
+        for kind, name, ring in areas:
+            f.write(f"AREA {kind}|{name}|{fmt(ring)}\n")
+        for kind, x, y in pois:
+            f.write(f"POI {kind} {x:.2f} {y:.2f}\n")
     size = os.path.getsize(out) / 1e6
     print(f"Готово: {out} ({size:.1f} МБ): узлов {len(node_list)}, дорог {len(roads)}, зданий {len(buildings)}, "
-          f"достопримечательностей {len(landmarks)}, водоёмов {len(water)}")
+          f"достопримечательностей {len(landmarks)}, водоёмов {len(water)}, лесов {len(woods)}, парков {len(parks)}, "
+          f"площадок и рынков {len(areas)}, киосков и рынков-точек {len(pois)}")
 
 
 def _inverse(warp, n, e):

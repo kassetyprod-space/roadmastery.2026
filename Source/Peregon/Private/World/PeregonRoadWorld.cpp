@@ -268,6 +268,9 @@ void APeregonRoadWorld::SetupAssets()
 	Set(EPeregonWorldMat::Steel, FPeregonLook(EPeregonTex::Paint, FLinearColor(0.34f, 0.42f, 0.5f), 0.35f, 0.6f));
 	// Двор: та же трава, но выгоревшая и пыльная — городская земля не должна выглядеть дачным газоном.
 	Set(EPeregonWorldMat::Yard, FPeregonLook(EPeregonTex::Grass, FLinearColor(0.74f, 0.7f, 0.55f), 0.97f));
+	FPeregonLook FarForest(EPeregonTex::TreeLine, FLinearColor(0.42f, 0.55f, 0.42f), 1.f);
+	FarForest.Sway = 0.f;
+	Set(EPeregonWorldMat::FarForest, FarForest);
 }
 
 UMaterialInterface* APeregonRoadWorld::Mat(EPeregonWorldMat Type) const
@@ -419,6 +422,7 @@ void APeregonRoadWorld::Tick(float DeltaSeconds)
 		AnnouncePlaces(PrevS, TrackedS);
 	}
 	UpdateStreaming(false);
+	UpdateCityStreaming(Focus);
 	FarGround->SetWorldLocation(FVector(Focus.X, Focus.Y, (Route.MinZ() - 40.0) * PeregonRoad::M));
 	UpdateRidges(Focus);
 	SeasonCheckTimer -= DeltaSeconds;

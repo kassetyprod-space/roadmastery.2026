@@ -519,6 +519,18 @@ int main()
 		std::printf("  светофоров %d, фонарей %d, знаков %d, достопримечательностей %d\n", Lights, Lamps, Signs, Landmarks);
 		Check(Lights >= 8 && Lamps > 50 && Signs >= 4 && Landmarks >= 1, "светофоры, фонари, знаки у кольца и переходов", Lights);
 		Check(Ms < 3000.0, "город строится быстро, мс", Ms);
+		std::printf("  деревьев %d, площадок %d, рынков %d, киосков %d, слито узлов перекрёстков %d, домов на проезжей части убрано %d\n", Res.Trees,
+			Res.Playgrounds, Res.Markets, Res.Kiosks, Res.MergedJunctionNodes, Res.BuildingsOnRoads);
+		Check(City.Woods.size() == 1 && City.Areas.size() == 2 && City.Pois.size() == 3, "лес, площадка, рынок, киоски читаются", static_cast<double>(City.Pois.size()));
+		Check(Res.Trees > 200, "деревья в парке, роще и вдоль улиц", Res.Trees);
+		Check(Res.Playgrounds >= 1 && Res.Markets >= 1 && Res.Kiosks >= 1, "детская площадка, рынок и киоски стоят", Res.Kiosks);
+		size_t LodTris = 0;
+		for (const rgen::CityTile& T : Res.Tiles)
+		{
+			LodTris += T.Sections[static_cast<int>(rgen::CityMat::LodMass)].I.size() / 3;
+		}
+		Check(LodTris > static_cast<size_t>(Res.BuildingsBuilt) * 8, "дальний вид домов (коробки)", static_cast<double>(LodTris));
+
 	}
 
 	// --- Настоящий Новосибирск (Content/Data/Cities/novosibirsk.city, если он есть в репозитории) ---
@@ -554,6 +566,11 @@ int main()
 				Res.Junctions, Res.Bridges, Res.BuildingsBuilt, Res.BuildingsCleared, Res.Driveways, Res.TriangleCount());
 			Check(Res.Junctions > 500 && Res.Bridges > 10, "развязки и мосты настоящего города", Res.Junctions);
 			Check(Res.Driveways > 500, "дворовые проезды у многоэтажек", Res.Driveways);
+			std::printf("  слито узлов в перекрёстки %d, домов с проезжей части убрано %d, деревьев %d, остановок %d, перекрытых въездов %d, стрелок %d\n",
+				Res.MergedJunctionNodes, Res.BuildingsOnRoads, Res.Trees, Res.BusStops, Res.BlockedEntries, Res.LaneArrows);
+			Check(Res.MergedJunctionNodes > 50, "сложные перекрёстки проспектов собраны в один", Res.MergedJunctionNodes);
+			Check(Res.Trees > 5000 && Res.BusStops > 50 && Res.LaneArrows > 200, "аллеи, остановки, стрелки на крупных улицах", Res.BusStops);
+			Check(Res.BlockedEntries > 50, "въезды на мелкие улицы перекрыты", Res.BlockedEntries);
 			Check(Res.TriangleCount() < 4000000, "треугольников меньше 4 млн", static_cast<double>(Res.TriangleCount()));
 			Check(Ms < 20000.0, "строится меньше 20 с, мс", Ms);
 		}
