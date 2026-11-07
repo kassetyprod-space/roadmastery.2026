@@ -477,6 +477,39 @@ void Route::AddFlatten(const Poi& Item)
 	}
 }
 
+void Route::LevelStart(double LevelS, double Blend, double HalfWidth)
+{
+	if (Samples.size() < 2 || LevelS <= 0.0)
+	{
+		return;
+	}
+	const double Z0 = Samples[0].Z;
+	const size_t N = Samples.size();
+	for (size_t I = 0; I < N; ++I)
+	{
+		const double S = Dbl(I) * P.Step;
+		const double W = 1.0 - SmoothStep(LevelS, LevelS + std::max(1.0, Blend), S);
+		if (W <= 0.0)
+		{
+			break;
+		}
+		Samples[I].Z = Lerp(Samples[I].Z, Z0, W);
+	}
+	for (size_t I = 0; I < N; ++I)
+	{
+		const size_t A = I > 0 ? I - 1 : I;
+		const size_t B = I + 1 < N ? I + 1 : I;
+		Samples[I].Grade = (Samples[B].Z - Samples[A].Z) / (Dbl(B - A) * P.Step);
+	}
+	FlattenZone Z;
+	Z.S0 = -2000.0; // и «хвост» рельефа до начала трассы
+	Z.S1 = LevelS;
+	Z.TMin = -HalfWidth;
+	Z.TMax = HalfWidth;
+	Z.Strength = 1.0;
+	FlattenList.push_back(Z);
+}
+
 RouteSample Route::Sample(double S) const
 {
 	if (Samples.empty())

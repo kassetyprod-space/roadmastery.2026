@@ -130,6 +130,10 @@ public:
 	double RoadHalfWidth() const { return P.LaneWidth; }
 	double ShoulderOuter() const { return P.LaneWidth + P.ShoulderWidth; }
 
+	// Настоящий город у начала трассы (rgen/City.h) плоский: до LevelS дорога идёт вровень с началом, дальше
+	// за Blend м плавно возвращается к своему профилю; земля по обе стороны (до HalfWidth) — вровень с дорогой.
+	void LevelStart(double LevelS, double Blend, double HalfWidth);
+
 	RouteSample Sample(double S) const;
 	// Точка в плане по (S, T).
 	void ToWorld(double S, double T, double& OutX, double& OutY) const;

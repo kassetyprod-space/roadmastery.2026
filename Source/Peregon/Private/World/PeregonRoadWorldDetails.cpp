@@ -539,6 +539,18 @@ void APeregonRoadWorld::LoadRealCity()
 		return;
 	}
 	CityBaseZ = Route.Sample(0.0).Z;
+	// Трасса в пределах города (с запасом 300 м) — вровень с городом, земля у неё тоже: иначе на старте
+	// дорога уходит вниз, а её холмы вылезают сквозь город и дома повисают.
+	double LevelS = 0.0;
+	for (double S = 0.0; S < FMath::Min(15000.0, Route.Length()); S += 25.0)
+	{
+		const rgen::RouteSample Smp = Route.Sample(S);
+		if (Smp.X > X0 - 300.0 && Smp.X < X1 + 300.0 && Smp.Y > Y0 - 300.0 && Smp.Y < Y1 + 300.0)
+		{
+			LevelS = S;
+		}
+	}
+	Route.LevelStart(LevelS, 600.0, 400.0);
 	Landscape.SetRealCity(CityMap.Name, X0, Y0, X1, Y1, CityBaseZ);
 	bRealCity = true;
 	UE_LOG(LogTemp, Log, TEXT("[Peregon] Город %s из OSM: %d дорог, %d зданий, %d достопримечательностей"), UTF8_TO_TCHAR(CityMap.Name.c_str()),
@@ -774,8 +786,13 @@ void APeregonRoadWorld::BuildRealCity()
 		case rgen::CityPropKind::SignRoundabout:
 		case rgen::CityPropKind::SignSpeed:
 		{
+			// Стойка Ø7 см; щит — перед стойкой (лицом к водителю), на двух хомутах, а не насквозь.
 			Plates.AddBox(At, Yaw, FVector(7.f, 7.f, 270.f), FVector2D(100.f, 100.f), PoleC, true, false);
-			const FVector Head = At + FVector(0, 0, 235.f);
+			const FVector Head = At + FVector(0, 0, 235.f) + Fwd * 6.f;
+			for (float Dz : {-18.f, 18.f})
+			{
+				Plates.AddBox(At + FVector(0, 0, 235.f + Dz - 2.f) + Fwd * 2.5f, Yaw, FVector(6.f, 9.f, 4.f), FVector2D(100.f, 100.f), DarkC, true, true);
+			}
 			if (P.Kind == rgen::CityPropKind::SignYield)
 			{
 				Triangle(Plates, Head, Fwd, 90.f, true);
@@ -804,11 +821,16 @@ void APeregonRoadWorld::BuildRealCity()
 		}
 		case rgen::CityPropKind::StreetName:
 		{
+			// Табличка на кронштейне сбоку от стойки: две стороны, между ними — пластина.
 			Plates.AddBox(At, Yaw, FVector(7.f, 7.f, 300.f), FVector2D(100.f, 100.f), PoleC, true, false);
+			const FVector Side90 = FRotator(0.f, Yaw + 90.f, 0.f).Vector();
+			const FVector PlateC = At + FVector(0, 0, 270.f) + Side90 * 60.f;
+			Plates.AddBox(PlateC - FVector(0, 0, 13.f), Yaw, FVector(2.f, 112.f, 26.f), FVector2D(100.f, 100.f), C(0.08f, 0.24f, 0.55f), true, true);
+			Plates.AddBox(At + FVector(0, 0, 268.f) + Side90 * 4.f, Yaw + 90.f, FVector(8.f, 3.f, 3.f), FVector2D(100.f, 100.f), DarkC, true, true);
 			for (float Side : {1.f, -1.f})
 			{
 				const FVector N = Fwd * Side;
-				Kit.Label(FTransform(N.Rotation(), At + FVector(0, 0, 270.f) + N * 4.0), UTF8_TO_TCHAR(P.Text.c_str()), 110.f, 22.f, 26,
+				Kit.Label(FTransform(N.Rotation(), PlateC + N * 1.6), UTF8_TO_TCHAR(P.Text.c_str()), 110.f, 22.f, 26,
 					FLinearColor(0.95f, 0.95f, 0.95f), FLinearColor(0.08f, 0.24f, 0.55f), 256);
 			}
 			break;

@@ -8,6 +8,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
 #include <queue>
@@ -357,6 +358,19 @@ struct Edge
 	double Trim0 = 0.0;
 	double Trim1 = 0.0;
 	double WaterS0 = 0.0, WaterS1 = 0.0; // где под мостом вода
+	bool Hidden = false;   // целиком лежит на трассе — не строится
+	bool Internal = false; // внутри сложного перекрёстка (его покрывает площадь перекрёстка)
+	bool Elevated = false; // эстакада/пандус выше 0.6 м — для наземных проверок не считается
+	std::vector<std::pair<double, double>> Cuts; // участки оси, которые не строятся (пересечение с трассой)
+};
+
+// Отрезок оси улицы в пространственном индексе.
+struct SegRef
+{
+	int E = -1;
+	V2 A, B;
+	double SA = 0.0, SB = 0.0;
+	double Z = 0.0;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -377,12 +391,28 @@ public:
 		{
 			FinishAxis(E);
 		}
+		BuildRouteIndex();
+		CorridorCuts();
+		BuildSegIndex();
+		ClusterJunctions();
 		TrimAtJunctions();
-		for (const Edge& E : Edges)
+		BuildJunctionHulls();
+		// Главные улицы — первыми: их тротуары и знаки в приоритете.
+		std::vector<size_t> Order(Edges.size());
+		for (size_t K = 0; K < Order.size(); ++K)
 		{
+			Order[K] = K;
+		}
+		std::stable_sort(Order.begin(), Order.end(), [&](size_t A, size_t B) { return Edges[A].Class < Edges[B].Class; });
+		for (const size_t Ei : Order)
+		{
+			const Edge& E = Edges[Ei];
+			if (E.Hidden || E.Internal)
+			{
+				continue;
+			}
 			RoadSurface(E);
 			Markings(E);
-			Sides(E);
 			if (E.Bridge)
 			{
 				BridgeStructure(E);
@@ -391,6 +421,13 @@ public:
 			RoadProps(E);
 		}
 		Junctions();
+		DecideBuildings();
+		Done.assign(Edges.size(), 0);
+		for (const size_t Ei : Order)
+		{
+			Sides(Edges[Ei], static_cast<int>(Ei));
+			Done[Ei] = 1;
+		}
 		RingIslands();
 		Buildings();
 		Areas();
@@ -418,7 +455,23 @@ private:
 	std::vector<Edge> Edges;
 	std::vector<double> H;                 // высота узла
 	std::vector<std::vector<int>> NodeEdges; // рёбра, которые начинаются/кончаются в узле
-	std::vector<double> JunctionR;
+	std::vector<int> ClusterOf;            // узел → перекрёсток (−1 — не перекрёсток)
+	struct Cluster
+	{
+		std::vector<int> Nodes;
+		int Flags = 0;
+		double Z = 0.0;
+		V2 C;
+		std::vector<V2> Hull;
+	};
+	std::vector<Cluster> Clusters;
+	std::vector<uint8_t> Done;            // тротуары ребра уже построены
+	std::vector<uint8_t> Keep;            // дом строится
+	// Пространственные индексы (клетка 40 м): оси улиц, площади перекрёстков, ось трассы.
+	std::map<std::pair<int, int>, std::vector<int>> SegGrid, HullGrid, RouteGrid;
+	std::vector<SegRef> Segs;
+	std::vector<std::pair<V2, V2>> RouteSegs;
+	static constexpr double IndexCell = 40.0;
 	std::map<std::pair<int, int>, size_t> TileIndex;
 
 	// Маска воды на сетке.
@@ -743,44 +796,528 @@ private:
 		}
 	}
 
-	// ---- Перекрёстки: подрезка улиц ----
-	void TrimAtJunctions()
+	// ---- Пространственные индексы ----
+	static std::pair<int, int> CellOf(double X, double Y)
 	{
-		JunctionR.assign(D.Nodes.size(), 0.0);
-		for (size_t N = 0; N < NodeEdges.size(); ++N)
+		return {static_cast<int>(std::floor(X / IndexCell)), static_cast<int>(std::floor(Y / IndexCell))};
+	}
+
+	template <typename Fn>
+	static void ForCells(double X0, double Y0, double X1, double Y1, Fn&& F)
+	{
+		const auto A = CellOf(X0, Y0);
+		const auto B = CellOf(X1, Y1);
+		for (int Cx = A.first; Cx <= B.first; ++Cx)
 		{
-			if (NodeEdges[N].size() < 3)
+			for (int Cy = A.second; Cy <= B.second; ++Cy)
 			{
-				continue;
-			}
-			double Rad = 0.0;
-			for (int K : NodeEdges[N])
-			{
-				Rad = std::max(Rad, Edges[static_cast<size_t>(K)].HalfW);
-			}
-			JunctionR[N] = Rad + ((D.Nodes[N].Flags & CityFlag::Signals) ? 3.0 : 1.5);
-			++R.Junctions;
-		}
-		for (Edge& E : Edges)
-		{
-			const double L = E.Ax.Length();
-			E.Trim0 = std::min(JunctionR[static_cast<size_t>(E.Nodes.front())], L * 0.45);
-			E.Trim1 = std::min(JunctionR[static_cast<size_t>(E.Nodes.back())], L * 0.45);
-			// Стык двух улиц без перекрёстка — продлеваем немного, чтобы не было щели.
-			if (E.Trim0 == 0.0)
-			{
-				E.Trim0 = -0.3;
-			}
-			if (E.Trim1 == 0.0)
-			{
-				E.Trim1 = -0.3;
+				F(std::make_pair(Cx, Cy));
 			}
 		}
 	}
 
+	static double SegDist(V2 P, V2 A, V2 B, double& OutT)
+	{
+		const V2 Ab = B - A;
+		const double L2 = Ab.X * Ab.X + Ab.Y * Ab.Y;
+		OutT = L2 > 1e-12 ? std::clamp(((P.X - A.X) * Ab.X + (P.Y - A.Y) * Ab.Y) / L2, 0.0, 1.0) : 0.0;
+		return Len(A + Ab * OutT - P);
+	}
+
+	void BuildRouteIndex()
+	{
+		for (size_t K = 0; K + 1 < O.Keepout.size(); ++K)
+		{
+			const V2 A{O.Keepout[K].X, O.Keepout[K].Y};
+			const V2 B{O.Keepout[K + 1].X, O.Keepout[K + 1].Y};
+			if (Len(B - A) > 80.0)
+			{
+				continue;
+			}
+			const int Id = static_cast<int>(RouteSegs.size());
+			RouteSegs.push_back({A, B});
+			const double M = 20.0;
+			ForCells(std::min(A.X, B.X) - M, std::min(A.Y, B.Y) - M, std::max(A.X, B.X) + M, std::max(A.Y, B.Y) + M,
+				[&](std::pair<int, int> C) { RouteGrid[C].push_back(Id); });
+		}
+	}
+
+	double RouteDist(V2 P) const
+	{
+		const auto It = RouteGrid.find(CellOf(P.X, P.Y));
+		double Best = 1e9;
+		if (It == RouteGrid.end())
+		{
+			return Best;
+		}
+		for (int Id : It->second)
+		{
+			double T = 0.0;
+			Best = std::min(Best, SegDist(P, RouteSegs[static_cast<size_t>(Id)].first, RouteSegs[static_cast<size_t>(Id)].second, T));
+		}
+		return Best;
+	}
+
+	// Улицы города, которые ложатся на трассу: участки поверх неё не строятся, а почти целиком лежащие — скрыты.
+	void CorridorCuts()
+	{
+		if (RouteSegs.empty())
+		{
+			return;
+		}
+		for (Edge& E : Edges)
+		{
+			if (E.Bridge)
+			{
+				continue;
+			}
+			const double L = E.Ax.Length();
+			const double Lim = O.RouteHalfWidth + 0.5 * E.HalfW;
+			double CutLen = 0.0;
+			for (double S = 0.0; S <= L; S += 2.0)
+			{
+				if (RouteDist(E.Ax.At(S)) < Lim)
+				{
+					const double A = std::max(0.0, S - 1.0), B = std::min(L, S + 1.0);
+					if (!E.Cuts.empty() && E.Cuts.back().second >= A - 1e-6)
+					{
+						E.Cuts.back().second = B;
+					}
+					else
+					{
+						E.Cuts.push_back({A, B});
+					}
+					CutLen += B - A;
+				}
+			}
+			if (CutLen > 0.6 * L)
+			{
+				E.Hidden = true;
+				++R.EdgesOnRoute;
+			}
+		}
+	}
+
+	void BuildSegIndex()
+	{
+		for (size_t Ei = 0; Ei < Edges.size(); ++Ei)
+		{
+			Edge& E = Edges[Ei];
+			E.Elevated = *std::max_element(E.Ax.Z.begin(), E.Ax.Z.end()) > 0.65;
+			for (size_t K = 0; K + 1 < E.Ax.P.size(); ++K)
+			{
+				SegRef Sr;
+				Sr.E = static_cast<int>(Ei);
+				Sr.A = E.Ax.P[K];
+				Sr.B = E.Ax.P[K + 1];
+				Sr.SA = E.Ax.S[K];
+				Sr.SB = E.Ax.S[K + 1];
+				Sr.Z = 0.5 * (E.Ax.Z[K] + E.Ax.Z[K + 1]);
+				const int Id = static_cast<int>(Segs.size());
+				Segs.push_back(Sr);
+				const double M = E.HalfW + CitySidewalkWidth(E.Class) + 2.0;
+				ForCells(std::min(Sr.A.X, Sr.B.X) - M, std::min(Sr.A.Y, Sr.B.Y) - M, std::max(Sr.A.X, Sr.B.X) + M, std::max(Sr.A.Y, Sr.B.Y) + M,
+					[&](std::pair<int, int> C) { SegGrid[C].push_back(Id); });
+			}
+		}
+	}
+
+	static bool InCut(const Edge& E, double S)
+	{
+		for (const auto& C : E.Cuts)
+		{
+			if (S >= C.first && S <= C.second)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static bool InConvex(const std::vector<V2>& Hull, V2 P)
+	{
+		if (Hull.size() < 3)
+		{
+			return false;
+		}
+		bool Pos = false, Neg = false;
+		for (size_t K = 0; K < Hull.size(); ++K)
+		{
+			const double C = Cross2(Hull[(K + 1) % Hull.size()] - Hull[K], P - Hull[K]);
+			Pos |= C > 0.0;
+			Neg |= C < 0.0;
+		}
+		return !(Pos && Neg);
+	}
+
+	// Точка на наземной проезжей части (чужой улицы, перекрёстка или трассы). Margin > 0 — с запасом наружу.
+	// OnlyCluster ≥ 0 — только улицы этого перекрёстка, по всей длине (для подрезки).
+	bool GroundRoadAt(V2 P, int Skip, double Margin, int OnlyCluster = -1) const
+	{
+		const auto Cell = CellOf(P.X, P.Y);
+		const auto It = SegGrid.find(Cell);
+		if (It != SegGrid.end())
+		{
+			for (int Id : It->second)
+			{
+				const SegRef& Sr = Segs[static_cast<size_t>(Id)];
+				if (Sr.E == Skip || Sr.Z > 0.65)
+				{
+					continue;
+				}
+				const Edge& E = Edges[static_cast<size_t>(Sr.E)];
+				if (E.Hidden)
+				{
+					continue;
+				}
+				if (OnlyCluster >= 0 && ClusterOf[static_cast<size_t>(E.Nodes.front())] != OnlyCluster &&
+					ClusterOf[static_cast<size_t>(E.Nodes.back())] != OnlyCluster)
+				{
+					continue;
+				}
+				double T = 0.0;
+				const double Dd = SegDist(P, Sr.A, Sr.B, T);
+				if (Dd >= E.HalfW + Margin)
+				{
+					continue;
+				}
+				const double S = Sr.SA + (Sr.SB - Sr.SA) * T;
+				if (OnlyCluster < 0 && !E.Internal && (S < E.Trim0 || S > E.Ax.Length() - E.Trim1))
+				{
+					continue;
+				}
+				if (InCut(E, S))
+				{
+					continue;
+				}
+				return true;
+			}
+		}
+		if (OnlyCluster >= 0)
+		{
+			return false;
+		}
+		const auto Ht = HullGrid.find(Cell);
+		if (Ht != HullGrid.end())
+		{
+			for (int Id : Ht->second)
+			{
+				const Cluster& Cl = Clusters[static_cast<size_t>(Id)];
+				if (Cl.Z < 0.65 && InConvex(Cl.Hull, P))
+				{
+					return true;
+				}
+			}
+		}
+		return RouteDist(P) < O.RouteHalfWidth + Margin;
+	}
+
+	// Точка на уже построенном тротуаре другой улицы.
+	bool SidewalkAt(V2 P, int Skip) const
+	{
+		const auto It = SegGrid.find(CellOf(P.X, P.Y));
+		if (It == SegGrid.end())
+		{
+			return false;
+		}
+		for (int Id : It->second)
+		{
+			const SegRef& Sr = Segs[static_cast<size_t>(Id)];
+			if (Sr.E == Skip || Sr.Z > 0.65 || !Done[static_cast<size_t>(Sr.E)])
+			{
+				continue;
+			}
+			const Edge& E = Edges[static_cast<size_t>(Sr.E)];
+			if (E.Hidden || E.Internal || !HasSidewalks(E))
+			{
+				continue;
+			}
+			double T = 0.0;
+			const double Dd = SegDist(P, Sr.A, Sr.B, T);
+			if (Dd >= E.HalfW - 0.1 && Dd <= E.HalfW + CitySidewalkWidth(E.Class) + 0.3)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static bool HasSidewalks(const Edge& E)
+	{
+		return !(E.Class <= CityRoadClass::Trunk || E.Class == CityRoadClass::Link) && !E.Bridge && !E.Elevated;
+	}
+
+	bool IsJ(int N) const { return ClusterOf[static_cast<size_t>(N)] >= 0; }
+	int JFlags(int N) const
+	{
+		const int K = ClusterOf[static_cast<size_t>(N)];
+		return K >= 0 ? Clusters[static_cast<size_t>(K)].Flags : D.Nodes[static_cast<size_t>(N)].Flags;
+	}
+
+	// ---- Перекрёстки: близкие узлы (развязки двусторонних проспектов) — один перекрёсток ----
+	void ClusterJunctions()
+	{
+		const size_t Nn = D.Nodes.size();
+		ClusterOf.assign(Nn, -1);
+		std::vector<int> Parent(Nn);
+		std::vector<double> BX0(Nn), BY0(Nn), BX1(Nn), BY1(Nn);
+		auto Jn = [&](int N) {
+			int Live = 0;
+			for (int K : NodeEdges[static_cast<size_t>(N)])
+			{
+				Live += Edges[static_cast<size_t>(K)].Hidden ? 0 : 1;
+			}
+			return Live >= 3 && H[static_cast<size_t>(N)] < 0.6;
+		};
+		for (size_t N = 0; N < Nn; ++N)
+		{
+			Parent[N] = static_cast<int>(N);
+			BX0[N] = BX1[N] = D.Nodes[N].X;
+			BY0[N] = BY1[N] = D.Nodes[N].Y;
+		}
+		std::function<int(int)> Find = [&](int X) {
+			while (Parent[static_cast<size_t>(X)] != X)
+			{
+				Parent[static_cast<size_t>(X)] = Parent[static_cast<size_t>(Parent[static_cast<size_t>(X)])];
+				X = Parent[static_cast<size_t>(X)];
+			}
+			return X;
+		};
+		auto MaxHalfW = [&](int N) {
+			double Wd = 0.0;
+			for (int K : NodeEdges[static_cast<size_t>(N)])
+			{
+				Wd = std::max(Wd, Edges[static_cast<size_t>(K)].HalfW);
+			}
+			return Wd;
+		};
+		for (const Edge& E : Edges)
+		{
+			if (E.Ring || E.Bridge || E.Hidden)
+			{
+				continue;
+			}
+			const int A = E.Nodes.front(), B = E.Nodes.back();
+			if (A == B || !Jn(A) || !Jn(B) || std::fabs(H[static_cast<size_t>(A)] - H[static_cast<size_t>(B)]) > 0.5)
+			{
+				continue;
+			}
+			const double Lim = std::min(36.0, 8.0 + 2.0 * std::max(MaxHalfW(A), MaxHalfW(B)));
+			if (E.Ax.Length() > Lim)
+			{
+				continue;
+			}
+			const int Ra = Find(A), Rb = Find(B);
+			if (Ra == Rb)
+			{
+				continue;
+			}
+			const double X0 = std::min(BX0[static_cast<size_t>(Ra)], BX0[static_cast<size_t>(Rb)]);
+			const double Y0 = std::min(BY0[static_cast<size_t>(Ra)], BY0[static_cast<size_t>(Rb)]);
+			const double X1 = std::max(BX1[static_cast<size_t>(Ra)], BX1[static_cast<size_t>(Rb)]);
+			const double Y1 = std::max(BY1[static_cast<size_t>(Ra)], BY1[static_cast<size_t>(Rb)]);
+			if (std::hypot(X1 - X0, Y1 - Y0) > 70.0)
+			{
+				continue; // не сливаем в «мега-перекрёсток»
+			}
+			Parent[static_cast<size_t>(Rb)] = Ra;
+			BX0[static_cast<size_t>(Ra)] = X0;
+			BY0[static_cast<size_t>(Ra)] = Y0;
+			BX1[static_cast<size_t>(Ra)] = X1;
+			BY1[static_cast<size_t>(Ra)] = Y1;
+		}
+		std::map<int, int> RootToCluster;
+		for (size_t N = 0; N < Nn; ++N)
+		{
+			if (!Jn(static_cast<int>(N)))
+			{
+				continue;
+			}
+			const int Rt = Find(static_cast<int>(N));
+			auto It = RootToCluster.find(Rt);
+			if (It == RootToCluster.end())
+			{
+				It = RootToCluster.emplace(Rt, static_cast<int>(Clusters.size())).first;
+				Clusters.emplace_back();
+			}
+			Cluster& Cl = Clusters[static_cast<size_t>(It->second)];
+			Cl.Nodes.push_back(static_cast<int>(N));
+			Cl.Flags |= D.Nodes[N].Flags;
+			Cl.Z = std::max(Cl.Z, H[N]);
+			ClusterOf[N] = It->second;
+		}
+		for (Cluster& Cl : Clusters)
+		{
+			V2 C{0, 0};
+			for (int N : Cl.Nodes)
+			{
+				C = C + NodeP(N);
+			}
+			Cl.C = C * (1.0 / static_cast<double>(Cl.Nodes.size()));
+			R.Junctions += 1;
+			R.MergedJunctionNodes += static_cast<int>(Cl.Nodes.size()) - 1;
+		}
+		for (Edge& E : Edges)
+		{
+			const int Ka = ClusterOf[static_cast<size_t>(E.Nodes.front())];
+			const int Kb = ClusterOf[static_cast<size_t>(E.Nodes.back())];
+			E.Internal = !E.Hidden && Ka >= 0 && Ka == Kb && !E.Ring && E.Ax.Length() < 75.0;
+		}
+	}
+
+	// ---- Подрезка: подъезд кончается там, где его поперечник уже не задевает чужую проезжую часть ----
+	void TrimAtJunctions()
+	{
+		for (size_t Ei = 0; Ei < Edges.size(); ++Ei)
+		{
+			Edge& E = Edges[Ei];
+			const double L = E.Ax.Length();
+			E.Trim0 = E.Trim1 = -0.3; // стык двух улиц без перекрёстка — продлеваем немного, чтобы не было щели
+			if (E.Hidden || E.Internal)
+			{
+				continue;
+			}
+			for (int End = 0; End < 2; ++End)
+			{
+				const int N = End == 0 ? E.Nodes.front() : E.Nodes.back();
+				const int K = ClusterOf[static_cast<size_t>(N)];
+				if (K < 0)
+				{
+					continue;
+				}
+				double Base = 0.0;
+				for (int Q : NodeEdges[static_cast<size_t>(N)])
+				{
+					Base = std::max(Base, Edges[static_cast<size_t>(Q)].Hidden ? 0.0 : Edges[static_cast<size_t>(Q)].HalfW);
+				}
+				const int Other = End == 0 ? E.Nodes.back() : E.Nodes.front();
+				const double Cap = L * (IsJ(Other) ? 0.45 : 0.8);
+				double T = std::min(Base + 1.0, Cap);
+				for (; T < Cap; T += 1.0)
+				{
+					const double S = End == 0 ? T : L - T;
+					double Miter = 1.0;
+					const V2 C = E.Ax.At(S);
+					const V2 Rt = E.Ax.RightAt(S, Miter);
+					bool Hit = false;
+					for (int Q = -2; Q <= 2 && !Hit; ++Q)
+					{
+						Hit = GroundRoadAt(C + Rt * (E.HalfW * Q * 0.5), static_cast<int>(Ei), 0.6, K);
+					}
+					if (!Hit)
+					{
+						break;
+					}
+				}
+				T = std::min(T + ((Clusters[static_cast<size_t>(K)].Flags & CityFlag::Signals) ? 1.5 : 0.5), Cap);
+				(End == 0 ? E.Trim0 : E.Trim1) = T;
+			}
+		}
+	}
+
+	// Площадь перекрёстка: выпуклая оболочка концов подрезанных подъездов и внутренних отрезков.
+	void BuildJunctionHulls()
+	{
+		std::vector<std::vector<V2>> Pts(Clusters.size());
+		for (const Edge& E : Edges)
+		{
+			if (E.Hidden)
+			{
+				continue;
+			}
+			if (E.Internal)
+			{
+				auto& Pk = Pts[static_cast<size_t>(ClusterOf[static_cast<size_t>(E.Nodes.front())])];
+				for (double S : E.Ax.Stations(0.0, E.Ax.Length(), 4.0))
+				{
+					double Miter = 1.0;
+					const V2 Rt = E.Ax.RightAt(S, Miter);
+					Pk.push_back(E.Ax.At(S) + Rt * E.HalfW);
+					Pk.push_back(E.Ax.At(S) - Rt * E.HalfW);
+				}
+				continue;
+			}
+			for (int End = 0; End < 2; ++End)
+			{
+				const int N = End == 0 ? E.Nodes.front() : E.Nodes.back();
+				const int K = ClusterOf[static_cast<size_t>(N)];
+				if (K < 0)
+				{
+					continue;
+				}
+				const double S = End == 0 ? std::max(0.0, E.Trim0) : E.Ax.Length() - std::max(0.0, E.Trim1);
+				double Miter = 1.0;
+				const V2 Rt = E.Ax.RightAt(S, Miter);
+				const V2 P = E.Ax.At(S);
+				Pts[static_cast<size_t>(K)].push_back(P + Rt * E.HalfW);
+				Pts[static_cast<size_t>(K)].push_back(P - Rt * E.HalfW);
+			}
+		}
+		for (size_t K = 0; K < Clusters.size(); ++K)
+		{
+			Cluster& Cl = Clusters[K];
+			Cl.Hull = ConvexHull(Pts[K]);
+			if (Cl.Hull.size() < 3)
+			{
+				continue;
+			}
+			double X0 = 1e18, Y0 = 1e18, X1 = -1e18, Y1 = -1e18;
+			for (const V2& P : Cl.Hull)
+			{
+				X0 = std::min(X0, P.X);
+				Y0 = std::min(Y0, P.Y);
+				X1 = std::max(X1, P.X);
+				Y1 = std::max(Y1, P.Y);
+			}
+			ForCells(X0, Y0, X1, Y1, [&](std::pair<int, int> C) { HullGrid[C].push_back(static_cast<int>(K)); });
+		}
+	}
+
 	// Полоса вдоль оси: от T0 до T1 (вправо от оси), на высоте оси + Lift, лицом вверх.
+	// Видимые части [S0, S1] за вычетом вырезов ребра.
+	static std::vector<std::pair<double, double>> Visible(const Edge& E, double S0, double S1)
+	{
+		std::vector<std::pair<double, double>> Out{{S0, S1}};
+		for (const auto& C : E.Cuts)
+		{
+			std::vector<std::pair<double, double>> Next;
+			for (const auto& Iv : Out)
+			{
+				if (C.second <= Iv.first || C.first >= Iv.second)
+				{
+					Next.push_back(Iv);
+					continue;
+				}
+				if (C.first > Iv.first)
+				{
+					Next.push_back({Iv.first, C.first});
+				}
+				if (C.second < Iv.second)
+				{
+					Next.push_back({C.second, Iv.second});
+				}
+			}
+			Out.swap(Next);
+		}
+		return Out;
+	}
+
 	void Ribbon(const Edge& E, double S0, double S1, double T0, double T1, double Lift, CityMat M, double UScale, double VScale,
 		uint32_t Color = 0xFFFFFFFFu, double MaxStep = 6.0, bool bFaceDown = false)
+	{
+		if (E.Cuts.empty())
+		{
+			RibbonRaw(E, S0, S1, T0, T1, Lift, M, UScale, VScale, Color, MaxStep, bFaceDown);
+			return;
+		}
+		for (const auto& Iv : Visible(E, S0, S1))
+		{
+			RibbonRaw(E, Iv.first, Iv.second, T0, T1, Lift, M, UScale, VScale, Color, MaxStep, bFaceDown);
+		}
+	}
+
+	void RibbonRaw(const Edge& E, double S0, double S1, double T0, double T1, double Lift, CityMat M, double UScale, double VScale,
+		uint32_t Color, double MaxStep, bool bFaceDown)
 	{
 		const double Nz = bFaceDown ? -1.0 : 1.0;
 		const double A = std::max(-0.3, S0);
@@ -843,6 +1380,15 @@ private:
 	// Вертикальная стенка вдоль оси на смещении T: от Zb до Zt (относительно оси, если bRelative), лицом вправо/влево.
 	void Wall(const Edge& E, double S0, double S1, double T, double Zb, double Zt, bool bFaceRight, CityMat M, bool bBottomAbsolute,
 		uint32_t Color = 0xFFFFFFFFu)
+	{
+		for (const auto& Iv : Visible(E, S0, S1))
+		{
+			WallRaw(E, Iv.first, Iv.second, T, Zb, Zt, bFaceRight, M, bBottomAbsolute, Color);
+		}
+	}
+
+	void WallRaw(const Edge& E, double S0, double S1, double T, double Zb, double Zt, bool bFaceRight, CityMat M, bool bBottomAbsolute,
+		uint32_t Color)
 	{
 		const double A = std::max(0.0, S0);
 		const double B = std::min(E.Ax.Length(), S1);
@@ -949,8 +1495,13 @@ private:
 		const double Lw = E.LaneW;
 		const bool Big = E.Class <= CityRoadClass::Primary;
 		const double Approach = 20.0;
-		const bool JStart = Degree(E.Nodes.front()) >= 3;
-		const bool JEnd = Degree(E.Nodes.back()) >= 3;
+		const bool JStart = IsJ(E.Nodes.front());
+		const bool JEnd = IsJ(E.Nodes.back());
+		// У светофора: «зебра» сразу у перекрёстка, стоп-линия — перед ней.
+		const bool SigStart = (JFlags(E.Nodes.front()) & CityFlag::Signals) && JStart && S1 - S0 > 14.0;
+		const bool SigEnd = (JFlags(E.Nodes.back()) & CityFlag::Signals) && JEnd && S1 - S0 > 14.0;
+		const double StopEnd = SigEnd ? S1 - 6.4 : S1 - 1.6;
+		const double StopStart = SigStart ? S0 + 6.0 : S0 + 1.2;
 		if (E.OneWay || E.Ring)
 		{
 			for (int K = 1; K < E.Lanes; ++K)
@@ -969,7 +1520,7 @@ private:
 			}
 			if (JEnd && !E.Ring)
 			{
-				Ribbon(E, S1 - 1.6, S1 - 1.2, -W + 0.2, W - 0.2, 0.015, CityMat::Marking, 0.5, 0.5); // стоп-линия
+				Ribbon(E, StopEnd, StopEnd + 0.4, -W + 0.2, W - 0.2, 0.015, CityMat::Marking, 0.5, 0.5); // стоп-линия
 			}
 		}
 		else
@@ -1016,23 +1567,21 @@ private:
 			}
 			if (JEnd)
 			{
-				Ribbon(E, S1 - 1.6, S1 - 1.2, 0.2, W - 0.2, 0.015, CityMat::Marking, 0.5, 0.5);
+				Ribbon(E, StopEnd, StopEnd + 0.4, 0.2, W - 0.2, 0.015, CityMat::Marking, 0.5, 0.5);
 			}
 			if (JStart)
 			{
-				Ribbon(E, S0 + 1.2, S0 + 1.6, -W + 0.2, -0.2, 0.015, CityMat::Marking, 0.5, 0.5);
+				Ribbon(E, StopStart, StopStart + 0.4, -W + 0.2, -0.2, 0.015, CityMat::Marking, 0.5, 0.5);
 			}
 		}
 		// «Зебры»: у регулируемых перекрёстков и на отмеченных переходах.
-		const bool SigStart = (D.Nodes[static_cast<size_t>(E.Nodes.front())].Flags & CityFlag::Signals) && JStart;
-		const bool SigEnd = (D.Nodes[static_cast<size_t>(E.Nodes.back())].Flags & CityFlag::Signals) && JEnd;
-		if (SigStart && S1 - S0 > 12.0)
+		if (SigStart)
 		{
-			Zebra(E, S0 + 4.5, -W, W);
+			Zebra(E, S0 + 3.0, -W, W);
 		}
-		if (SigEnd && S1 - S0 > 12.0)
+		if (SigEnd)
 		{
-			Zebra(E, S1 - 4.5, -W, W);
+			Zebra(E, S1 - 3.0, -W, W);
 		}
 		for (size_t K = 1; K + 1 < E.Nodes.size(); ++K)
 		{
@@ -1049,8 +1598,12 @@ private:
 	}
 
 	// ---- Тротуары, бордюры, подпорные стенки ----
-	void Sides(const Edge& E)
+	void Sides(const Edge& E, int Ei)
 	{
+		if (E.Hidden || E.Internal)
+		{
+			return;
+		}
 		const double S0 = std::max(0.0, E.Trim0);
 		const double S1 = E.Ax.Length() - std::max(0.0, E.Trim1);
 		const double W = E.HalfW;
@@ -1088,13 +1641,51 @@ private:
 			return;
 		}
 		const double Sw = CitySidewalkWidth(E.Class);
+		// Тротуар кусками по 2 м: кусок не кладётся на чужую проезжую часть, перекрёсток, трассу, чужой тротуар,
+		// в дом и в воду. Так у перекрёстков и разделительных полос нет наслоений и «клиньев».
+		const double Piece = 2.0;
 		for (double Side : {-1.0, 1.0})
 		{
 			const double Inner = Side * W;
 			const double Outer = Side * (W + Sw);
-			Ribbon(E, S0, S1, std::min(Inner, Outer), std::max(Inner, Outer), 0.15, CityMat::Sidewalk, 0.5, 0.5);
-			Wall(E, S0, S1, Inner, 0.0, 0.15, Side < 0.0, CityMat::Curb, false);
-			Wall(E, S0, S1, Outer, -0.2, 0.15, Side > 0.0, CityMat::Curb, false);
+			double RunA = -1.0;
+			auto Flush = [&](double RunB) {
+				if (RunA >= 0.0 && RunB - RunA > 0.5)
+				{
+					Ribbon(E, RunA, RunB, std::min(Inner, Outer), std::max(Inner, Outer), 0.15, CityMat::Sidewalk, 0.5, 0.5);
+					Wall(E, RunA, RunB, Inner, 0.0, 0.15, Side < 0.0, CityMat::Curb, false);
+					Wall(E, RunA, RunB, Outer, -0.2, 0.15, Side > 0.0, CityMat::Curb, false);
+					++R.SidewalkRuns;
+				}
+				RunA = -1.0;
+			};
+			for (double S = S0; S < S1 - 1e-3; S += Piece)
+			{
+				const double Sm = std::min(S1, S + Piece * 0.5);
+				double Miter = 1.0;
+				const V2 C = E.Ax.At(Sm);
+				const V2 Rt = E.Ax.RightAt(Sm, Miter);
+				bool Ok = !InCut(E, Sm);
+				for (double Tq : {W + 0.5, W + Sw * 0.5, W + Sw - 0.2})
+				{
+					if (!Ok)
+					{
+						break;
+					}
+					const V2 P = C + Rt * (Side * Tq);
+					Ok = !GroundRoadAt(P, Ei, 0.0) && !SidewalkAt(P, Ei) && !InsideAnyBuilding(P, std::numeric_limits<size_t>::max()) &&
+						!IsWet(P.X, P.Y);
+				}
+				if (Ok && RunA < 0.0)
+				{
+					RunA = S;
+				}
+				else if (!Ok)
+				{
+					Flush(S);
+				}
+			}
+			Flush(S1);
 		}
 	}
 
@@ -1206,44 +1797,26 @@ private:
 		}
 	}
 
-	// ---- Перекрёстки ----
+	// ---- Перекрёстки: площадь чуть ниже полотна подъездов (подъезды поверх, без мерцания) ----
 	void Junctions()
 	{
-		for (size_t N = 0; N < NodeEdges.size(); ++N)
+		for (const Cluster& Cl : Clusters)
 		{
-			if (NodeEdges[N].size() < 3)
+			if (Cl.Hull.size() < 3)
 			{
 				continue;
 			}
-			std::vector<V2> Pts;
-			const V2 C = NodeP(static_cast<int>(N));
-			for (int K : NodeEdges[N])
-			{
-				const Edge& E = Edges[static_cast<size_t>(K)];
-				const bool AtStart = E.Nodes.front() == static_cast<int>(N);
-				const double S = AtStart ? std::max(0.0, E.Trim0) : E.Ax.Length() - std::max(0.0, E.Trim1);
-				double Miter = 1.0;
-				const V2 Rt = E.Ax.RightAt(S, Miter);
-				const V2 P = E.Ax.At(S);
-				Pts.push_back(P + Rt * E.HalfW);
-				Pts.push_back(P - Rt * E.HalfW);
-			}
-			std::vector<V2> Hull = ConvexHull(Pts);
-			if (Hull.size() < 3)
-			{
-				continue;
-			}
-			const double Z = H[N] + 0.05;
-			CitySection& Sc = Sec(C.X, C.Y, CityMat::Asphalt);
+			const double Z = Cl.Z + 0.035;
+			CitySection& Sc = Sec(Cl.C.X, Cl.C.Y, CityMat::Asphalt);
 			V2 Mid{0, 0};
-			for (const V2& P : Hull)
+			for (const V2& P : Cl.Hull)
 			{
 				Mid = Mid + P;
 			}
-			Mid = Mid * (1.0 / static_cast<double>(Hull.size()));
+			Mid = Mid * (1.0 / static_cast<double>(Cl.Hull.size()));
 			const int32_t Ic = Sc.Vertex(Mid.X, Mid.Y, Z, 0, 0, 1, Mid.X / 3.5, Mid.Y / 4.0);
 			std::vector<int32_t> Ring;
-			for (const V2& P : Hull)
+			for (const V2& P : Cl.Hull)
 			{
 				Ring.push_back(Sc.Vertex(P.X, P.Y, Z, 0, 0, 1, P.X / 3.5, P.Y / 4.0));
 			}
@@ -1318,8 +1891,18 @@ private:
 		const double W = E.HalfW;
 		const double Sw = CitySidewalkWidth(E.Class);
 		auto Add = [&](CityPropKind Kind, double S, double T, double YawD, int Value, const std::string& Text) {
+			if (InCut(E, S))
+			{
+				return;
+			}
 			double Miter = 1.0;
 			const V2 P = E.Ax.At(S) + E.Ax.RightAt(S, Miter) * T;
+			// Не на проезжей части (у двусторонних проспектов левая обочина — это уже встречная полоса).
+			if (!E.Elevated && GroundRoadAt(P, -1, -0.3))
+			{
+				++R.PropsOnRoad;
+				return;
+			}
 			CityProp Pr;
 			Pr.Kind = Kind;
 			Pr.X = P.X;
@@ -1332,14 +1915,14 @@ private:
 		};
 		const int Nf = E.Nodes.front();
 		const int Nb = E.Nodes.back();
-		const int Ff = D.Nodes[static_cast<size_t>(Nf)].Flags;
-		const int Fb = D.Nodes[static_cast<size_t>(Nb)].Flags;
+		const int Ff = JFlags(Nf);
+		const int Fb = JFlags(Nb);
 		const double YawFwd = YawDeg(E.Ax.Dir(std::min(L, S1)));
 		const double YawBack = YawDeg(E.Ax.Dir(std::max(0.0, S0))) + 180.0;
 		const double Curb = W + std::min(Sw, 1.2);
 		// Въезд в конец ребра (по ходу оси) — правая сторона; в начало (против оси) — левая.
-		const bool InEnd = Degree(Nb) >= 3 || (Fb & (CityFlag::Signals | CityFlag::Stop | CityFlag::GiveWay));
-		const bool InStart = !E.OneWay && (Degree(Nf) >= 3 || (Ff & (CityFlag::Signals | CityFlag::Stop | CityFlag::GiveWay)));
+		const bool InEnd = IsJ(Nb) || (Fb & (CityFlag::Signals | CityFlag::Stop | CityFlag::GiveWay));
+		const bool InStart = !E.OneWay && (IsJ(Nf) || (Ff & (CityFlag::Signals | CityFlag::Stop | CityFlag::GiveWay)));
 		auto RingAt = [&](int N) {
 			for (int K : NodeEdges[static_cast<size_t>(N)])
 			{
@@ -1354,7 +1937,7 @@ private:
 		{
 			if (InEnd)
 			{
-				const double S = S1 - 1.0;
+				const double S = (Fb & CityFlag::Signals) && S1 - S0 > 14.0 ? S1 - 5.6 : S1 - 1.0;
 				if (Fb & CityFlag::Signals)
 				{
 					Add(CityPropKind::TrafficLight, S, Curb, YawFwd + 180.0, 0, "");
@@ -1374,7 +1957,7 @@ private:
 			}
 			if (InStart)
 			{
-				const double S = S0 + 1.0;
+				const double S = (Ff & CityFlag::Signals) && S1 - S0 > 14.0 ? S0 + 5.6 : S0 + 1.0;
 				if (Ff & CityFlag::Signals)
 				{
 					Add(CityPropKind::TrafficLight, S, -Curb, YawBack + 180.0, 0, "");
@@ -1393,7 +1976,7 @@ private:
 				}
 			}
 			// Названия улиц на углах перекрёстков.
-			if (!E.Name.empty() && Degree(Nb) >= 3 && E.Class <= CityRoadClass::Tertiary)
+			if (!E.Name.empty() && IsJ(Nb) && E.Class <= CityRoadClass::Tertiary)
 			{
 				Add(CityPropKind::StreetName, S1 - 0.5, W + Sw - 0.3, YawFwd + 90.0, 0, E.Name);
 			}
@@ -1560,7 +2143,7 @@ private:
 		for (size_t Bi = 0; Bi < D.Buildings.size(); ++Bi)
 		{
 			const auto& Rg = D.Buildings[Bi].Ring;
-			if (Rg.size() < 3)
+			if (Rg.size() < 3 || !Keep[Bi])
 			{
 				continue;
 			}
@@ -1702,11 +2285,11 @@ private:
 		{
 			return;
 		}
-		// Сквозь соседние дома не прокладываем.
+		// Сквозь соседние дома и по улицам не прокладываем.
 		for (int Si = 0; Si <= 6; ++Si)
 		{
 			const V2 Q = P0 + (P1 - P0) * (Si / 6.0) + Side * (Width * 0.5);
-			if (InsideAnyBuilding(Q, Self))
+			if (InsideAnyBuilding(Q, Self) || GroundRoadAt(Q, -1, 1.0))
 			{
 				return;
 			}
@@ -1786,10 +2369,53 @@ private:
 		return Inside ? -1.0 : 1.0;
 	}
 
-	void Buildings()
+	// Какие дома строить: не на трассе и не на проезжей части (контуры OSM и сжатие окраин иногда «наезжают»).
+	void DecideBuildings()
 	{
+		Keep.assign(D.Buildings.size(), 0);
+		for (size_t Bi = 0; Bi < D.Buildings.size(); ++Bi)
+		{
+			const auto& Rg = D.Buildings[Bi].Ring;
+			if (Rg.size() < 3)
+			{
+				continue;
+			}
+			if (OnRouteCorridor(Rg))
+			{
+				++R.BuildingsCleared;
+				continue;
+			}
+			bool Hit = false;
+			V2 C{0, 0};
+			for (size_t K = 0; K < Rg.size() && !Hit; ++K)
+			{
+				const V2 A{Rg[K].X, Rg[K].Y};
+				const V2 B{Rg[(K + 1) % Rg.size()].X, Rg[(K + 1) % Rg.size()].Y};
+				C = C + A;
+				const int Steps = std::max(1, static_cast<int>(Len(B - A) / 3.0));
+				for (int Q = 0; Q < Steps && !Hit; ++Q)
+				{
+					Hit = GroundRoadAt(A + (B - A) * (static_cast<double>(Q) / Steps), -1, -0.4);
+				}
+			}
+			if (!Hit)
+			{
+				C = C * (1.0 / static_cast<double>(Rg.size()));
+				Hit = GroundRoadAt(C, -1, -0.4);
+			}
+			if (Hit)
+			{
+				++R.BuildingsOnRoads;
+				continue;
+			}
+			Keep[Bi] = 1;
+		}
 		BuildRoadGrid();
 		BuildBuildingGrid();
+	}
+
+	void Buildings()
+	{
 		for (size_t Bi = 0; Bi < D.Buildings.size(); ++Bi)
 		{
 			const CityBuilding& B = D.Buildings[Bi];
@@ -1798,9 +2424,8 @@ private:
 			{
 				continue;
 			}
-			if (OnRouteCorridor(Ring))
+			if (!Keep[Bi])
 			{
-				++R.BuildingsCleared;
 				continue;
 			}
 			if (SignedArea(Ring) < 0.0)
@@ -1985,10 +2610,31 @@ private:
 				E.Ax.Z.push_back(0.0);
 			}
 			E.Ax.Finish();
-			Ribbon(E, 0.0, E.Ax.Length(), -2.2, 2.2, 0.15, CityMat::Ballast, 0.5, 0.5);
+			// Путь не кладётся поверх улиц (переезд — асфальт улицы), домов и трассы.
+			const double L = E.Ax.Length();
+			for (double S = 0.0; S <= L; S += 2.0)
+			{
+				const V2 P = E.Ax.At(S);
+				if (GroundRoadAt(P, -1, 2.5) || InsideAnyBuilding(P, std::numeric_limits<size_t>::max()) || IsWet(P.X, P.Y))
+				{
+					const double A = std::max(0.0, S - 1.0), B = std::min(L, S + 1.0);
+					if (!E.Cuts.empty() && E.Cuts.back().second >= A - 1e-6)
+					{
+						E.Cuts.back().second = B;
+					}
+					else
+					{
+						E.Cuts.push_back({A, B});
+					}
+				}
+			}
+			Ribbon(E, 0.0, L, -1.9, 1.9, 0.1, CityMat::Ballast, 0.5, 0.5);
+			Ribbon(E, 0.0, L, -1.3, 1.3, 0.22, CityMat::Concrete, 0.4, 1.6); // шпалы (текстура полосами)
 			for (double T : {-0.76, 0.76})
 			{
-				Ribbon(E, 0.0, E.Ax.Length(), T - 0.04, T + 0.04, 0.33, CityMat::Steel, 1.0, 1.0);
+				Ribbon(E, 0.0, L, T - 0.05, T + 0.05, 0.38, CityMat::Steel, 1.0, 1.0);
+				Wall(E, 0.0, L, T - 0.05, 0.22, 0.38, false, CityMat::Steel, false);
+				Wall(E, 0.0, L, T + 0.05, 0.22, 0.38, true, CityMat::Steel, false);
 			}
 		}
 	}

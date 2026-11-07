@@ -190,6 +190,7 @@ struct CityBuildOptions
 	double KeepoutRadius = 280.0;
 	double KeepoutClear = 35.0;  // дома ближе этого к точкам Keepout не строятся (там идёт трасса)
 	double ApronWidth = 1.4;     // отмостка и тротуар вокруг многоэтажек, м
+	double RouteHalfWidth = 7.0; // полуширина трассы с обочинами: городские улицы на ней не строятся
 };
 
 struct RGEN_API CityResult
@@ -203,6 +204,11 @@ struct RGEN_API CityResult
 	int BuildingsBuilt = 0;
 	int BuildingsCleared = 0; // убрано с коридора трассы
 	int Driveways = 0;        // асфальтовые проезды у подъездов
+	int BuildingsOnRoads = 0; // дома, контур которых лёг на проезжую часть (убраны)
+	int EdgesOnRoute = 0;     // улицы, совпавшие с трассой (не строятся)
+	int MergedJunctionNodes = 0; // узлов OSM, слитых в общие перекрёстки
+	int SidewalkRuns = 0;
+	int PropsOnRoad = 0;      // знаки/фонари, которые попали бы на проезжую часть (не ставятся)
 
 	size_t TriangleCount() const;
 	// Высота дорожного полотна в точке (для машин и реквизита): 0 — земля, > 0 — эстакада, NaN — не дорога.
